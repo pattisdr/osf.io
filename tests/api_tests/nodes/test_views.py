@@ -540,7 +540,6 @@ class TestNodeCreateUpdate(ApiTestCase):
         self.project_one = ProjectFactory(title = "Project One", is_public = True)
         self.project_two = ProjectFactory(title = "Project Two", is_public = False, creator = self.user)
 
-    # Permission coverage: Handles logged out user for public/private project
     def test_cannot_create_node_when_logged_out(self):
         url = '/v2/nodes/'
         public_project = {'title': 'My public project', 'description': 'Project description', 'category' : 'project',
@@ -552,7 +551,6 @@ class TestNodeCreateUpdate(ApiTestCase):
         assert_equal(res1.status_code, 401)
         assert_equal(res2.status_code, 401)
 
-    # Permission coverage: Handles logged in user for public/private project
     def test_creates_project_returns_proper_data(self):
         url = '/v2/nodes/'
         public_project = {'title': 'My public project', 'description': 'Project description', 'category' : 'project',
@@ -591,7 +589,6 @@ class TestNodeCreateUpdate(ApiTestCase):
         assert_equal(res.json['data']['description'], description)
         assert_equal(res.json['data']['category'], category)
 
-    # Permission coverage: Handles logged out user for public/private project
     def test_retrieve_project_details_when_logged_out(self):
         url = '/v2/nodes/{}/'.format(self.project_one._id)
         res = self.app.get(url)
@@ -601,7 +598,6 @@ class TestNodeCreateUpdate(ApiTestCase):
         res = self.app.get(url, expect_errors = True)
         assert_equal(res.status_code, 401)
 
-    # Permission coverage: Handles logged in user, private resource
     def test_retrieve_private_project_when_logged_in(self):
         url = '/v2/nodes/{}/'.format(self.project_two._id)
         res = self.app.get(url, auth = self.auth)
@@ -633,6 +629,50 @@ class TestNodeCreateUpdate(ApiTestCase):
         assert_equal(res.json['data']['title'], new_title)
         assert_equal(res.json['data']['description'], new_description)
         assert_equal(res.json['data']['category'], new_category)
+
+    def test_update_project_while_logged_out(self):
+        new_title = 'Super Cool Project'
+        new_description = 'An even cooler project'
+        new_category = 'project'
+        url = '/v2/nodes/{}/'.format(self.project_one._id)
+        res = self.app.put_json(url, {
+            'title': new_title,
+            'description': new_description,
+            'category': new_category,
+            'public': True,
+        }, expect_errors = True)
+        assert_equal(res.status_code, 401)
+
+        url = '/v2/nodes/{}/'.format(self.project_two._id)
+        res = self.app.put_json(url, {
+            'title': new_title,
+            'description': new_description,
+            'category': new_category,
+            'public': False,
+        }, expect_errors = True)
+        assert_equal(res.status_code, 401)
+
+    def test_update_private_project_while_logged_in(self):
+        new_title = 'Super Cool Project'
+        new_description = 'An even cooler project'
+        new_category = 'project'
+        url = '/v2/nodes/{}/'.format(self.project_two._id)
+        res = self.app.put_json(url, {
+            'title': new_title,
+            'description': new_description,
+            'category': new_category,
+            'public': False,
+        }, auth=self.auth)
+        assert_equal(res.status_code, 200)
+
+        url = '/v2/nodes/{}/'.format(self.project_two._id)
+        res = self.app.put_json(url, {
+            'title': new_title,
+            'description': new_description,
+            'category': new_category,
+            'public': False,
+        }, auth=self.auth_two, expect_errors = True)
+        assert_equal(res.status_code, 403)
 
     def test_update_project_updates_project_properly(self):
         url = '/v2/nodes/'
@@ -676,6 +716,25 @@ class TestNodeCreateUpdate(ApiTestCase):
         assert_equal(res.json['data']['title'], new_title)
         assert_equal(res.json['data']['description'], description)
         assert_equal(res.json['data']['category'], category)
+
+    def test_partial_update_project_while_logged_out(self):
+        new_title = "Patching this title"
+        url = '/v2/nodes/{}/'.format(self.project_one._id)
+        res = self.app.patch_json(url, {'title': new_title}, expect_errors = True)
+        assert_equal(res.status_code, 401)
+
+        url = '/v2/nodes/{}/'.format(self.project_two._id)
+        res = self.app.patch_json(url, {'title': new_title}, expect_errors = True)
+        assert_equal(res.status_code, 401)
+
+    def test_partial_update_private_project_while_logged_in(self):
+        new_title = "Patching this title"
+        url = '/v2/nodes/{}/'.format(self.project_two._id)
+        res = self.app.patch_json(url, {'title': new_title}, auth = self.auth)
+        assert_equal(res.status_code, 200)
+
+        res = self.app.patch_json(url, {'title': new_title}, auth = self.auth_two, expect_errors = True)
+        assert_equal(res.status_code, 403)
 
     def test_partial_update_project_updates_project_properly(self):
         url = '/v2/nodes/'
