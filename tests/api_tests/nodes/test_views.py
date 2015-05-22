@@ -533,6 +533,12 @@ class TestNodeCreateUpdate(ApiTestCase):
         self.user.set_password('justapoorboy')
         self.user.save()
         self.auth = (self.user.username, 'justapoorboy')
+        self.user_two = UserFactory.build()
+        self.user_two.set_password('justapoorboy')
+        self.user_two.save()
+        self.auth_two = (self.user_two.username, 'justapoorboy')
+        self.project_one = ProjectFactory(title = "Project One", is_public = True)
+        self.project_two = ProjectFactory(title = "Project Two", is_public = False, creator = self.user)
 
     # Permission coverage: Handles logged out user for public/private project
     def test_cannot_create_node_when_logged_out(self):
@@ -553,16 +559,17 @@ class TestNodeCreateUpdate(ApiTestCase):
                           'public': True }
         private_project = {'title': 'Cool Private Project', 'description': 'A properly cool project', 'category': 'data',
                            'public': False }
-        res1 = self.app.post_json(url, public_project, auth=self.auth)
-        res2 = self.app.post_json(url, private_project, auth=self.auth)
-        assert_equal(res1.status_code, 201)
-        assert_equal(res1.json['data']['title'], public_project['title'])
-        assert_equal(res1.json['data']['description'], public_project['description'])
-        assert_equal(res1.json['data']['category'], public_project['category'])
-        assert_equal(res2.status_code, 201)
-        assert_equal(res2.json['data']['title'], private_project['title'])
-        assert_equal(res2.json['data']['description'], private_project['description'])
-        assert_equal(res2.json['data']['category'], private_project['category'])
+        res = self.app.post_json(url, public_project, auth=self.auth)
+        assert_equal(res.status_code, 201)
+        assert_equal(res.json['data']['title'], public_project['title'])
+        assert_equal(res.json['data']['description'], public_project['description'])
+        assert_equal(res.json['data']['category'], public_project['category'])
+
+        res = self.app.post_json(url, private_project, auth=self.auth)
+        assert_equal(res.status_code, 201)
+        assert_equal(res.json['data']['title'], private_project['title'])
+        assert_equal(res.json['data']['description'], private_project['description'])
+        assert_equal(res.json['data']['category'], private_project['category'])
 
     def test_creates_project_creates_project(self):
         url = '/v2/nodes/'
@@ -583,6 +590,26 @@ class TestNodeCreateUpdate(ApiTestCase):
         assert_equal(res.json['data']['title'], title)
         assert_equal(res.json['data']['description'], description)
         assert_equal(res.json['data']['category'], category)
+
+    # Permission coverage: Handles logged out user for public/private project
+    def test_retrieve_project_details_when_logged_out(self):
+        url = '/v2/nodes/{}/'.format(self.project_one._id)
+        res = self.app.get(url)
+        assert_equal(res.status_code, 200)
+
+        url = '/v2/nodes/{}/'.format(self.project_two._id)
+        res = self.app.get(url, expect_errors = True)
+        assert_equal(res.status_code, 401)
+
+    # Permission coverage: Handles logged in user, private resource
+    def test_retrieve_private_project_when_logged_in(self):
+        url = '/v2/nodes/{}/'.format(self.project_two._id)
+        res = self.app.get(url, auth = self.auth)
+        assert_equal(res.status_code, 200)
+
+        res = self.app.get(url, auth = self.auth_two, expect_errors = True)
+        assert_equal(res.status_code, 403)
+
 
     def test_update_project_returns_proper_data(self):
         url = '/v2/nodes/'
