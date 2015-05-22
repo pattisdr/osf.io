@@ -534,24 +534,35 @@ class TestNodeCreateUpdate(ApiTestCase):
         self.user.save()
         self.auth = (self.user.username, 'justapoorboy')
 
+    # Permission coverage: Handles logged out user for public/private project
+    def test_cannot_create_node_when_logged_out(self):
+        url = '/v2/nodes/'
+        public_project = {'title': 'My public project', 'description': 'Project description', 'category' : 'project',
+                          'public': True }
+        private_project = {'title': 'My private project', 'description': 'Project description', 'category' : 'project',
+                          'public': False }
+        res1 = self.app.post_json(url, public_project, expect_errors = True)
+        res2 = self.app.post_json(url, private_project, expect_errors = True)
+        assert_equal(res1.status_code, 401)
+        assert_equal(res2.status_code, 401)
 
+    # Permission coverage: Handles logged in user for public/private project
     def test_creates_project_returns_proper_data(self):
         url = '/v2/nodes/'
-        title = 'Cool Project'
-        description = 'A Properly Cool Project'
-        category = 'data'
-
-        res = self.app.post_json(url, {
-            'title': title,
-            'description': description,
-            'category': category,
-            'public': True,
-        }, auth=self.auth)
-        project_id = res.json['data']['id']
-        assert_equal(res.status_code, 201)
-        assert_equal(res.json['data']['title'], title)
-        assert_equal(res.json['data']['description'], description)
-        assert_equal(res.json['data']['category'], category)
+        public_project = {'title': 'My public project', 'description': 'Project description', 'category' : 'project',
+                          'public': True }
+        private_project = {'title': 'Cool Private Project', 'description': 'A properly cool project', 'category': 'data',
+                           'public': False }
+        res1 = self.app.post_json(url, public_project, auth=self.auth)
+        res2 = self.app.post_json(url, private_project, auth=self.auth)
+        assert_equal(res1.status_code, 201)
+        assert_equal(res1.json['data']['title'], public_project['title'])
+        assert_equal(res1.json['data']['description'], public_project['description'])
+        assert_equal(res1.json['data']['category'], public_project['category'])
+        assert_equal(res2.status_code, 201)
+        assert_equal(res2.json['data']['title'], private_project['title'])
+        assert_equal(res2.json['data']['description'], private_project['description'])
+        assert_equal(res2.json['data']['category'], private_project['category'])
 
     def test_creates_project_creates_project(self):
         url = '/v2/nodes/'
