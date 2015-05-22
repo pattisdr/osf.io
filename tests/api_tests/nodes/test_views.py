@@ -76,6 +76,11 @@ class TestNodeContributorList(ApiTestCase):
         self.project.add_contributor(self.user)
         self.project.save()
 
+        self.project_two = ProjectFactory(is_public=True)
+        self.project_two.add_contributor(self.user)
+        self.project_two.save()
+
+
     def test_must_be_contributor(self):
 
         non_contrib = UserFactory.build()
@@ -95,6 +100,16 @@ class TestNodeContributorList(ApiTestCase):
         # contrib
         res = self.app.get(url, auth=(self.user.username, self.password))
         assert_equal(res.status_code, 200)
+
+        url = '/v2/nodes/{}/contributors/'.format(self.project_two._id)
+        # Not logged in, public
+        res = self.app.get(url)
+        assert_equal(res.status_code, 200)
+
+        # Logged in, public
+        res = self.app.get(url, auth= self.auth)
+        assert_equal(res.status_code, 200)
+
         Node.remove()
 
 
