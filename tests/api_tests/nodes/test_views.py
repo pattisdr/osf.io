@@ -380,6 +380,14 @@ class TestNodePointersList(ApiTestCase):
         self.pointer_project = ProjectFactory()
         self.project.add_pointer(self.pointer_project, auth=Auth(self.user))
 
+        self.public_project = ProjectFactory(is_public=True)
+        self.public_pointer_project = ProjectFactory(is_public=True)
+        self.public_project.add_pointer(self.public_pointer_project, auth=Auth(self.user))
+        self.user_two = UserFactory.build()
+        self.user.set_password('password')
+        self.user.save()
+
+
     def test_returns_200(self):
         url = '/v2/nodes/{}/pointers/'.format(self.project._id)
         res = self.app.get(url, auth=self.auth)
