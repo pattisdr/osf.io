@@ -7,6 +7,27 @@ from website.models import Node
 from tests.base import ApiTestCase, fake
 from tests.factories import UserFactory, ProjectFactory, FolderFactory, DashboardFactory, NodeFactory, PointerFactory
 
+class TestWelcomeToApi(ApiTestCase):
+    def setUp(self):
+        ApiTestCase.setUp(self)
+        self.user = UserFactory.build()
+        self.user.set_password('justapoorboy')
+        self.user.save()
+        self.auth = (self.user.username, 'justapoorboy')
+
+    def test_returns_200_for_logged_out_user(self):
+        res = self.app.get('/v2/')
+        assert_equal(res.status_code, 200)
+
+    def test_returns_200_for_logged_in_user(self):
+        url = '/v2/'
+        res = self.app.get(url, auth=(self.auth))
+        assert_equal(res.status_code, 200)
+
+    def test_returns_current_user_info_when_logged_in(self):
+        url = '/v2/'
+        res = self.app.get(url, auth=(self.auth))
+        assert_equal(res.json['meta']['current_user']['data']['given_name'], 'Freddie')
 
 class TestNodeList(ApiTestCase):
 
@@ -512,6 +533,7 @@ class TestNodeCreateUpdate(ApiTestCase):
         self.user.set_password('justapoorboy')
         self.user.save()
         self.auth = (self.user.username, 'justapoorboy')
+
 
     def test_creates_project_returns_proper_data(self):
         url = '/v2/nodes/'
