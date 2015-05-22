@@ -129,15 +129,35 @@ class TestNodeChildrenList(ApiTestCase):
         self.pointer = ProjectFactory()
         self.project.add_pointer(self.pointer, auth=Auth(self.user), save=True)
 
+        self.public_project = ProjectFactory(is_public=True)
+        self.public_project.save()
+        self.component = NodeFactory(parent=self.public_project, creator=self.user, is_public=True)
+
     def test_node_children_list_does_not_include_pointers(self):
         url = '/v2/nodes/{}/children/'.format(self.project._id)
         res = self.app.get(url, auth=self.auth)
         assert_equal(len(res.json['data']), 1)
 
+        #Not logged in
+        res = self.app.get(url, expect_errors = True)
+        assert_equal(res.status_code, 401)
+
     def test_node_children_list_does_not_include_unauthorized_projects(self):
         private_component = NodeFactory(parent=self.project)
         url = '/v2/nodes/{}/children/'.format(self.project._id)
         res = self.app.get(url, auth=self.auth)
+        assert_equal(len(res.json['data']), 1)
+
+    def test_public_node_children(self):
+        # logged in
+        url = '/v2/nodes/{}/children/'.format(self.public_project._id)
+        res = self.app.get(url, auth=self.auth)
+        assert_equal(len(res.json['data']), 1)
+        assert_equal(res.status_code, 200)
+
+        # Logged out
+        res = self.app.get(url)
+        assert_equal(res.status_code, 200)
         assert_equal(len(res.json['data']), 1)
 
 
