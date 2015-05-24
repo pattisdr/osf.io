@@ -434,9 +434,32 @@ class TestNodePointersList(ApiTestCase):
         project = ProjectFactory()
         url = '/v2/nodes/{}/pointers/'.format(self.project._id)
         payload = {'node_id': project._id}
+
+        # Private, unauthorized
+        res = self.app.post(url, payload, auth=self.auth_two)
+        assert_equal(res.status_code, 403)
+        assert_equal(res.json['data']['node_id'], project._id)
+
+        # Private, authorized
         res = self.app.post(url, payload, auth=self.auth)
         assert_equal(res.status_code, 201)
         assert_equal(res.json['data']['node_id'], project._id)
+
+        # Private, logged out
+        res = self.app.post(url, payload, expect_errors = True)
+        assert_equal(res.status_code, 401)
+
+        url = '/v2/nodes/{}/pointers/'.format(self.public_project._id)
+        payload = {'node_id': self.public_project._id}
+
+        # Public, logged in
+        res = self.app.post(url, payload, auth = self.auth_two)
+        assert_equal(res.status_code, 201)
+        assert_equal(res.json['data']['node_id'], self.public_project._id)
+
+        # Public, logged out
+        res = self.app.post(url, payload, expect_errors = True)
+        assert_equal(res.status_code, 401)
 
 
 class TestNodeContributorFiltering(ApiTestCase):
