@@ -576,10 +576,35 @@ class TestNodePointerDetail(ApiTestCase):
 
     def test_deletes_node_pointer(self):
         url = '/v2/nodes/{}/pointers/{}'.format(self.project._id, self.pointer._id)
+
+        # Private resource, authorized
         res = self.app.delete(url, auth=self.auth)
         assert_equal(res.status_code, 204)
         assert_equal(len(self.project.nodes_pointer), 0)
 
+        # Private resource, unauthorized
+        url = '/v2/nodes/{}/pointers/'.format(self.project._id)
+        payload = {'node_id': self.project._id}
+        res = self.app.post(url, payload, auth=self.auth)
+
+        res = self.app.delete(url, auth=self.auth_two, expect_errors = True)
+        assert_equal(res.status_code, 405)
+
+        # Private resource, logged out
+        res = self.app.delete(url, expect_errors = True)
+        assert_equal(res.status_code, 401)
+
+        url = '/v2/nodes/{}/pointers/'.format(self.public_project._id)
+        payload = {'node_id': self.public_project._id}
+        res = self.app.post(url, payload, auth=self.auth)
+
+        # Public resource, logged in
+        res = self.app.delete(url, auth = self.auth_two, expect_errors=True)
+        assert_equal(res.status_code, 405)
+
+        # Public resource, logged out
+        res = self.app.delete(url, expect_errors=True)
+        assert_equal(res.status_code, 401)
 
 class TestNodeFilesList(ApiTestCase):
 
