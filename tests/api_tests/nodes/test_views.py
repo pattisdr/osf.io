@@ -528,6 +528,16 @@ class TestNodePointerDetail(ApiTestCase):
         self.pointer_project = ProjectFactory()
         self.pointer = self.project.add_pointer(self.pointer_project, auth=Auth(self.user), save=True)
 
+        self.user_two = UserFactory.build()
+        self.user_two.set_password('password')
+        self.user_two.save()
+        self.auth_two = (self.user_two.username, 'password')
+
+        self.public_project = ProjectFactory(is_public = True)
+        self.public_pointer_project = ProjectFactory(is_public = True)
+        self.public_pointer = self.public_project.add_pointer(self.public_pointer_project, auth= Auth(self.user), save=True)
+
+
     def test_returns_200(self):
         url = '/v2/nodes/{}/pointers/{}'.format(self.project._id, self.pointer._id)
         res = self.app.get(url, auth=self.auth)
@@ -535,9 +545,34 @@ class TestNodePointerDetail(ApiTestCase):
 
     def test_returns_node_pointer(self):
         url = '/v2/nodes/{}/pointers/{}'.format(self.project._id, self.pointer._id)
+        # Private resource, authorized
         res = self.app.get(url, auth=self.auth)
         res_json = res.json['data']
         assert_equal(res_json['node_id'], self.pointer_project._id)
+
+        # Private resource, logged out
+        res = self.app.get(url)
+        assert_equal(res.status_code, 401 )
+
+        # Private resource, unauthorized
+        res = self.app.get(url, auth = self.auth_two)
+        assert_equal(res.status_code, 403)
+
+        url = '/v2/nodes/{}/pointers/{}'.format(self.public_project._id, self.public_pointer._id)
+
+        # Public resource, logged in
+        res = self.app.get(url, auth=self.auth)
+        res_json = res.json['data']
+        assert_equal(res_json['node_id'], self.public_pointer_project._id)
+
+        #Public resource, logged out
+        res = self.app.get(url)
+        assert_equal(res.status_code, 200)
+        res_json = res.json['data']
+        assert_equal(res_json['node_id'], self.public_pointer_project._id)
+
+
+
 
     def test_deletes_node_pointer(self):
         url = '/v2/nodes/{}/pointers/{}'.format(self.project._id, self.pointer._id)
@@ -572,6 +607,7 @@ class TestNodeFilesList(ApiTestCase):
         project.add_addon('github', auth=user_auth)
         project.save()
 
+        # Private resource, authorized
         res = self.app.get(url, auth=self.auth)
         data = res.json['data']
         providers = [item['provider'] for item in data]
