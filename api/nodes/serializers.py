@@ -51,13 +51,11 @@ class NodeSerializer(JSONAPISerializer):
                                                      'A dashboard is a collection node that serves as the root of '
                                                      'Project Organizer collections. Every user will always have '
                                                      'one Dashboard')
-    # TODO: When we have 'admin' permissions, make this writable for admins
     public = ser.BooleanField(source='is_public', help_text='Nodes that are made public will give read-only access '
                                                             'to everyone. Private nodes require explicit read '
                                                             'permission. Write and admin access are the same for '
                                                             'public and private nodes. Administrators on a parent '
-                                                            'node have implicit read permissions for all child nodes',
-                              read_only=True)
+                                                            'node have implicit read permissions for all child nodes')
     # TODO: finish me
 
     class Meta:
@@ -65,8 +63,6 @@ class NodeSerializer(JSONAPISerializer):
 
     def get_absolute_url(self, obj):
         return obj.absolute_url
-
-    # TODO: See if we can get the count filters into the filter rather than the serializer.
 
     def get_node_count(self, obj):
         request = self.context['request']
