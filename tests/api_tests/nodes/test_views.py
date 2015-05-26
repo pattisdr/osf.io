@@ -935,6 +935,26 @@ class TestNodeCreateUpdate(ApiTestCase):
         }, auth=self.auth_two, expect_errors=True)
         assert_equal(res.status_code, 403)
 
+    def test_writing_to_public_field(self):
+        title = "Cool project"
+        description = 'A Properly Cool Project'
+        category = 'data'
+        project = self.project = ProjectFactory(
+            title=title, description=description, category=category, is_public=True, creator=self.user)
+        # Test non-contrib writing to public field
+        url = '/v2/nodes/{}/'.format(project._id)
+        res = self.app.patch_json(url, {
+            'is_public': False,
+        }, auth=self.auth_two, expect_errors=True)
+        assert_equal(res.status_code, 403)
+        # Test creator writing to public field
+        res = self.app.patch_json(url, {
+            'is_public': False,
+        }, auth=self.auth, expect_errors=True)
+        assert_equal(res.status_code, 403)
+
+
+
     def test_partial_update_project_while_logged_out(self):
         new_title = "Patching this title"
         url = '/v2/nodes/{}/'.format(self.project_one._id)
@@ -986,11 +1006,13 @@ class TestNodeRegistrationList(ApiTestCase):
         self.user.save()
         self.auth = (self.user.username, password)
         self.project = ProjectFactory(is_public=False, creator=self.user)
-        self.project.save()
-        self.registration_project = RegistrationFactory(creator=self.user, title="1st Registration")
+        self.registration_project = RegistrationFactory(creator=self.user, project=self.project)
 
+        self.project.save()
         self.public_project = ProjectFactory(is_public=True, creator=self.user)
+        self.public_registration_project = RegistrationFactory(creator=self.user, project=self.public_project)
         self.public_project.save()
+
 
         self.user_two = UserFactory.build()
         self.user_two.set_password(password)
@@ -1002,16 +1024,18 @@ class TestNodeRegistrationList(ApiTestCase):
         # Public project, logged in
         res = self.app.get(url, auth=self.auth)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json, 1)
+        assert_equal(res.json['data'][0]['category'], 'project')
         # Public project, logged out
-        es = self.app.get(url)
+        res = self.app.get(url)
         assert_equal(res.status_code, 200)
+        assert_equal(res.json['data'][0]['title'], 'The meaning of life')
 
     def test_private_registrations(self):
         url = '/v2/nodes/{}/registrations/'.format(self.project._id)
         #Private project, authorized
         res = self.app.get(url, auth=self.auth)
         assert_equal(res.status_code, 200)
+        assert_equal(res.json['data'][0]['category'], 'project')
         # Private project, unauthorized
         res = self.app.get(url, auth=self.auth_two, expect_errors=True)
         assert_equal(res.status_code, 403)
