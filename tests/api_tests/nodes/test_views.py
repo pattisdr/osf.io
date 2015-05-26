@@ -976,4 +976,45 @@ class TestNodeCreateUpdate(ApiTestCase):
         assert_equal(res.json['data']['description'], new_description)
         assert_equal(res.json['data']['category'], category)
 
+class TestNodeRegistrationList(ApiTestCase):
+    def setUp(self):
+        ApiTestCase.setUp(self)
+        self.user = UserFactory.build()
+        password = fake.password()
+        self.password = password
+        self.user.set_password(password)
+        self.user.save()
+        self.auth = (self.user.username, password)
+        self.project = ProjectFactory(is_public=False, creator=self.user)
+        self.project.save()
+
+        self.public_project = ProjectFactory(is_public=True, creator=self.user)
+        self.public_project.save()
+
+        self.user_two = UserFactory.build()
+        self.user_two.set_password(password)
+        self.user_two.save()
+        self.auth_two = (self.user_two.username, password)
+
+    def test_public_registrations(self):
+        url = '/v2/nodes/{}/registrations/'.format(self.public_project._id)
+        # Public project, logged in
+        res = self.app.get(url, auth=self.auth)
+        assert_equal(res.status_code, 200)
+        # Public project, logged out
+        es = self.app.get(url)
+        assert_equal(res.status_code, 200)
+
+    def test_private_registrations(self):
+        url = '/v2/nodes/{}/registrations/'.format(self.project._id)
+        #Private project, authorized
+        res = self.app.get(url, auth=self.auth)
+        assert_equal(res.status_code, 200)
+        # Private project, unauthorized
+        res = self.app.get(url, auth=self.auth_two, expect_errors=True)
+        assert_equal(res.status_code, 403)
+        # Private project, logged out
+        res = self.app.get(url, expect_errors=True)
+        assert_equal(res.status_code, 401)
+
 
