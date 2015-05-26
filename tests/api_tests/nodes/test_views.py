@@ -5,7 +5,7 @@ from nose.tools import *  # flake8: noqa
 from framework.auth.core import Auth
 from website.models import Node
 from tests.base import ApiTestCase, fake
-from tests.factories import UserFactory, ProjectFactory, FolderFactory, DashboardFactory, NodeFactory, PointerFactory
+from tests.factories import UserFactory, ProjectFactory, FolderFactory, RegistrationFactory, DashboardFactory, NodeFactory, PointerFactory
 
 class TestWelcomeToApi(ApiTestCase):
     def setUp(self):
@@ -987,6 +987,7 @@ class TestNodeRegistrationList(ApiTestCase):
         self.auth = (self.user.username, password)
         self.project = ProjectFactory(is_public=False, creator=self.user)
         self.project.save()
+        self.registration_project = RegistrationFactory(creator=self.user, title="1st Registration")
 
         self.public_project = ProjectFactory(is_public=True, creator=self.user)
         self.public_project.save()
@@ -1001,6 +1002,7 @@ class TestNodeRegistrationList(ApiTestCase):
         # Public project, logged in
         res = self.app.get(url, auth=self.auth)
         assert_equal(res.status_code, 200)
+        assert_equal(res.json, 1)
         # Public project, logged out
         es = self.app.get(url)
         assert_equal(res.status_code, 200)
