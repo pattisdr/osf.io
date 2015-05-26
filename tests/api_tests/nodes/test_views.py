@@ -151,12 +151,12 @@ class TestNodeChildrenList(ApiTestCase):
         assert_equal(res.status_code, 401)
 
     def test_node_children_list_does_not_include_unauthorized_projects(self):
-        # Private project, unauthorized
+
         private_component = NodeFactory(parent=self.project)
         url = '/v2/nodes/{}/children/'.format(self.project._id)
         res = self.app.get(url, auth=self.auth)
         assert_equal(len(res.json['data']), 1)
-
+        # Private project, unauthorized
         res = self.app.get(url, auth=self.auth_two, expect_errors=True)
         assert_equal(res.status_code, 403)
 
@@ -166,6 +166,7 @@ class TestNodeChildrenList(ApiTestCase):
         res = self.app.get(url, auth=self.auth)
         assert_equal(len(res.json['data']), 1)
         assert_equal(res.status_code, 200)
+
         # Logged in, public resource, non-contrib
         res = self.app.get(url, auth=self.auth_two)
         assert_equal(len(res.json['data']), 1)
@@ -437,12 +438,12 @@ class TestNodePointersList(ApiTestCase):
     def test_return_public_node_pointers(self):
         url ='/v2/nodes/{}/pointers/'.format(self.public_project._id)
         # Logged in, public resource
-        res = self.app.get(url, auth=self.auth)
+        res = self.app.get(url, auth=self.auth_two)
         res_json = res.json['data']
         assert_equal(len(res_json), 1)
         assert_equal(res.status_code, 200)
 
-        # Not logged in, public resource
+        # Logged out, public resource
         res = self.app.get(url)
         res_json = res.json['data']
         assert_equal(len(res_json), 1)
@@ -488,7 +489,7 @@ class TestNodeContributorFiltering(ApiTestCase):
         auth = (project.creator.username, password)
 
         base_url = '/v2/nodes/{}/contributors/'.format(project._id)
-        # no filter
+        # no filter, private resource, logged in
         res = self.app.get(base_url, auth=auth)
         assert_equal(len(res.json['data']), 1)
 
@@ -673,7 +674,7 @@ class TestNodeFilesList(ApiTestCase):
         res = self.app.get(url, auth=self.auth)
         assert_equal(res.status_code, 200)
 
-        # Public resource, logged out
+        # Public resource, private components, logged out
         res = self.app.get(url, expect_errors=True)
         assert_equal(res.status_code, 401)
 
@@ -731,21 +732,8 @@ class TestNodeCreateUpdate(ApiTestCase):
         self.user_two.set_password('justapoorboy')
         self.user_two.save()
         self.auth_two = (self.user_two.username, 'justapoorboy')
-        self.project_one = ProjectFactory(title = "Project One", is_public = True)
-        self.project_two = ProjectFactory(title = "Project Two", is_public = False, creator = self.user)
-
-    def test_cannot_create_node_when_logged_out(self):
-        url = '/v2/nodes/'
-        public_project = {'title': 'My public project', 'description': 'Project description', 'category' : 'project',
-                          'public': True }
-        private_project = {'title': 'My private project', 'description': 'Project description', 'category' : 'project',
-                          'public': False }
-        # Public resource, logged out
-        res1 = self.app.post_json(url, public_project, expect_errors=True)
-        assert_equal(res1.status_code, 401)
-        # Private resource, logged out
-        res2 = self.app.post_json(url, private_project, expect_errors=True)
-        assert_equal(res2.status_code, 401)
+        self.project_one = ProjectFactory(title="Project One", is_public=True)
+        self.project_two = ProjectFactory(title="Project Two", is_public=False, creator=self.user)
 
     def test_creates_project_returns_proper_data(self):
         url = '/v2/nodes/'
@@ -759,12 +747,25 @@ class TestNodeCreateUpdate(ApiTestCase):
         assert_equal(res.json['data']['title'], public_project['title'])
         assert_equal(res.json['data']['description'], public_project['description'])
         assert_equal(res.json['data']['category'], public_project['category'])
-        # Private project, logged in
+        # Private project, logged in, authorized
         res = self.app.post_json(url, private_project, auth=self.auth)
         assert_equal(res.status_code, 201)
         assert_equal(res.json['data']['title'], private_project['title'])
         assert_equal(res.json['data']['description'], private_project['description'])
         assert_equal(res.json['data']['category'], private_project['category'])
+
+    def test_cannot_create_node_when_logged_out(self):
+        url = '/v2/nodes/'
+        public_project = {'title': 'My public project', 'description': 'Project description', 'category' : 'project',
+                          'public': True }
+        private_project = {'title': 'My private project', 'description': 'Project description', 'category' : 'project',
+                          'public': False }
+        # Public resource, logged out
+        res1 = self.app.post_json(url, public_project, expect_errors=True)
+        assert_equal(res1.status_code, 401)
+        # Private resource, logged out
+        res2 = self.app.post_json(url, private_project, expect_errors=True)
+        assert_equal(res2.status_code, 401)
 
     def test_creates_project_creates_project(self):
         url = '/v2/nodes/'
@@ -824,11 +825,20 @@ class TestNodeCreateUpdate(ApiTestCase):
             'category': new_category,
             'public': True,
         }, auth=self.auth)
-        # Public project, logged in
+        # Public project, logged in, contrib
         assert_equal(res.status_code, 200)
         assert_equal(res.json['data']['title'], new_title)
         assert_equal(res.json['data']['description'], new_description)
         assert_equal(res.json['data']['category'], new_category)
+
+        # Public project, logged in, unauthorized
+        res = self.app.put_json(url, {
+            'title': new_title,
+            'description': new_description,
+            'category': new_category,
+            'public': True,
+        }, auth=self.auth_two, expect_errors=True)
+        assert_equal(res.status_code, 403)
 
     def test_update_project_while_logged_out(self):
         new_title = 'Super Cool Project'
