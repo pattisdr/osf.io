@@ -5,32 +5,8 @@ from nose.tools import *  # flake8: noqa
 from framework.auth.core import Auth
 from website.models import Node
 from tests.base import ApiTestCase, fake
-from tests.factories import UserFactory, ProjectFactory, FolderFactory, RegistrationFactory, DashboardFactory, NodeFactory, PointerFactory
+from tests.factories import UserFactory, ProjectFactory, FolderFactory, DashboardFactory, NodeFactory, PointerFactory
 
-class TestWelcomeToApi(ApiTestCase):
-    def setUp(self):
-        ApiTestCase.setUp(self)
-        self.user = UserFactory.build()
-        self.user.set_password('justapoorboy')
-        self.user.save()
-        self.auth = (self.user.username, 'justapoorboy')
-
-    # Logged out, public page
-    def test_returns_200_for_logged_out_user(self):
-        res = self.app.get('/v2/')
-        assert_equal(res.status_code, 200)
-        assert_equal(res.json['meta']['current_user'], None)
-
-    # Logged in, public page
-    def test_returns_200_for_logged_in_user(self):
-        url = '/v2/'
-        res = self.app.get(url, auth=(self.auth))
-        assert_equal(res.status_code, 200)
-
-    def test_returns_current_user_info_when_logged_in(self):
-        url = '/v2/'
-        res = self.app.get(url, auth=(self.auth))
-        assert_equal(res.json['meta']['current_user']['data']['given_name'], 'Freddie')
 
 class TestNodeList(ApiTestCase):
 
@@ -55,10 +31,8 @@ class TestNodeList(ApiTestCase):
 
         ids = [each['id'] for each in node_json]
 
-        # Public resource, logged out
         assert_in(public._id, ids)
         assert_not_in(deleted._id, ids)
-        # Private resource, logged out
         assert_not_in(private._id, ids)
 
         Node.remove()
@@ -69,6 +43,7 @@ class TestNodeContributorList(ApiTestCase):
     def setUp(self):
         ApiTestCase.setUp(self)
         self.user = UserFactory.build()
+
         password = fake.password()
         self.password = password
 
@@ -80,38 +55,25 @@ class TestNodeContributorList(ApiTestCase):
         self.project.add_contributor(self.user)
         self.project.save()
 
-        self.project_two = ProjectFactory(is_public=True)
-        self.project_two.add_contributor(self.user)
-        self.project_two.save()
-
     def test_must_be_contributor(self):
+
         non_contrib = UserFactory.build()
         pw = fake.password()
         non_contrib.set_password(pw)
         non_contrib.save()
 
         url = '/v2/nodes/{}/contributors/'.format(self.project._id)
-        # non-authenticated, private resource
+        # non-authenticated
         res = self.app.get(url, expect_errors=True)
         assert_equal(res.status_code, 401)
 
-        # non-contrib, private resource
+        # non-contrib
         res = self.app.get(url, auth=(non_contrib.username, pw), expect_errors=True)
         assert_equal(res.status_code, 403)
 
-        # contrib, private resource
+        # contrib
         res = self.app.get(url, auth=(self.user.username, self.password))
         assert_equal(res.status_code, 200)
-
-        url = '/v2/nodes/{}/contributors/'.format(self.project_two._id)
-        # Logged out, public
-        res = self.app.get(url)
-        assert_equal(res.status_code, 200)
-
-        # Logged in, public
-        res = self.app.get(url, auth=self.auth)
-        assert_equal(res.status_code, 200)
-
         Node.remove()
 
 
@@ -131,53 +93,16 @@ class TestNodeChildrenList(ApiTestCase):
         self.pointer = ProjectFactory()
         self.project.add_pointer(self.pointer, auth=Auth(self.user), save=True)
 
-        self.public_project = ProjectFactory(is_public=True)
-        self.public_project.save()
-        self.component = NodeFactory(parent=self.public_project, creator=self.user, is_public=True)
-
-        self.user_two = UserFactory.build()
-        self.user_two.set_password(password)
-        self.user_two.save()
-        self.auth_two = (self.user_two.username, password)
-
     def test_node_children_list_does_not_include_pointers(self):
         url = '/v2/nodes/{}/children/'.format(self.project._id)
-        # Private project, authorized
         res = self.app.get(url, auth=self.auth)
         assert_equal(len(res.json['data']), 1)
-        assert_equal(res.status_code, 200)
-        # Private resource, logged out
-        res = self.app.get(url, expect_errors=True)
-        assert_equal(res.status_code, 401)
 
     def test_node_children_list_does_not_include_unauthorized_projects(self):
-
         private_component = NodeFactory(parent=self.project)
         url = '/v2/nodes/{}/children/'.format(self.project._id)
         res = self.app.get(url, auth=self.auth)
         assert_equal(len(res.json['data']), 1)
-        # Private project, unauthorized
-        res = self.app.get(url, auth=self.auth_two, expect_errors=True)
-        assert_equal(res.status_code, 403)
-
-    def test_public_node_children(self):
-        # Logged in, public resource
-        url = '/v2/nodes/{}/children/'.format(self.public_project._id)
-        res = self.app.get(url, auth=self.auth)
-        assert_equal(len(res.json['data']), 1)
-        assert_equal(res.status_code, 200)
-
-        # Logged in, public resource, non-contrib
-        res = self.app.get(url, auth=self.auth_two)
-        assert_equal(len(res.json['data']), 1)
-        assert_equal(res.status_code, 200)
-
-        # Logged out, public resource
-        res = self.app.get(url)
-        assert_equal(res.status_code, 200)
-        assert_equal(len(res.json['data']), 1)
-
-        Node.remove()
 
 
 class TestNodeFiltering(ApiTestCase):
@@ -206,31 +131,29 @@ class TestNodeFiltering(ApiTestCase):
 
     def test_get_all_projects_with_no_filter_logged_in(self):
         url = "/v2/nodes/"
+
         res = self.app.get(url, auth=self.auth_one)
         node_json = res.json['data']
 
         ids = [each['id'] for each in node_json]
-        # Public resource, logged in
         assert_in(self.project_one._id, ids)
         assert_in(self.project_two._id, ids)
         assert_in(self.project_three._id, ids)
-        # Private resource, authorized
         assert_in(self.private_project_user_one._id, ids)
-        # Private resource, unauthorized
         assert_not_in(self.private_project_user_two._id, ids)
         assert_not_in(self.folder._id, ids)
         assert_not_in(self.dashboard._id, ids)
 
     def test_get_all_projects_with_no_filter_not_logged_in(self):
         url = "/v2/nodes/"
+
         res = self.app.get(url)
         node_json = res.json['data']
+
         ids = [each['id'] for each in node_json]
-        # Public resource, logged out
         assert_in(self.project_one._id, ids)
         assert_in(self.project_two._id, ids)
         assert_in(self.project_three._id, ids)
-        # Private resource, logged out
         assert_not_in(self.private_project_user_one._id, ids)
         assert_not_in(self.private_project_user_two._id, ids)
         assert_not_in(self.folder._id, ids)
@@ -388,8 +311,6 @@ class TestNodeFiltering(ApiTestCase):
         assert_not_in(self.folder._id, ids)
         assert_not_in(self.dashboard._id, ids)
 
-        Node.remove()
-
 
 class TestNodePointersList(ApiTestCase):
 
@@ -399,18 +320,9 @@ class TestNodePointersList(ApiTestCase):
         self.user.set_password('password')
         self.user.save()
         self.auth = (self.user.username, 'password')
-        self.project = ProjectFactory(creator=self.user, is_public=False)
-        self.pointer_project = ProjectFactory(creator=self.user, is_public=False)
+        self.project = ProjectFactory()
+        self.pointer_project = ProjectFactory()
         self.project.add_pointer(self.pointer_project, auth=Auth(self.user))
-
-        self.public_project = ProjectFactory(is_public=True)
-        self.public_pointer_project = ProjectFactory(is_public=True)
-        self.public_project.add_pointer(self.public_pointer_project, auth=Auth(self.user))
-
-        self.user_two = UserFactory.build()
-        self.user_two.set_password('password')
-        self.user_two.save()
-        self.auth_two = (self.user_two.username, 'password')
 
     def test_returns_200(self):
         url = '/v2/nodes/{}/pointers/'.format(self.project._id)
@@ -419,116 +331,68 @@ class TestNodePointersList(ApiTestCase):
 
     def test_returns_node_pointers(self):
         url = '/v2/nodes/{}/pointers/'.format(self.project._id)
-        # Logged in, private resource, authorized
         res = self.app.get(url, auth=self.auth)
         res_json = res.json['data']
         assert_equal(len(res_json), 1)
         assert_in(res_json[0]['node_id'], self.pointer_project._id)
 
-        url = '/v2/nodes/{}/pointers/'.format(self.project._id)
-
-        # Logged in, private resource, unauthorized
-        res = self.app.get(url, auth=self.auth_two, expect_errors=True)
-        assert_equal(res.status_code, 403)
-
-        # Logged out, private resource
-        res = self.app.get(url, expect_errors=True)
-        assert_equal(res.status_code, 401)
-
-    def test_return_public_node_pointers(self):
-        url ='/v2/nodes/{}/pointers/'.format(self.public_project._id)
-        # Logged in, public resource
-        res = self.app.get(url, auth=self.auth_two)
-        res_json = res.json['data']
-        assert_equal(len(res_json), 1)
-        assert_equal(res.status_code, 200)
-
-        # Logged out, public resource
-        res = self.app.get(url)
-        res_json = res.json['data']
-        assert_equal(len(res_json), 1)
-        assert_equal(res.status_code, 200)
-
-
     def test_creates_node_pointer(self):
-        project = ProjectFactory(creator=self.user)
+        project = ProjectFactory()
         url = '/v2/nodes/{}/pointers/'.format(self.project._id)
         payload = {'node_id': project._id}
-
-        # Private, unauthorized
-        res = self.app.post(url, payload, auth=self.auth_two, expect_errors=True)
-        assert_equal(res.status_code, 403)
-
-        # Private, authorized
         res = self.app.post(url, payload, auth=self.auth)
         assert_equal(res.status_code, 201)
         assert_equal(res.json['data']['node_id'], project._id)
 
-        # Private, logged out
-        res = self.app.post(url, payload, expect_errors=True)
-        assert_equal(res.status_code, 401)
-
-        url = '/v2/nodes/{}/pointers/'.format(self.public_project._id)
-        payload = {'node_id': self.public_project._id}
-
-        # Public, logged in, non-contrib
-        res = self.app.post(url, payload, auth = self.auth_two, expect_errors=True)
-        assert_equal(res.status_code, 405)
-
-        # Public, logged out
-        res = self.app.post(url, payload, expect_errors = True)
-        assert_equal(res.status_code, 401)
 
 class TestNodeContributorFiltering(ApiTestCase):
 
-    def test_filtering_node_with_only_bibliographic_contributors(self):
-        project = ProjectFactory()
-        password = fake.password()
-        project.creator.set_password(password)
-        project.creator.save()
-        auth = (project.creator.username, password)
+    def setUp(self):
+        ApiTestCase.setUp(self)
+        self.project = ProjectFactory()
+        self.password = fake.password()
+        self.project.creator.set_password(self.password)
+        self.project.creator.save()
+        self.auth = (self.project.creator.username, self.password)
 
-        base_url = '/v2/nodes/{}/contributors/'.format(project._id)
-        # no filter, private resource, logged in
-        res = self.app.get(base_url, auth=auth)
+    def test_filtering_node_with_only_bibliographic_contributors(self):
+
+        base_url = '/v2/nodes/{}/contributors/'.format(self.project._id)
+        # no filter
+        res = self.app.get(base_url, auth=self.auth)
         assert_equal(len(res.json['data']), 1)
 
         # filter for bibliographic contributors
         url = base_url + '?filter[bibliographic]=True'
-        res = self.app.get(url, auth=auth)
+        res = self.app.get(url, auth=self.auth)
         assert_equal(len(res.json['data']), 1)
         assert_true(res.json['data'][0].get('bibliographic', None))
 
         # filter for non-bibliographic contributors
         url = base_url + '?filter[bibliographic]=False'
-        res = self.app.get(url, auth=auth)
+        res = self.app.get(url, auth=self.auth)
         assert_equal(len(res.json['data']), 0)
 
     def test_filtering_node_with_non_bibliographic_contributor(self):
-        project = ProjectFactory()
-        password = fake.password()
-        project.creator.set_password(password)
-        project.creator.save()
-        auth = (project.creator.username, password)
         non_bibliographic_contrib = UserFactory()
-        project.add_contributor(non_bibliographic_contrib, visible=False)
-        project.save()
+        self.project.add_contributor(non_bibliographic_contrib, visible=False)
+        self.project.save()
 
-        base_url = base_url = '/v2/nodes/{}/contributors/'.format(project._id)
+        base_url = base_url = '/v2/nodes/{}/contributors/'.format(self.project._id)
 
         # no filter
-        res = self.app.get(base_url, auth=auth)
+        res = self.app.get(base_url, auth=self.auth)
         assert_equal(len(res.json['data']), 2)
 
         # filter for bibliographic contributors
         url = base_url + '?filter[bibliographic]=True'
-        res = self.app.get(url, auth=auth)
+        res = self.app.get(url, auth=self.auth)
         assert_equal(len(res.json['data']), 1)
         assert_true(res.json['data'][0].get('bibliographic', None))
 
         # filter for non-bibliographic contributors
         url = base_url + '?filter[bibliographic]=False'
-        res = self.app.get(url, auth=auth)
+        res = self.app.get(url, auth=self.auth)
         assert_equal(len(res.json['data']), 1)
         assert_false(res.json['data'][0].get('bibliographic', None))
 
@@ -541,18 +405,9 @@ class TestNodePointerDetail(ApiTestCase):
         self.user.set_password('password')
         self.user.save()
         self.auth = (self.user.username, 'password')
-        self.project = ProjectFactory(creator=self.user)
-        self.pointer_project = ProjectFactory(creator=self.user)
+        self.project = ProjectFactory()
+        self.pointer_project = ProjectFactory()
         self.pointer = self.project.add_pointer(self.pointer_project, auth=Auth(self.user), save=True)
-
-        self.user_two = UserFactory.build()
-        self.user_two.set_password('password')
-        self.user_two.save()
-        self.auth_two = (self.user_two.username, 'password')
-
-        self.public_project = ProjectFactory(is_public=True)
-        self.public_pointer_project = ProjectFactory(is_public=True)
-        self.public_pointer = self.public_project.add_pointer(self.public_pointer_project, auth= Auth(self.user), save=True)
 
     def test_returns_200(self):
         url = '/v2/nodes/{}/pointers/{}'.format(self.project._id, self.pointer._id)
@@ -561,63 +416,16 @@ class TestNodePointerDetail(ApiTestCase):
 
     def test_returns_node_pointer(self):
         url = '/v2/nodes/{}/pointers/{}'.format(self.project._id, self.pointer._id)
-        # Private resource, authorized
         res = self.app.get(url, auth=self.auth)
         res_json = res.json['data']
         assert_equal(res_json['node_id'], self.pointer_project._id)
 
-        # Private resource, logged out
-        res = self.app.get(url, expect_errors=True)
-        assert_equal(res.status_code, 401)
-
-        # Private resource, unauthorized
-        res = self.app.get(url, auth=self.auth_two, expect_errors=True)
-        assert_equal(res.status_code, 403)
-
-        url = '/v2/nodes/{}/pointers/{}'.format(self.public_project._id, self.public_pointer._id)
-
-        # Public resource, logged in
-        res = self.app.get(url, auth=self.auth)
-        res_json = res.json['data']
-        assert_equal(res_json['node_id'], self.public_pointer_project._id)
-
-        #Public resource, logged out
-        res = self.app.get(url)
-        assert_equal(res.status_code, 200)
-        res_json = res.json['data']
-        assert_equal(res_json['node_id'], self.public_pointer_project._id)
-
     def test_deletes_node_pointer(self):
         url = '/v2/nodes/{}/pointers/{}'.format(self.project._id, self.pointer._id)
-
-        # Private resource, authorized
         res = self.app.delete(url, auth=self.auth)
         assert_equal(res.status_code, 204)
         assert_equal(len(self.project.nodes_pointer), 0)
 
-        # Private resource, unauthorized
-        url = '/v2/nodes/{}/pointers/'.format(self.project._id)
-        payload = {'node_id': self.project._id}
-        res = self.app.post(url, payload, auth=self.auth)
-
-        res = self.app.delete(url, auth=self.auth_two, expect_errors=True)
-        assert_equal(res.status_code, 405)
-
-        # Private resource, logged out
-        res = self.app.delete(url, expect_errors=True)
-        assert_equal(res.status_code, 401)
-
-        url = '/v2/nodes/{}/pointers/'.format(self.public_project._id)
-        payload = {'node_id': self.public_project._id}
-        res = self.app.post(url, payload, auth=self.auth)
-
-        # Public resource, logged in
-        res = self.app.delete(url, auth = self.auth_two, expect_errors=True)
-        assert_equal(res.status_code, 405)
-
-        # Public resource, logged out
-        res = self.app.delete(url, expect_errors=True)
-        assert_equal(res.status_code, 401)
 
 class TestNodeFilesList(ApiTestCase):
 
@@ -628,13 +436,6 @@ class TestNodeFilesList(ApiTestCase):
         self.user.save()
         self.auth = (self.user.username, 'justapoorboy')
         self.project = ProjectFactory(creator=self.user)
-
-        self.user_two = UserFactory.build()
-        self.user_two.set_password('justapoorboy')
-        self.user_two.save()
-        self.auth_two = (self.user_two.username, 'justapoorboy')
-
-        self.public_project = ProjectFactory(creator=self.user)
 
     def test_returns_200(self):
         url = '/v2/nodes/{}/files/'.format(self.project._id)
@@ -652,31 +453,12 @@ class TestNodeFilesList(ApiTestCase):
         project.add_addon('github', auth=user_auth)
         project.save()
 
-        # Private resource, authorized
         res = self.app.get(url, auth=self.auth)
         data = res.json['data']
         providers = [item['provider'] for item in data]
         assert_equal(len(data), 2)
         assert_in('github', providers)
         assert_in('osfstorage', providers)
-
-        # Private resource, unauthorized
-        res = self.app.get(url, auth=self.auth_two, expect_errors=True)
-        assert_equal(res.status_code, 403)
-
-        # Private resource, logged out
-        res = self.app.get(url, expect_errors=True)
-        assert_equal(res.status_code, 401)
-
-        url = '/v2/nodes/{}/files/'.format(self.public_project._id)
-
-        # Public resource, logged in
-        res = self.app.get(url, auth=self.auth)
-        assert_equal(res.status_code, 200)
-
-        # Public resource, private components, logged out
-        res = self.app.get(url, expect_errors=True)
-        assert_equal(res.status_code, 401)
 
     @mock.patch('api.nodes.views.requests.get')
     def test_returns_node_files_list(self, mock_waterbutler_request):
@@ -728,233 +510,88 @@ class TestNodeCreateUpdate(ApiTestCase):
         self.user.set_password('justapoorboy')
         self.user.save()
         self.auth = (self.user.username, 'justapoorboy')
-        self.user_two = UserFactory.build()
-        self.user_two.set_password('justapoorboy')
-        self.user_two.save()
-        self.auth_two = (self.user_two.username, 'justapoorboy')
-        self.project_one = ProjectFactory(title="Project One", is_public=True)
-        self.project_two = ProjectFactory(title="Project Two", is_public=False, creator=self.user)
+        self.url = '/v2/nodes/'
+        self.title = 'Cool Project'
+        self.new_title = 'Super Cool Project'
+        self.description = 'A Properly Cool Project'
+        self.new_description = 'An even cooler project'
+        self.category = 'data'
+        self.new_category = 'project'
 
     def test_creates_project_returns_proper_data(self):
-        url = '/v2/nodes/'
-        public_project = {'title': 'My public project', 'description': 'Project description', 'category' : 'project',
-                          'public': True }
-        private_project = {'title': 'Cool Private Project', 'description': 'A properly cool project', 'category': 'data',
-                           'public': False }
-        # Public project, logged in
-        res = self.app.post_json(url, public_project, auth=self.auth)
+        res = self.app.post_json(self.url, {
+            'title': self.title,
+            'description': self.description,
+            'category': self.category,
+            'public': True,
+        }, auth=self.auth)
+        project_id = res.json['data']['id']
         assert_equal(res.status_code, 201)
-        assert_equal(res.json['data']['title'], public_project['title'])
-        assert_equal(res.json['data']['description'], public_project['description'])
-        assert_equal(res.json['data']['category'], public_project['category'])
-        # Private project, logged in, authorized
-        res = self.app.post_json(url, private_project, auth=self.auth)
-        assert_equal(res.status_code, 201)
-        assert_equal(res.json['data']['title'], private_project['title'])
-        assert_equal(res.json['data']['description'], private_project['description'])
-        assert_equal(res.json['data']['category'], private_project['category'])
-
-    def test_cannot_create_node_when_logged_out(self):
-        url = '/v2/nodes/'
-        public_project = {'title': 'My public project', 'description': 'Project description', 'category' : 'project',
-                          'public': True }
-        private_project = {'title': 'My private project', 'description': 'Project description', 'category' : 'project',
-                          'public': False }
-        # Public resource, logged out
-        res1 = self.app.post_json(url, public_project, expect_errors=True)
-        assert_equal(res1.status_code, 401)
-        # Private resource, logged out
-        res2 = self.app.post_json(url, private_project, expect_errors=True)
-        assert_equal(res2.status_code, 401)
+        assert_equal(res.json['data']['title'], self.title)
+        assert_equal(res.json['data']['description'], self.description)
+        assert_equal(res.json['data']['category'], self.category)
 
     def test_creates_project_creates_project(self):
-        url = '/v2/nodes/'
-        title = 'Cool Project'
-        description = 'A Properly Cool Project'
-        category = 'data'
-
-        res = self.app.post_json(url, {
-            'title': title,
-            'description': description,
-            'category': category,
+        res = self.app.post_json(self.url, {
+            'title': self.title,
+            'description': self.description,
+            'category': self.category,
             'public': True,
         }, auth=self.auth)
         project_id = res.json['data']['id']
         assert_equal(res.status_code, 201)
         url = '/v2/nodes/{}/'.format(project_id)
-        # Public resource, logged in
         res = self.app.get(url, auth=self.auth)
-        assert_equal(res.json['data']['title'], title)
-        assert_equal(res.json['data']['description'], description)
-        assert_equal(res.json['data']['category'], category)
-
-    def test_retrieve_project_details_when_logged_out(self):
-        # Public resource, logged out
-        url = '/v2/nodes/{}/'.format(self.project_one._id)
-        res = self.app.get(url)
-        assert_equal(res.status_code, 200)
-        # Private resource, logged out
-        url = '/v2/nodes/{}/'.format(self.project_two._id)
-        res = self.app.get(url, expect_errors=True)
-        assert_equal(res.status_code, 401)
-
-    def test_retrieve_private_project_when_logged_in(self):
-        # Private resource, authorized
-        url = '/v2/nodes/{}/'.format(self.project_two._id)
-        res = self.app.get(url, auth=self.auth)
-        assert_equal(res.status_code, 200)
-        # Private resource, unauthorized
-        res = self.app.get(url, auth=self.auth_two, expect_errors=True)
-        assert_equal(res.status_code, 403)
+        assert_equal(res.json['data']['title'], self.title)
+        assert_equal(res.json['data']['description'], self.description)
+        assert_equal(res.json['data']['category'], self.category)
 
     def test_update_project_returns_proper_data(self):
-        url = '/v2/nodes/'
-        title = 'Cool Project'
-        new_title = 'Super Cool Project'
-        description = 'A Properly Cool Project'
-        new_description = 'An even cooler project'
-        category = 'data'
-        new_category = 'project'
         project = self.project = ProjectFactory(
-            title=title, description=description, category=category, is_public=True, creator=self.user)
+            title=self.title, description=self.description, category=self.category, is_public=True, creator=self.user)
 
         url = '/v2/nodes/{}/'.format(project._id)
         res = self.app.put_json(url, {
-            'title': new_title,
-            'description': new_description,
-            'category': new_category,
+            'title': self.new_title,
+            'description': self.new_description,
+            'category': self.new_category,
             'public': True,
         }, auth=self.auth)
-        # Public project, logged in, contrib
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data']['title'], new_title)
-        assert_equal(res.json['data']['description'], new_description)
-        assert_equal(res.json['data']['category'], new_category)
-
-        # Public project, logged in, unauthorized
-        res = self.app.put_json(url, {
-            'title': new_title,
-            'description': new_description,
-            'category': new_category,
-            'public': True,
-        }, auth=self.auth_two, expect_errors=True)
-        assert_equal(res.status_code, 403)
-
-    def test_update_project_while_logged_out(self):
-        new_title = 'Super Cool Project'
-        new_description = 'An even cooler project'
-        new_category = 'project'
-        url = '/v2/nodes/{}/'.format(self.project_one._id)
-        # Public resource, logged out
-        res = self.app.put_json(url, {
-            'title': new_title,
-            'description': new_description,
-            'category': new_category,
-            'public': True,
-        }, expect_errors=True)
-        assert_equal(res.status_code, 401)
-        # Private resource, logged out
-        url = '/v2/nodes/{}/'.format(self.project_two._id)
-        res = self.app.put_json(url, {
-            'title': new_title,
-            'description': new_description,
-            'category': new_category,
-            'public': False,
-        }, expect_errors=True)
-        assert_equal(res.status_code, 401)
-
-    def test_update_private_project_while_logged_in(self):
-        new_title = 'Super Cool Project'
-        new_description = 'An even cooler project'
-        new_category = 'project'
-        url = '/v2/nodes/{}/'.format(self.project_two._id)
-        # Private resource, authorized
-        res = self.app.put_json(url, {
-            'title': new_title,
-            'description': new_description,
-            'category': new_category,
-            'public': False,
-        }, auth=self.auth)
-        assert_equal(res.status_code, 200)
-
-        url = '/v2/nodes/{}/'.format(self.project_two._id)
-        # Private resource, unauthorized
-        res = self.app.put_json(url, {
-            'title': new_title,
-            'description': new_description,
-            'category': new_category,
-            'public': False,
-        }, auth=self.auth_two, expect_errors=True)
-        assert_equal(res.status_code, 403)
+        assert_equal(res.json['data']['title'], self.new_title)
+        assert_equal(res.json['data']['description'], self.new_description)
+        assert_equal(res.json['data']['category'], self.new_category)
 
     def test_update_project_updates_project_properly(self):
-        url = '/v2/nodes/'
-        title = 'Cool Project'
-        new_title = 'Super Cool Project'
-        description = 'A Properly Cool Project'
-        new_description = 'An even cooler project'
-        category = 'data'
-        new_category = 'project'
         project = self.project = ProjectFactory(
-            title=title, description=description, category=category, is_public=True, creator=self.user)
+            title=self.title, description=self.description, category=self.category, is_public=True, creator=self.user)
 
         url = '/v2/nodes/{}/'.format(project._id)
         res = self.app.put_json(url, {
-            'title': new_title,
-            'description': new_description,
-            'category': new_category,
+            'title': self.new_title,
+            'description': self.new_description,
+            'category': self.new_category,
             'public': True,
         }, auth=self.auth)
         assert_equal(res.status_code, 200)
         res = self.app.get(url)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data']['title'], new_title)
-        assert_equal(res.json['data']['description'], new_description)
-        assert_equal(res.json['data']['category'], new_category)
+        assert_equal(res.json['data']['title'], self.new_title)
+        assert_equal(res.json['data']['description'], self.new_description)
+        assert_equal(res.json['data']['category'], self.new_category)
 
     def test_partial_update_project_returns_proper_data(self):
-        url = '/v2/nodes/'
-        title = 'Cool Project'
-        new_title = 'Super Cool Project'
-        description = 'A Properly Cool Project'
-        category = 'data'
         project = self.project = ProjectFactory(
-            title=title, description=description, category=category, is_public=True, creator=self.user)
-        # Public resource, logged in
+            title=self.title, description=self.description, category=self.category, is_public=True, creator=self.user)
+
         url = '/v2/nodes/{}/'.format(project._id)
         res = self.app.patch_json(url, {
-            'title': new_title,
+            'title': self.new_title,
         }, auth=self.auth)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data']['title'], new_title)
-        assert_equal(res.json['data']['description'], description)
-        assert_equal(res.json['data']['category'], category)
-        # Public resource, logged in, unauthorized
-        res = self.app.patch_json(url, {
-            'title': new_title,
-        }, auth=self.auth_two, expect_errors=True)
-        assert_equal(res.status_code, 403)
-
-    def test_partial_update_project_while_logged_out(self):
-        new_title = "Patching this title"
-        url = '/v2/nodes/{}/'.format(self.project_one._id)
-        # Public resource, logged out
-        res = self.app.patch_json(url, {'title': new_title}, expect_errors=True)
-        assert_equal(res.status_code, 401)
-        # Private resource, logged out
-        url = '/v2/nodes/{}/'.format(self.project_two._id)
-        res = self.app.patch_json(url, {'title': new_title}, expect_errors=True)
-        assert_equal(res.status_code, 401)
-
-    def test_partial_update_private_project_while_logged_in(self):
-        new_title = "Patching this title"
-        url = '/v2/nodes/{}/'.format(self.project_two._id)
-        # Private resource, authorized
-        res = self.app.patch_json(url, {'title': new_title}, auth=self.auth)
-        assert_equal(res.status_code, 200)
-        # Private resource, unauthorized
-        res = self.app.patch_json(url, {'title': new_title}, auth=self.auth_two, expect_errors=True)
-        assert_equal(res.status_code, 403)
+        assert_equal(res.json['data']['title'], self.new_title)
+        assert_equal(res.json['data']['description'], self.description)
+        assert_equal(res.json['data']['category'], self.category)
 
     def test_partial_update_project_updates_project_properly(self):
         url = '/v2/nodes/'
@@ -975,48 +612,3 @@ class TestNodeCreateUpdate(ApiTestCase):
         assert_equal(res.json['data']['title'], title)
         assert_equal(res.json['data']['description'], new_description)
         assert_equal(res.json['data']['category'], category)
-
-class TestNodeRegistrationList(ApiTestCase):
-    def setUp(self):
-        ApiTestCase.setUp(self)
-        self.user = UserFactory.build()
-        password = fake.password()
-        self.password = password
-        self.user.set_password(password)
-        self.user.save()
-        self.auth = (self.user.username, password)
-        self.project = ProjectFactory(is_public=False, creator=self.user)
-        self.project.save()
-        self.registration_project = RegistrationFactory(creator=self.user, title="1st Registration")
-
-        self.public_project = ProjectFactory(is_public=True, creator=self.user)
-        self.public_project.save()
-
-        self.user_two = UserFactory.build()
-        self.user_two.set_password(password)
-        self.user_two.save()
-        self.auth_two = (self.user_two.username, password)
-
-    def test_public_registrations(self):
-        url = '/v2/nodes/{}/registrations/'.format(self.public_project._id)
-        # Public project, logged in
-        res = self.app.get(url, auth=self.auth)
-        assert_equal(res.status_code, 200)
-        assert_equal(res.json, 1)
-        # Public project, logged out
-        es = self.app.get(url)
-        assert_equal(res.status_code, 200)
-
-    def test_private_registrations(self):
-        url = '/v2/nodes/{}/registrations/'.format(self.project._id)
-        #Private project, authorized
-        res = self.app.get(url, auth=self.auth)
-        assert_equal(res.status_code, 200)
-        # Private project, unauthorized
-        res = self.app.get(url, auth=self.auth_two, expect_errors=True)
-        assert_equal(res.status_code, 403)
-        # Private project, logged out
-        res = self.app.get(url, expect_errors=True)
-        assert_equal(res.status_code, 401)
-
-
