@@ -11,6 +11,7 @@ from website.project.model import DraftRegistration, Node
 
 class RegistrationCreateSerializer(JSONAPISerializer):
     id = ser.CharField(read_only=True, source='_id')
+    warning_message = ser.CharField(read_only=True)
     class Meta:
         type_ = 'registrations'
 
