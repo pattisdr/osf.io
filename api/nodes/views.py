@@ -5,8 +5,8 @@ from rest_framework import generics, permissions as drf_permissions
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from modularodm import Q
-from website.models import Node, Pointer, DraftRegistration
 from api.users.serializers import ContributorSerializer
+from website.models import Node, Pointer, DraftRegistration
 from api.base.filters import ODMFilterMixin, ListFilterMixin
 from api.base.utils import get_object_or_404, waterbutler_url_for
 from .serializers import NodeSerializer, NodePointersSerializer, NodeFilesSerializer, DraftRegistrationSerializer

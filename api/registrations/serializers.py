@@ -1,12 +1,16 @@
 from framework.auth.core import Auth
 from rest_framework import serializers as ser
+from django.utils.translation import ugettext_lazy as _
 from rest_framework.exceptions import PermissionDenied, NotFound
+
 from api.base.utils import token_creator
+from api.base.utils import get_object_or_404
 from api.nodes.serializers import NodeSerializer
 from api.base.serializers import JSONAPISerializer
-from api.draft_registrations.views import DraftRegistrationMixin
-from api.base.utils import get_object_or_404
 from website.project.model import DraftRegistration, Node
+from api.draft_registrations.views import DraftRegistrationMixin
+
+
 
 
 class RegistrationCreateSerializer(JSONAPISerializer):
@@ -32,11 +36,11 @@ class RegistrationCreateSerializerWithToken(NodeSerializer, DraftRegistrationMix
         view = self.context['view']
         draft = get_object_or_404(DraftRegistration, data['draft_id'])
         if draft.is_deleted:
-            raise NotFound('This resource has been deleted')
+            raise NotFound(_('This resource has been deleted'))
         given_token = view.kwargs['token']
         correct_token = token_creator(draft._id, user._id)
         if correct_token != given_token:
-            raise ser.ValidationError("Incorrect token.")
+            raise ser.ValidationError(_("Incorrect token."))
         return data
 
     def create(self, validated_data):

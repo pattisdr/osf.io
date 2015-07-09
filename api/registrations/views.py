@@ -2,6 +2,7 @@ from rest_framework import status
 from rest_framework import generics
 from rest_framework import exceptions
 from rest_framework.response import Response
+from django.utils.translation import ugettext_lazy as _
 
 from modularodm import Q
 from api.base.utils import get_object_or_404
@@ -48,7 +49,7 @@ class RegistrationList(NodeList):
         user = request.user
         draft = get_object_or_404(DraftRegistration, request.data['draft_id'])
         if draft.is_deleted:
-            raise exceptions.NotFound('This resource has been deleted')
+            raise exceptions.NotFound(_('This resource has been deleted'))
         self.check_object_permissions(self.request, draft)
         token = token_creator(draft._id, user._id)
         url = absolute_reverse('registrations:registration-create', kwargs={'token': token})
@@ -63,12 +64,6 @@ class RegistrationCreateWithToken(generics.CreateAPIView, NodeMixin):
     permission_classes = (
         ContributorOrPublic,
     )
-
-    def get_object(self):
-        obj = self.request.data['draft_id']
-        obj = get_object_or_404(DraftRegistration, obj)
-        self.check_object_permissions(self.request, obj)
-        return obj
 
     serializer_class = RegistrationCreateSerializerWithToken
 

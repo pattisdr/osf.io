@@ -33,6 +33,8 @@ class DraftRegSerializer(JSONAPISerializer):
                 Q('name', 'eq', schema_name) &
                 Q('schema_version', 'eq', schema_version)
             )
+            instance.registration_schema = meta_schema
+
         if "registration_metadata" in validated_data.keys():
             instance.registration_metadata = validated_data.get('registration_metadata', {})
 
