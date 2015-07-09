@@ -3,6 +3,8 @@ from nose.tools import *  # flake8: noqa
 
 from api.base.settings.defaults import API_BASE
 
+from api.base.utils import token_creator
+
 from tests.base import ApiTestCase, fake
 from website.project.model import ensure_schemas
 from tests.factories import UserFactory, ProjectFactory, RegistrationFactory, NodeFactory, DraftRegistrationFactory
@@ -69,74 +71,89 @@ class TestRegistrationCreate(ApiTestCase):
 
         self.public_project = ProjectFactory(creator=self.user, is_public=True)
         self.public_draft = DraftRegistrationFactory(initiator=self.user, branched_from=self.public_project)
-        self.public_url = '/{}registrations/{}/'.format(API_BASE, self.public_draft._id)
+        self.public_url = '/{}registrations/'.format(API_BASE)
+        self.public_payload = {'draft_id': self.public_draft._id}
 
         self.private_project = ProjectFactory(creator=self.user, is_private=True)
         self.private_draft = DraftRegistrationFactory(initiator=self.user, branched_from=self.private_project)
-        self.private_url = '/{}registrations/{}/'.format(API_BASE, self.private_draft._id)
+        self.private_url = '/{}registrations/'.format(API_BASE)
+        self.private_payload = {'draft_id': self.private_draft._id}
+
 
         self.registration = RegistrationFactory(project=self.public_project)
 
     def test_create_registration_from_node(self):
-        url = '/{}registrations/{}/'.format(API_BASE, self.public_project._id)
-        res = self.app.post(url, auth=self.basic_auth, expect_errors=True)
+        url = '/{}registrations/'.format(API_BASE)
+        res = self.app.post(url, {'draft_id': self.public_project._id}, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 404)
 
     def test_create_registration_from_fake_node(self):
-        url = '/{}registrations/{}/'.format(API_BASE, '12345')
-        res = self.app.post(url, auth=self.basic_auth, expect_errors=True)
+        url = '/{}registrations/'.format(API_BASE)
+        res = self.app.post(url, {'draft_id': '12345'}, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 404)
 
     def test_create_registration_from_registration(self):
-        url = '/{}registrations/{}/'.format(API_BASE, self.registration._id)
-        res = self.app.post(url, auth=self.basic_auth, expect_errors=True)
+        url = '/{}registrations/'.format(API_BASE)
+        res = self.app.post(url, {'draft_id':  self.registration._id}, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 404)
 
     def test_create_public_registration_logged_out(self):
-        res = self.app.post(self.public_url, expect_errors=True)
+        res = self.app.post(self.public_url, self.public_payload, expect_errors=True)
         assert_equal(res.status_code, 403)
 
     def test_create_public_registration_logged_in(self):
-        res = self.app.post(self.public_url, auth=self.basic_auth, expect_errors=True)
+        res = self.app.post(self.public_url, self.public_payload, auth=self.basic_auth, expect_errors=True)
         token_url = res.json['data']['links']['confirm_register']
         assert_equal(res.status_code, 202)
 
-        res = self.app.post(token_url, auth=self.basic_auth, expect_errors = True)
+        res = self.app.post(token_url, self.public_payload, auth=self.basic_auth, expect_errors = True)
         assert_equal(res.status_code, 201)
         assert_equal(res.json['data']['title'], self.public_draft.title)
         assert_equal(res.json['data']['properties']['registration'], True)
 
     def test_invalid_token_create_registration(self):
-        res = self.app.post(self.private_url, auth=self.basic_auth, expect_errors=True)
+        res = self.app.post(self.private_url, self.private_payload, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 202)
-        token_url = self.private_url + "freeze/12345/"
+        token_url = self.private_url + "12345/"
 
-        res = self.app.post(token_url, auth=self.basic_auth, expect_errors = True)
+        res = self.app.post(token_url, self.private_payload, auth=self.basic_auth, expect_errors = True)
         assert_equal(res.status_code, 400)
         assert_equal(res.json["non_field_errors"][0], "Incorrect token.")
 
     def test_create_private_registration_logged_out(self):
-        res = self.app.post(self.private_url, expect_errors=True)
+        res = self.app.post(self.private_url, self.private_payload, expect_errors=True)
+        assert_equal(res.status_code, 403)
+
+    def test_create_public_registration_logged_out_with_token(self):
+        token = token_creator(self.public_draft._id, self.user._id)
+        url = '/{}registrations/{}/'.format(API_BASE, token)
+        res = self.app.post(url, self.public_payload, expect_errors=True)
+        assert_equal(res.status_code, 403)
+
+    def test_create_private_registration_logged_out_with_token(self):
+        token = token_creator(self.private_draft._id, self.user._id)
+        url = '/{}registrations/{}/'.format(API_BASE, token)
+        res = self.app.post(url, self.private_payload, expect_errors=True)
         assert_equal(res.status_code, 403)
 
     def test_create_private_registration_logged_in_contributor(self):
-        res = self.app.post(self.private_url, auth=self.basic_auth, expect_errors=True)
+        res = self.app.post(self.private_url, self.private_payload, auth=self.basic_auth, expect_errors=True)
         token_url = res.json['data']['links']['confirm_register']
         assert_equal(res.status_code, 202)
 
         assert_equal(self.private_draft.is_registration, False)
-        res = self.app.post(token_url, auth=self.basic_auth, expect_errors = True)
+        res = self.app.post(token_url, self.private_payload, auth=self.basic_auth, expect_errors = True)
         assert_equal(res.status_code, 201)
         assert_equal(res.json['data']['title'], self.private_draft.title)
         assert_equal(res.json['data']['properties']['registration'], True)
 
     def test_create_private_registration_logged_in_non_contributor(self):
-        res = self.app.post(self.private_url, auth=self.basic_auth_two, expect_errors=True)
+        res = self.app.post(self.private_url, self.private_payload, auth=self.basic_auth_two, expect_errors=True)
         assert_equal(res.status_code, 403)
 
     def test_create_private_registration_logged_in_read_only_contributor(self):
         self.private_draft.add_contributor(self.user_two, permissions = ['read'])
-        res = self.app.post(self.private_url, auth=self.basic_auth_two, expect_errors=True)
+        res = self.app.post(self.private_url, self.private_payload, auth=self.basic_auth_two, expect_errors=True)
         assert_equal(res.status_code, 403)
 
 
