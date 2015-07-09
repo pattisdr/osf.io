@@ -27,7 +27,9 @@ class DraftRegistrationMixin(object):
 
 
 class DraftRegistrationList(generics.ListAPIView, ODMFilterMixin):
-    """All draft registrations"""
+    """
+    All draft registrations
+    """
 
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,

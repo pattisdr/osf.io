@@ -213,7 +213,6 @@ class TestDraftRegistrationPartialUpdate(ApiTestCase):
             'registration_form': self.registration_form,
             'schema_version': 2
         }, auth=self.basic_auth, expect_errors=True)
-        print res
         assert_equal(res.status_code, 404)
 
     def test_partial_update_registration_schema_public_draft_registration_logged_in(self):

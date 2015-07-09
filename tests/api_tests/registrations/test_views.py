@@ -111,6 +111,20 @@ class TestRegistrationCreate(ApiTestCase):
         assert_equal(res.json['data']['title'], self.public_draft.title)
         assert_equal(res.json['data']['properties']['registration'], True)
 
+    def test_create_registration_from_deleted_draft(self):
+        self.public_draft.is_deleted = True
+        self.public_draft.save()
+        res = self.app.post(self.public_url, self.public_payload, auth=self.basic_auth, expect_errors=True)
+        assert_equal(res.status_code, 404)
+
+    def test_create_registration_with_token_from_deleted_draft(self):
+        self.public_draft.is_deleted = True
+        self.public_draft.save()
+        token = token_creator(self.private_draft._id, self.user._id)
+        url = '/{}registrations/{}/'.format(API_BASE, token)
+        res = self.app.post(self.public_url, self.public_payload, auth=self.basic_auth, expect_errors=True)
+        assert_equal(res.status_code, 404)
+
     def test_invalid_token_create_registration(self):
         res = self.app.post(self.private_url, self.private_payload, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 202)
