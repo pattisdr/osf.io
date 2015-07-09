@@ -1,4 +1,4 @@
-from flask import request
+from flask import request, redirect
 import httplib as http
 
 from modularodm import Q
@@ -11,11 +11,32 @@ from website.project.decorators import (
     must_be_valid_project,
     must_have_permission,
 )
-from website.project.model import MetaSchema, DraftRegistration
+from framework.auth import Auth
+from website.mails import Mail, send_mail
+from website.project.utils import serialize_node
+from website.project.model import MetaSchema, DraftRegistration, User
 from website.project.metadata.utils import serialize_meta_schema, serialize_draft_registration
 
 get_draft_or_fail = lambda pk: get_or_http_error(DraftRegistration, pk)
 get_schema_or_fail = lambda query: get_or_http_error(MetaSchema, query)
+ADMIN_USERNAMES = ['vndqr', 'szj4b']
+
+@must_be_valid_project
+def submit_for_review(node, uid, *args, **kwargs):
+    user = User.load(uid)
+    auth = Auth(user)
+
+    node.is_pending_review = True
+
+    REVIEW_EMAIL = Mail(tpl_prefix='prereg_review', subject='New Prereg Prize registration ready for review')
+    for uid in ADMIN_USERNAMES:
+        admin = User.load(uid)
+        send_mail(admin.email, REVIEW_EMAIL, user=user, src=node)
+
+    ret = serialize_node(node, auth)
+    ret['success'] = True
+    return ret
+
 
 @must_have_permission(ADMIN)
 @must_be_valid_project
@@ -61,6 +82,44 @@ def create_draft_registration(auth, node, *args, **kwargs):
     )
     draft.save()
     return serialize_draft_registration(draft, auth), http.CREATED
+
+@must_have_permission(ADMIN)
+@must_be_valid_project
+def new_draft_registration(auth, node, *args, **kwargs):
+
+    data = request.values
+
+    schema_name = data.get('schema_name')
+    if not schema_name:
+        raise HTTPError(http.BAD_REQUEST)
+
+    schema_version = data.get('schema_version', 1)
+    schema_data = data.get('schema_data', {})
+
+    meta_schema = get_schema_or_fail(
+        Q('name', 'eq', schema_name) &
+        Q('schema_version', 'eq', int(schema_version))
+    )
+    draft = DraftRegistration(
+        initiator=auth.user,
+        branched_from=node,
+        registration_schema=meta_schema,
+        registration_metadata=schema_data
+    )
+    draft.save()
+
+    return redirect(node.web_url_for('edit_draft_registration', draft_id=draft._id))
+
+@must_have_permission(ADMIN)
+@must_be_valid_project
+def edit_draft_registration(auth, node, draft_id, **kwargs):
+    draft = DraftRegistration.load(draft_id)
+    if not draft:
+        raise HTTPError(http.NOT_FOUND)
+
+    ret = serialize_node(node, auth, primary=True)
+    ret['draft'] = serialize_draft_registration(draft, auth)
+    return ret
 
 @must_have_permission(ADMIN)
 @must_be_valid_project
