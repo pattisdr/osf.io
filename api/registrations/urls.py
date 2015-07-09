@@ -9,5 +9,5 @@ urlpatterns = [
     # url(r'^(?P<draft_id>\w+)/$', views.RegistrationCreate.as_view(), name='registration-detail'),
     # url(r'^(?P<draft_id>\w+)/freeze/(?P<token>\w+)/$', views.RegistrationCreateWithToken.as_view(), name='registration-create'),
     # url(r'^freeze/(?P<draft_id>\w+)/$', views.RegistrationCreate.as_view(), name='registration-detail'),
-    url(r'^freeze/(?P<token>\w+)/$', views.RegistrationCreateWithToken.as_view(), name='registration-create'),
+    url(r'^(?P<token>\w+)/$', views.RegistrationCreateWithToken.as_view(), name='registration-create'),
 ]
