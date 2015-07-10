@@ -65,5 +65,3 @@ class RegistrationCreateWithToken(generics.CreateAPIView, NodeMixin):
     )
 
     serializer_class = RegistrationCreateSerializerWithToken
-
-

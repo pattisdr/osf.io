@@ -74,7 +74,6 @@ class TestRegistrationUpdate(ApiTestCase):
         self.registration_metadata = "{'Have you looked at the data?': 'No'}"
         self.schema_version = 1
 
-    # TODO, figure out how to not need eval!
     def test_update_node_that_is_not_registration_draft(self):
         url = '/{}draft_registrations/{}/'.format(API_BASE, self.private_project)
         res = self.app.put(url, {
@@ -108,13 +107,13 @@ class TestRegistrationUpdate(ApiTestCase):
             'schema_version': self.schema_version,
         }, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 200)
-        source = eval(res.json['data']['branched_from'])
+        source = res.json['data']['branched_from']
         metadata = res.json['data']['registration_metadata']
-        registration_schema =eval(res.json['data']['registration_schema'])
-        assert_equal(source['title'], self.public_project.title)
+        registration_schema = res.json['data']['registration_schema']
+        assert_equal(source, self.public_project._id)
         assert_equal(metadata, self.registration_metadata)
         assert_not_equal(registration_schema, None)
-        assert_equal(registration_schema['name'], self.registration_form)
+        assert_equal(registration_schema, self.registration_form)
 
         res = self.app.put(self.public_url, {
             'registration_form': self.registration_form,
@@ -138,13 +137,13 @@ class TestRegistrationUpdate(ApiTestCase):
             'schema_version': self.schema_version,
         }, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 200)
-        source = eval(res.json['data']['branched_from'])
+        source = res.json['data']['branched_from']
         metadata = res.json['data']['registration_metadata']
-        registration_schema = eval(res.json['data']['registration_schema'])
-        assert_equal(source['title'], self.private_project.title)
+        registration_schema = res.json['data']['registration_schema']
+        assert_equal(source, self.private_project._id)
         assert_equal(metadata, self.registration_metadata)
         assert_not_equal(registration_schema, None)
-        assert_equal(registration_schema['name'], self.registration_form)
+        assert_equal(registration_schema, self.registration_form)
 
     def test_update_private_registration_draft_logged_in_non_contributor(self):
         res = self.app.put(self.private_url, {
@@ -219,16 +218,16 @@ class TestDraftRegistrationPartialUpdate(ApiTestCase):
         res = self.app.patch(self.public_url, {
             'registration_form': self.registration_form,
         }, auth=self.basic_auth, expect_errors=True)
-        registration_schema = eval(res.json['data']['registration_schema'])
-        assert_equal(registration_schema['name'], self.registration_form)
+        registration_schema = res.json['data']['registration_schema']
+        assert_equal(registration_schema, self.registration_form)
         assert_equal(res.status_code, 200)
 
         res = self.app.patch(self.public_url, {
             'registration_form': self.registration_form,
             'schema_version': self.schema_version
         }, auth=self.basic_auth, expect_errors=True)
-        registration_schema = eval(res.json['data']['registration_schema'])
-        assert_equal(registration_schema['name'], self.registration_form)
+        registration_schema = res.json['data']['registration_schema']
+        assert_equal(registration_schema, self.registration_form)
         assert_equal(res.status_code, 200)
 
     def test_partial_update_public_draft_registration_logged_out(self):

@@ -20,4 +20,3 @@ class ContributorOrPublic(permissions.BasePermission):
             return obj.is_public or obj.can_view(auth)
         else:
             return obj.can_edit(auth)
-
