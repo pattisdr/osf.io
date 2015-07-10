@@ -37,6 +37,19 @@ def submit_for_review(node, uid, *args, **kwargs):
     ret['success'] = True
     return ret
 
+def get_all_draft_registrations(uid, *args, **kwargs):
+    user = User.load(uid)
+    auth = Auth(user)
+    count = request.args.get('count', 100)
+
+    all_drafts = DraftRegistration.find(
+        # Q('is_pending_review', 'eq', True) &
+        # Q('schema_name', 'eq' 'Prereg Prize')
+    )[:count]
+
+    return {
+        'drafts': [serialize_draft_registration(d, auth) for d in all_drafts]
+    }
 
 @must_have_permission(ADMIN)
 @must_be_valid_project
@@ -78,7 +91,8 @@ def create_draft_registration(auth, node, *args, **kwargs):
         initiator=auth.user,
         branched_from=node,
         registration_schema=meta_schema,
-        registration_metadata=schema_data
+        registration_metadata=schema_data,
+        schema_name = schema_name
     )
     draft.save()
     return serialize_draft_registration(draft, auth), http.CREATED

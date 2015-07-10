@@ -169,6 +169,8 @@ def make_url_map(app):
     process_rules(app, [
 
         Rule('/dashboard/', 'get', website_views.dashboard, OsfWebRenderer('dashboard.mako')),
+        #TODO
+        Rule('/preregAdmin/', 'get', website_views.preregAdmin, OsfWebRenderer('preregAdmin.mako')),
         Rule('/reproducibility/', 'get',
              website_views.reproducibility, OsfWebRenderer('', render_mako_string)),
 
@@ -1065,6 +1067,9 @@ def make_url_map(app):
         ], 'get', project_views.node.get_registrations, json_renderer),
 
         # Draft Registrations
+         Rule([
+            '/drafts/<uid>/',
+        ], 'get', project_views.drafts.get_all_draft_registrations, json_renderer),
         Rule([
             '/project/<pid>/draft/submit/<uid>/',
         ], 'post', project_views.drafts.submit_for_review, json_renderer),

@@ -3072,6 +3072,11 @@ class DraftRegistration(AddonModelMixin, StoredObject):
 
     registration_metadata = fields.DictionaryField({})
     registration_schema = fields.ForeignField('metaschema')
+    registered_node = fields.ForeignField('node')
+
+    is_pending_review = fields.BooleanField(default=False)
+
+    schema_name = fields.StringField()
 
     storage = fields.ForeignField('osfstoragenodesettings')
 
@@ -3081,3 +3086,42 @@ class DraftRegistration(AddonModelMixin, StoredObject):
             return self.__dict__[attr]
         except KeyError:
             return getattr(self.branched_from, attr, None)
+
+    def get_comments(self):
+        """ Returns a list of all comments made on a draft in the format of :
+        [{
+            'page1': [{
+                user: 'user',
+                last_modified: 'Thu, 09 Jul 2015 21:45:56 GMT',
+                value: 'Comment text'
+            }],
+            'page2': [{
+                user: 'user',
+                last_modified: 'Thu, 09 Jul 2015 21:45:56 GMT',
+                value: 'Comment text'
+            },
+            {
+                user: 'user',
+                last_modified: 'Thu, 09 Jul 2015 21:45:56 GMT',
+                value: 'Comment text'
+            }]
+        }]
+        """
+        pages = self.registration_schema['schema']['pages']
+        all_comments = list()
+
+        # there has to be a more pythonic way to do this
+        page_num = 1
+        for page in pages:
+            comment_obj = dict()
+            comments = page['comments']
+
+            comment_obj['page{}'.format(page_num)] = list()
+
+            if comments:
+                for comment in comments:
+                    all_comments.append(comment)
+
+            page_num += 1
+
+        return all_comments
