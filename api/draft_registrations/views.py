@@ -7,7 +7,7 @@ from modularodm import Q
 from api.base.filters import ODMFilterMixin
 from website.models import DraftRegistration
 from api.base.utils import get_object_or_404
-from api.draft_registrations.permissions import ContributorOrPublic
+from api.nodes.permissions import ContributorOrPublic
 from api.draft_registrations.serializers import DraftRegSerializer
 
 
