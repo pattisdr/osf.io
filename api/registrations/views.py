@@ -48,8 +48,8 @@ class RegistrationList(NodeList):
     def create(self, request, *args):
         user = request.user
         draft = get_object_or_404(DraftRegistration, request.data['draft_id'])
-        if draft.is_deleted:
-            raise exceptions.NotFound(_('This resource has been deleted'))
+        # if draft.is_deleted:
+        #     raise exceptions.NotFound(_('This resource has been deleted'))
         self.check_object_permissions(self.request, draft)
         token = token_creator(draft._id, user._id)
         url = absolute_reverse('registrations:registration-create', kwargs={'token': token})

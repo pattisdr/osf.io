@@ -11,8 +11,6 @@ from website.project.model import DraftRegistration, Node
 from api.draft_registrations.views import DraftRegistrationMixin
 
 
-
-
 class RegistrationCreateSerializer(JSONAPISerializer):
     draft_id = ser.CharField(source='_id')
     warning_message = ser.CharField(read_only=True)
