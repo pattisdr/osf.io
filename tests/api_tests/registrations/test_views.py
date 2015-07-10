@@ -7,7 +7,7 @@ from api.base.utils import token_creator
 
 from tests.base import ApiTestCase, fake
 from website.project.model import ensure_schemas
-from tests.factories import UserFactory, ProjectFactory, RegistrationFactory, NodeFactory, DraftRegistrationFactory
+from tests.factories import UserFactory, ProjectFactory, RegistrationFactory, DraftRegistrationFactory
 
 class TestRegistrationList(ApiTestCase):
     def setUp(self):

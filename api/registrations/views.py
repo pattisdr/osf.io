@@ -11,7 +11,7 @@ from api.nodes.views import NodeList, NodeMixin
 from api.nodes.serializers import NodeSerializer
 from api.base.utils import token_creator, absolute_reverse
 from api.draft_registrations.views import DraftRegistration
-from api.nodes.permissions import ContributorOrPublic, ReadOnlyIfRegistration
+from api.draft_registrations.permissions import ContributorOrPublic
 from api.registrations.serializers import RegistrationCreateSerializer, RegistrationCreateSerializerWithToken
 
 
@@ -20,7 +20,6 @@ class RegistrationList(NodeList):
 
     permission_classes = (
         ContributorOrPublic,
-        ReadOnlyIfRegistration
     )
 
     def get_serializer_class(self):

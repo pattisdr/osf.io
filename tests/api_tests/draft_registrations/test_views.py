@@ -137,7 +137,6 @@ class TestRegistrationUpdate(ApiTestCase):
             'registration_metadata': self.registration_metadata,
             'schema_version': self.schema_version,
         }, auth=self.basic_auth, expect_errors=True)
-        print res
         assert_equal(res.status_code, 200)
         source = eval(res.json['data']['branched_from'])
         metadata = res.json['data']['registration_metadata']
@@ -208,6 +207,7 @@ class TestDraftRegistrationPartialUpdate(ApiTestCase):
         }, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 404)
 
+    # TODO Handle schema version does not exist
     def test_partial_update_schema_version_does_not_exist(self):
         res = self.app.patch(self.public_url, {
             'registration_form': self.registration_form,

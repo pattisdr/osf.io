@@ -1,5 +1,4 @@
 from framework.auth.core import Auth
-
 from rest_framework.exceptions import NotAuthenticated
 from django.utils.translation import ugettext_lazy as _
 from rest_framework import generics, permissions as drf_permissions
@@ -8,7 +7,7 @@ from modularodm import Q
 from api.base.filters import ODMFilterMixin
 from website.models import DraftRegistration
 from api.base.utils import get_object_or_404
-from api.nodes.permissions import ContributorOrPublic
+from api.draft_registrations.permissions import ContributorOrPublic
 from api.draft_registrations.serializers import DraftRegSerializer
 
 
@@ -41,7 +40,7 @@ class DraftRegistrationList(generics.ListAPIView, ODMFilterMixin):
     def get_queryset(self):
         user = self.request.user
         if user.is_anonymous():
-            raise NotAuthenticated(_("Must be logged in to view draft registrations"))
+            raise NotAuthenticated(_('Must be logged in to view draft registrations'))
         return DraftRegistration.find(Q('initiator', 'eq', user))
 
 
