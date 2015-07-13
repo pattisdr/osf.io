@@ -45,10 +45,10 @@ class TestDraftRegistrationList(ApiTestCase):
         assert_equal(res.status_code, 200)
 
 
-class TestRegistrationUpdate(ApiTestCase):
+class TestDraftRegistrationUpdate(ApiTestCase):
 
     def setUp(self):
-        super(TestRegistrationUpdate, self).setUp()
+        super(TestDraftRegistrationUpdate, self).setUp()
         ensure_schemas()
         self.user = UserFactory.build()
         password = fake.password()

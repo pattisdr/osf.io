@@ -54,14 +54,6 @@ class DraftRegistrationDetail(generics.RetrieveUpdateDestroyAPIView, DraftRegist
 
     serializer_class = DraftRegSerializer
 
-    # Restores original get_serializer_class
-    def get_serializer_context(self):
-        return {
-            'request': self.request,
-            'format': self.format_kwarg,
-            'view': self
-        }
-
     # overrides RetrieveUpdateDestroyAPIView
     def get_object(self):
         draft = self.get_draft()
