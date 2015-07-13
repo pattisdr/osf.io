@@ -21,7 +21,7 @@ class RegistrationList(NodeList):
     permission_classes = (
         ContributorOrPublic,
     )
-
+    # overrides ODMFilterMixin
     def get_serializer_class(self):
         if self.request.method == 'POST':
             serializer_class = RegistrationCreateSerializer

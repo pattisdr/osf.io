@@ -137,6 +137,14 @@ class NodeSerializer(JSONAPISerializer):
 class DraftRegistrationSerializer(DraftRegSerializer):
 
     def create(self, validated_data):
+        """
+        Create draft registration from node.
+
+        """
+        """
+        :param validated_data:
+        :return:
+        """
         request = self.context['request']
         schema_name = validated_data['schema_name']
         if not schema_name:
