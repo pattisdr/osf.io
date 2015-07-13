@@ -138,7 +138,7 @@ class DraftRegistrationSerializer(DraftRegSerializer):
 
     def create(self, validated_data):
         request = self.context['request']
-        schema_name = validated_data['registration_form']
+        schema_name = validated_data['schema_name']
         if not schema_name:
             raise HTTPError(http.BAD_REQUEST)
 

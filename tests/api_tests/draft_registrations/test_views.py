@@ -70,14 +70,14 @@ class TestDraftRegistrationUpdate(ApiTestCase):
         self.public_draft = DraftRegistrationFactory(initiator=self.user, branched_from=self.public_project)
         self.public_url = '/{}draft_registrations/{}/'.format(API_BASE, self.public_draft._id)
 
-        self.registration_form = 'OSF-Standard Pre-Data Collection Registration'
+        self.schema_name = 'OSF-Standard Pre-Data Collection Registration'
         self.registration_metadata = "{'Have you looked at the data?': 'No'}"
         self.schema_version = 1
 
     def test_update_node_that_is_not_registration_draft(self):
         url = '/{}draft_registrations/{}/'.format(API_BASE, self.private_project)
         res = self.app.put(url, {
-            'registration_form': self.registration_form,
+            'schema_name': self.schema_name,
             'registration_metadata': self.registration_metadata,
             'schema_version': self.schema_version,
         }, auth=self.basic_auth, expect_errors=True)
@@ -86,7 +86,7 @@ class TestDraftRegistrationUpdate(ApiTestCase):
     def test_update_node_that_does_not_exist(self):
         url = '/{}draft_registrations/{}/'.format(API_BASE, '12345')
         res = self.app.put(url, {
-            'registration_form': self.registration_form,
+            'schema_name': self.schema_name,
             'registration_metadata': self.registration_metadata,
             'schema_version': self.schema_version,
         }, auth=self.basic_auth, expect_errors=True)
@@ -94,7 +94,7 @@ class TestDraftRegistrationUpdate(ApiTestCase):
 
     def test_update_public_registration_draft_logged_out(self):
         res = self.app.put(self.public_url, {
-            'registration_form': self.registration_form,
+            'schema_name': self.schema_name,
             'registration_metadata': self.registration_metadata,
             'schema_version': self.schema_version,
         }, expect_errors=True)
@@ -102,7 +102,7 @@ class TestDraftRegistrationUpdate(ApiTestCase):
 
     def test_update_public_registration_draft_logged_in(self):
         res = self.app.put(self.public_url, {
-            'registration_form': self.registration_form,
+            'schema_name': self.schema_name,
             'registration_metadata': self.registration_metadata,
             'schema_version': self.schema_version,
         }, auth=self.basic_auth, expect_errors=True)
@@ -113,10 +113,10 @@ class TestDraftRegistrationUpdate(ApiTestCase):
         assert_equal(source, self.public_project._id)
         assert_equal(metadata, self.registration_metadata)
         assert_not_equal(registration_schema, None)
-        assert_equal(registration_schema, self.registration_form)
+        assert_equal(registration_schema, self.schema_name)
 
         res = self.app.put(self.public_url, {
-            'registration_form': self.registration_form,
+            'schema_name': self.schema_name,
             'registration_metadata': self.registration_metadata,
             'schema_version': self.schema_version,
         }, auth=self.basic_auth_two, expect_errors=True)
@@ -124,7 +124,7 @@ class TestDraftRegistrationUpdate(ApiTestCase):
 
     def test_update_private_registration_draft_logged_out(self):
         res = self.app.put(self.private_url, {
-            'registration_form': self.registration_form,
+            'schema_name': self.schema_name,
             'registration_metadata': self.registration_metadata,
             'schema_version': self.schema_version,
         }, expect_errors=True)
@@ -132,7 +132,7 @@ class TestDraftRegistrationUpdate(ApiTestCase):
 
     def test_update_private_registration_draft_logged_in_contributor(self):
         res = self.app.put(self.private_url, {
-            'registration_form': self.registration_form,
+            'schema_name': self.schema_name,
             'registration_metadata': self.registration_metadata,
             'schema_version': self.schema_version,
         }, auth=self.basic_auth, expect_errors=True)
@@ -143,11 +143,11 @@ class TestDraftRegistrationUpdate(ApiTestCase):
         assert_equal(source, self.private_project._id)
         assert_equal(metadata, self.registration_metadata)
         assert_not_equal(registration_schema, None)
-        assert_equal(registration_schema, self.registration_form)
+        assert_equal(registration_schema, self.schema_name)
 
     def test_update_private_registration_draft_logged_in_non_contributor(self):
         res = self.app.put(self.private_url, {
-            'registration_form': self.registration_form,
+            'schema_name': self.schema_name,
             'registration_metadata': self.registration_metadata,
             'schema_version': self.schema_version,
         }, auth=self.basic_auth_two, expect_errors=True)
@@ -156,7 +156,7 @@ class TestDraftRegistrationUpdate(ApiTestCase):
     def test_partial_update_private_registration_draft_logged_in_read_only_contributor(self):
         self.private_draft.add_contributor(self.user_two, permissions=['read'])
         res = self.app.put(self.private_url, {
-            'registration_form': self.registration_form,
+            'schema_name': self.schema_name,
             'registration_metadata': self.registration_metadata,
             'schema_version': self.schema_version,
         }, auth=self.basic_auth_two, expect_errors=True)
@@ -188,51 +188,51 @@ class TestDraftRegistrationPartialUpdate(ApiTestCase):
         self.public_draft = DraftRegistrationFactory(initiator=self.user, branched_from=self.public_project)
         self.public_url = '/{}draft_registrations/{}/'.format(API_BASE, self.public_draft._id)
 
-        self.registration_form = 'OSF-Standard Pre-Data Collection Registration'
+        self.schema_name = 'OSF-Standard Pre-Data Collection Registration'
         self.registration_metadata = "{'Have you looked at the data?': 'No'}"
         self.schema_version = 1
 
     def test_partial_update_node_that_is_not_registration_draft(self):
         url = '/{}draft_registrations/{}/'.format(API_BASE, self.private_project)
         res = self.app.patch(url, {
-            'self.registration_form': self.registration_form,
+            'self.schema_name': self.schema_name,
         }, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 404)
 
     def test_partial_update_node_that_does_not_exist(self):
         url = '/{}draft_registrations/{}/'.format(API_BASE, '12345')
         res = self.app.patch(url, {
-            'self.registration_form': self.registration_form,
+            'self.schema_name': self.schema_name,
         }, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 404)
 
     # TODO Handle schema version does not exist
     def test_partial_update_schema_version_does_not_exist(self):
         res = self.app.patch(self.public_url, {
-            'registration_form': self.registration_form,
+            'schema_name': self.schema_name,
             'schema_version': 2
         }, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 404)
 
     def test_partial_update_registration_schema_public_draft_registration_logged_in(self):
         res = self.app.patch(self.public_url, {
-            'registration_form': self.registration_form,
+            'schema_name': self.schema_name,
         }, auth=self.basic_auth, expect_errors=True)
         registration_schema = res.json['data']['registration_schema']
-        assert_equal(registration_schema, self.registration_form)
+        assert_equal(registration_schema, self.schema_name)
         assert_equal(res.status_code, 200)
 
         res = self.app.patch(self.public_url, {
-            'registration_form': self.registration_form,
+            'schema_name': self.schema_name,
             'schema_version': self.schema_version
         }, auth=self.basic_auth, expect_errors=True)
         registration_schema = res.json['data']['registration_schema']
-        assert_equal(registration_schema, self.registration_form)
+        assert_equal(registration_schema, self.schema_name)
         assert_equal(res.status_code, 200)
 
     def test_partial_update_public_draft_registration_logged_out(self):
         res = self.app.patch(self.public_url, {
-            'registration_form': self.registration_form,
+            'schema_name': self.schema_name,
         }, expect_errors=True)
         assert_equal(res.status_code, 403)
 

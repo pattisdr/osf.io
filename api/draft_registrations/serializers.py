@@ -13,7 +13,7 @@ class DraftRegSerializer(JSONAPISerializer):
     branched_from = ser.CharField(read_only=True, source = 'branched_from._id', help_text='Source node')
     initiator = ser.CharField(read_only=True, source = 'initiator._id')
     registration_schema = ser.CharField(read_only=True, source = 'registration_schema.schema.title')
-    registration_form = ser.ChoiceField(choices=schema_choices, required=True, write_only=True, help_text='Please select a registration form to initiate registration.')
+    schema_name = ser.ChoiceField(choices=schema_choices, required=True, write_only=True, help_text='Please select a registration form to initiate registration.')
     registration_metadata = ser.CharField(required=False, help_text='Responses to supplemental registration questions')
     schema_version = ser.IntegerField(help_text='Registration schema version', write_only=True, required=False)
     datetime_initiated = ser.DateTimeField(read_only=True)
@@ -27,8 +27,8 @@ class DraftRegSerializer(JSONAPISerializer):
         the request to be in the serializer context.
         """
         schema_version = int(validated_data.get('schema_version', 1))
-        if "registration_form" in validated_data.keys():
-            schema_name = validated_data['registration_form']
+        if "schema_name" in validated_data.keys():
+            schema_name = validated_data['schema_name']
             meta_schema = drafts.get_schema_or_fail(
                 Q('name', 'eq', schema_name) &
                 Q('schema_version', 'eq', schema_version)

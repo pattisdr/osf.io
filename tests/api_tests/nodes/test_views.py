@@ -947,7 +947,7 @@ class TestCreateDraftRegistration(ApiTestCase):
 
         self.private_project = ProjectFactory(is_public=False, creator=self.user)
         self.private_url = '/{}nodes/{}/draft_registrations/'.format(API_BASE, self.private_project._id)
-        self.payload = {'registration_form': 'Open-Ended Registration', 'schema_version': 1}
+        self.payload = {'schema_name': 'Open-Ended Registration', 'schema_version': 1}
 
         self.public_project = ProjectFactory(is_public=True, creator=self.user)
         self.public_registration = RegistrationFactory(source=self.public_project)
@@ -974,7 +974,7 @@ class TestCreateDraftRegistration(ApiTestCase):
         source = res.json['data']['branched_from']
         schema = res.json['data']['registration_schema']
         assert_equal(source, self.public_project._id)
-        assert_equal(schema, self.payload['registration_form'])
+        assert_equal(schema, self.payload['schema_name'])
         assert_not_equal(res.json['data']['registration_schema'], None)
 
     def test_create_private_registration_draft_logged_out(self):
@@ -987,7 +987,7 @@ class TestCreateDraftRegistration(ApiTestCase):
         source = res.json['data']['branched_from']
         schema = res.json['data']['registration_schema']
         assert_equal(source, self.private_project._id)
-        assert_equal(schema, self.payload['registration_form'])
+        assert_equal(schema, self.payload['schema_name'])
         assert_not_equal(res.json['data']['registration_schema'], None)
 
     def test_create_private_registration_draft_logged_in_non_contributor(self):
