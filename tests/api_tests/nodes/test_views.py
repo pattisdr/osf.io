@@ -999,6 +999,12 @@ class TestCreateDraftRegistration(ApiTestCase):
         res = self.app.post(self.private_url, self.payload, auth=self.basic_auth_two, expect_errors=True)
         assert_equal(res.status_code, 403)
 
+    # TODO Handle schema version does not exist
+    def test_create_draft_schema_version_does_not_exist(self):
+        payload = {'schema_name': 'Open-Ended Registration', 'schema_version': 5}
+        res = self.app.post(self.public_url, payload, auth=self.basic_auth, expect_errors=True)
+        assert_equal(res.status_code, 404)
+
 
 class TestNodeChildrenList(ApiTestCase):
     def setUp(self):

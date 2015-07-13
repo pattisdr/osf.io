@@ -7,6 +7,7 @@ import pymongo
 from modularodm.query import QueryBase
 from modularodm.exceptions import ValidationValueError, NoResultsFound
 
+from rest_framework.exceptions import ValidationError
 from framework.exceptions import HTTPError
 
 # MongoDB forbids field names that begin with "$" or contain ".". These
@@ -69,10 +70,12 @@ def get_or_http_error(Model, pk_or_query):
     if isinstance(pk_or_query, QueryBase):
         try:
             instance = Model.find_one(pk_or_query)
+        # TODO: shouldn't use rest-framework exceptions.  Why is HTTPError not working here?
         except NoResultsFound:
-            raise HTTPError(http.NOT_FOUND, data=dict(
-                message_long="No {} resource matching that query could be found".format()
-            ))
+            # raise HTTPError(http.NOT_FOUND, data=dict(
+            #     message_long="No {} resource matching that query could be found".format(name)
+            # ))
+            raise ValidationError("No resource matching that query could be found.")
         return instance
     else:
         instance = Model.load(pk_or_query)
