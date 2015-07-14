@@ -7,8 +7,8 @@ from rest_framework import serializers as ser
 
 from modularodm import Q
 from website.project.views import drafts
+from website.project.metadata.schemas import OSF_META_SCHEMAS
 from website.models import Node, DraftRegistration
-from api.draft_registrations.serializers import DraftRegSerializer
 from api.base.serializers import JSONAPISerializer, LinksField, Link, WaterbutlerLink
 
 
@@ -134,16 +134,24 @@ class NodeSerializer(JSONAPISerializer):
         return instance
 
 
-class DraftRegistrationSerializer(DraftRegSerializer):
+class DraftRegistrationSerializer(JSONAPISerializer):
+    schema_choices = [schema['name'] for schema in OSF_META_SCHEMAS]
+
+    id = ser.CharField(read_only=True, source='_id')
+    branched_from = ser.CharField(read_only=True, source = 'branched_from._id', help_text='Source node')
+    initiator = ser.CharField(read_only=True, source = 'initiator._id')
+    registration_schema = ser.CharField(read_only=True, source = 'registration_schema.schema.title')
+    schema_name = ser.ChoiceField(choices=schema_choices, required=True, write_only=True, help_text='Please select a registration form to initiate registration.')
+    registration_metadata = ser.CharField(required=False, help_text='Responses to supplemental registration questions')
+    schema_version = ser.IntegerField(help_text='Registration schema version', write_only=True, required=False)
+    datetime_initiated = ser.DateTimeField(read_only=True)
+    datetime_updated = ser.DateTimeField(read_only=True)
+
 
     def create(self, validated_data):
         """
         Create draft registration from node.
 
-        """
-        """
-        :param validated_data:
-        :return:
         """
         request = self.context['request']
         schema_name = validated_data['schema_name']
