@@ -60,8 +60,6 @@ class RegistrationCreateSerializerWithToken(NodeSerializer):
         draft = get_object_or_404(DraftRegistration, data['draft_id'])
         if draft.is_deleted:
             raise NotFound(_('This resource has been deleted'))
-        if draft.initiator != user:
-            raise PermissionDenied
         given_token = view.kwargs['token']
         correct_token = token_creator(draft._id, user._id)
         if correct_token != given_token:

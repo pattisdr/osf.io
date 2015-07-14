@@ -60,11 +60,13 @@ class DraftRegistrationList(generics.ListCreateAPIView, ODMFilterMixin):
         draft = get_object_or_404(DraftRegistration, request.data['draft_id'])
         if draft.is_deleted:
             raise exceptions.NotFound(_('This resource has been deleted'))
-        self.check_object_permissions(self.request, draft)
-        token = token_creator(draft._id, user._id)
-        url = absolute_reverse('draft_registrations:registration-create', kwargs={'token': token})
-        registration_warning = REGISTER_WARNING.format((draft.title))
-        return Response({'data': {'draft_id': draft._id, 'warning_message': registration_warning, 'links': {'confirm_register': url}}}, status=status.HTTP_202_ACCEPTED)
+        if user._id in draft.permissions.keys():
+            if 'write' in draft.permissions[user._id]:
+                token = token_creator(draft._id, user._id)
+                url = absolute_reverse('draft_registrations:registration-create', kwargs={'token': token})
+                registration_warning = REGISTER_WARNING.format((draft.title))
+                return Response({'data': {'draft_id': draft._id, 'warning_message': registration_warning, 'links': {'confirm_register': url}}}, status=status.HTTP_202_ACCEPTED)
+        raise exceptions.PermissionDenied
 
 
 class DraftRegistrationDetail(generics.RetrieveUpdateDestroyAPIView, DraftRegistrationMixin):
@@ -89,6 +91,7 @@ class DraftRegistrationDetail(generics.RetrieveUpdateDestroyAPIView, DraftRegist
         draft = self.get_object()
         draft.remove_node(auth=auth)
         draft.save()
+
 
 class RegistrationCreateWithToken(generics.CreateAPIView, NodeMixin):
     """
