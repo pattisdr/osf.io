@@ -1,10 +1,9 @@
 import mock
 from nose.tools import *  # flake8: noqa
 
-from api.base.settings.defaults import API_BASE
-
 from tests.base import ApiTestCase, fake
 from api.base.utils import token_creator
+from api.base.settings.defaults import API_BASE
 from website.project.model import ensure_schemas
 from tests.factories import UserFactory, ProjectFactory, RegistrationFactory, DraftRegistrationFactory
 

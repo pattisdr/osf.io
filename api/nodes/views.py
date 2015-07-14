@@ -9,8 +9,8 @@ from api.users.serializers import ContributorSerializer
 from website.models import Node, Pointer, DraftRegistration
 from api.base.filters import ODMFilterMixin, ListFilterMixin
 from api.base.utils import get_object_or_404, waterbutler_url_for
-from .serializers import NodeSerializer, NodePointersSerializer, NodeFilesSerializer, DraftRegistrationSerializer
 from .permissions import ContributorOrPublic, ReadOnlyIfRegistration, ContributorOrPublicForPointers
+from .serializers import NodeSerializer, NodePointersSerializer, NodeFilesSerializer, DraftRegistrationSerializer
 
 
 class NodeMixin(object):
