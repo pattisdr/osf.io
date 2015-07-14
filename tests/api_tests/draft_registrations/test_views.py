@@ -423,7 +423,7 @@ class TestRegistrationCreate(ApiTestCase):
     def test_invalid_token_create_registration(self):
         res = self.app.post(self.private_url, self.private_payload, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 202)
-        token_url = self.private_url + "12345/"
+        token_url = self.private_url + "freeze/12345/"
 
         res = self.app.post(token_url, self.private_payload, auth=self.basic_auth, expect_errors = True)
         assert_equal(res.status_code, 400)
@@ -435,13 +435,13 @@ class TestRegistrationCreate(ApiTestCase):
 
     def test_create_public_registration_logged_out_with_token(self):
         token = token_creator(self.public_draft._id, self.user._id)
-        url = '/{}draft_registrations/{}/'.format(API_BASE, token)
+        url = '/{}draft_registrations/freeze/{}/'.format(API_BASE, token)
         res = self.app.post(url, self.public_payload, expect_errors=True)
         assert_equal(res.status_code, 403)
 
     def test_create_private_registration_logged_out_with_token(self):
         token = token_creator(self.private_draft._id, self.user._id)
-        url = '/{}draft_registrations/{}/'.format(API_BASE, token)
+        url = '/{}draft_registrations/freeze/{}/'.format(API_BASE, token)
         res = self.app.post(url, self.private_payload, expect_errors=True)
         assert_equal(res.status_code, 403)
 

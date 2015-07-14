@@ -7,7 +7,7 @@ import pymongo
 from modularodm.query import QueryBase
 from modularodm.exceptions import ValidationValueError, NoResultsFound
 
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import NotFound
 from framework.exceptions import HTTPError
 
 # MongoDB forbids field names that begin with "$" or contain ".". These
@@ -75,7 +75,7 @@ def get_or_http_error(Model, pk_or_query):
             # raise HTTPError(http.NOT_FOUND, data=dict(
             #     message_long="No {} resource matching that query could be found".format(name)
             # ))
-            raise ValidationError("No resource matching that query could be found.")
+            raise NotFound("No resource matching that query could be found.")
         return instance
     else:
         instance = Model.load(pk_or_query)

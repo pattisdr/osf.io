@@ -1,16 +1,13 @@
-from rest_framework import serializers as ser
-
-from website.project.model import Q
-from website.project.views import drafts
-from api.base.serializers import JSONAPISerializer
-from website.project.metadata.schemas import OSF_META_SCHEMAS
-
 from framework.auth.core import Auth
+from rest_framework import serializers as ser
 from django.utils.translation import ugettext_lazy as _
 from rest_framework.exceptions import PermissionDenied, NotFound
 
+from website.project.model import Q
 from api.base.utils import token_creator
+from website.project.views import drafts
 from api.base.utils import get_object_or_404
+from api.base.serializers import JSONAPISerializer
 from website.project.model import DraftRegistration, Node
 from api.nodes.serializers import NodeSerializer, DraftRegistrationSerializer
 
@@ -37,6 +34,7 @@ class DraftRegSerializer(DraftRegistrationSerializer):
     class Meta:
         type_ = 'registrations'
 
+
 class RegistrationCreateSerializer(JSONAPISerializer):
     draft_id = ser.CharField(source='_id')
     warning_message = ser.CharField(read_only=True)
@@ -62,6 +60,8 @@ class RegistrationCreateSerializerWithToken(NodeSerializer):
         draft = get_object_or_404(DraftRegistration, data['draft_id'])
         if draft.is_deleted:
             raise NotFound(_('This resource has been deleted'))
+        if draft.initiator != user:
+            raise PermissionDenied
         given_token = view.kwargs['token']
         correct_token = token_creator(draft._id, user._id)
         if correct_token != given_token:
