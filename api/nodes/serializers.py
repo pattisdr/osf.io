@@ -147,6 +147,10 @@ class DraftRegistrationSerializer(JSONAPISerializer):
     datetime_initiated = ser.DateTimeField(read_only=True)
     datetime_updated = ser.DateTimeField(read_only=True)
 
+    links = LinksField({
+        'html': 'get_absolute_url',
+    })
+
     def create(self, validated_data):
         """
         Create draft registration from node.
@@ -173,6 +177,9 @@ class DraftRegistrationSerializer(JSONAPISerializer):
         )
         draft.save()
         return draft
+
+    def get_absolute_url(self, obj):
+        return obj.absolute_url
 
     class Meta:
         type_ = "draft_registrations"
