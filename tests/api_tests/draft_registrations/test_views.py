@@ -353,6 +353,7 @@ class TestDraftRegistrationPartialUpdate(ApiTestCase):
         res = self.app.patch(self.public_url, {
             'schema_name': self.schema_name,
         }, expect_errors=True)
+        print res
         assert_equal(res.status_code, 403)
 
     def test_partial_update_public_draft_registration_logged_in(self):
