@@ -3060,7 +3060,7 @@ class DraftRegistration(AddonModelMixin, StoredObject):
     def __init__(self, *args, **kwargs):
         super(DraftRegistration, self).__init__(*args, **kwargs)
 
-        meta_schema = self.registration_schema or kwargs.get('registration_schema')
+        meta_schema = self.registration_schema # or kwargs.get('registration_schema')
         if meta_schema:
             schema = meta_schema.schema
             config = schema.get('config', {})
