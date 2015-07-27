@@ -448,6 +448,7 @@ class TestDeleteDraftRegistration(ApiTestCase):
 
     def test_delete_private_registration_draft_logged_out(self):
         res = self.app.delete(self.private_url, expect_errors=True)
+        print res
         assert_equal(res.status_code, 403)
 
     def test_delete_private_registration_draft_logged_in_contributor(self):
