@@ -28,7 +28,6 @@ from website.util import paths
 from website.util import sanitize
 from website import landing_pages as landing_page_views
 from website import views as website_views
-from website.admin import views as admin_views
 from website.citations import views as citation_views
 from website.search import views as search_views
 from website.oauth import views as oauth_views
@@ -69,15 +68,21 @@ def get_globals():
         'api_v2_base': util.api_v2_url(''),  # Base url used by JS api helper
         'sanitize': sanitize,
         'js_str': lambda x: x.replace("'", r"\'").replace('"', r'\"'),
+        'sjson': lambda s: sanitize.safe_json(s),
         'webpack_asset': paths.webpack_asset,
         'waterbutler_url': settings.WATERBUTLER_URL,
         'login_url': cas.get_login_url(request.url, auto=True),
         'access_token': session.data.get('auth_user_access_token') or '',
+        'auth_url': cas.get_login_url(request.url),
+        'profile_url': cas.get_profile_url(),
     }
 
 
 class OsfWebRenderer(WebRenderer):
+    """Render a Mako template with OSF context vars.
 
+    :param trust: Optional. If ``False``, markup-save escaping will be enabled
+    """
     def __init__(self, *args, **kwargs):
         kwargs['data'] = get_globals
         super(OsfWebRenderer, self).__init__(*args, **kwargs)
@@ -169,8 +174,6 @@ def make_url_map(app):
     process_rules(app, [
 
         Rule('/dashboard/', 'get', website_views.dashboard, OsfWebRenderer('dashboard.mako')),
-        #TODO
-        Rule('/preregAdmin/', 'get', website_views.preregAdmin, OsfWebRenderer('preregAdmin.mako')),
         Rule('/reproducibility/', 'get',
              website_views.reproducibility, OsfWebRenderer('', render_mako_string)),
 
@@ -218,15 +221,6 @@ def make_url_map(app):
         ),
 
         Rule('/news/', 'get', {}, OsfWebRenderer('public/pages/news.mako')),
-    ])
-
-    # Admin routes
-
-    process_rules(app, [
-        Rule('/admin/prereg/',
-             'get',
-             admin_views.prereg,
-             OsfWebRenderer('admin/prereg.mako')),
     ])
 
     # Site-wide API routes
@@ -490,8 +484,6 @@ def make_url_map(app):
         Rule('/profile/', 'get', profile_views.profile_view, OsfWebRenderer('profile.mako')),
         Rule('/profile/<uid>/', 'get', profile_views.profile_view_id,
              OsfWebRenderer('profile.mako')),
-        Rule('/settings/key_history/<kid>/', 'get', profile_views.user_key_history,
-             OsfWebRenderer('profile/key_history.mako')),
         Rule(["/user/merge/"], 'get', auth_views.merge_user_get,
              OsfWebRenderer("merge_accounts.mako")),
         Rule(["/user/merge/"], 'post', auth_views.merge_user_post,
@@ -540,12 +532,13 @@ def make_url_map(app):
             OsfWebRenderer('profile/notifications.mako'),
         ),
 
-        Rule(
-            '/@<uid>/',
-            'get',
-            profile_views.redirect_to_twitter,
-            OsfWebRenderer('error.mako', render_mako_string)
-        ),
+        # TODO: Uncomment once outstanding issues with this feature are addressed
+        # Rule(
+        #     '/@<twitter_handle>/',
+        #     'get',
+        #     profile_views.redirect_to_twitter,
+        #     OsfWebRenderer('error.mako', render_mako_string)
+        # ),
 
     ])
 
@@ -564,11 +557,6 @@ def make_url_map(app):
              profile_views.get_public_projects, json_renderer),
         Rule('/profile/<uid>/public_components/', 'get',
              profile_views.get_public_components, json_renderer),
-
-        Rule('/settings/keys/', 'get', profile_views.get_keys, json_renderer),
-        Rule('/settings/create_key/', 'post', profile_views.create_user_key, json_renderer),
-        Rule('/settings/revoke_key/', 'post', profile_views.revoke_user_key, json_renderer),
-        Rule('/settings/key_history/<kid>/', 'get', profile_views.user_key_history, json_renderer),
 
         Rule('/profile/<user_id>/summary/', 'get',
              profile_views.get_profile_summary, json_renderer),
@@ -734,11 +722,6 @@ def make_url_map(app):
         Rule('/project/<pid>/newnode/', 'post', project_views.node.project_new_node,
              OsfWebRenderer('', render_mako_string)),
 
-        Rule([
-            '/project/<pid>/key_history/<kid>/',
-            '/project/<pid>/node/<nid>/key_history/<kid>/',
-        ], 'get', project_views.key.node_key_history, OsfWebRenderer('project/key_history.mako')),
-
         # # TODO: Add API endpoint for tags
         # Rule('/tags/<tag>/', 'get', project_views.tag.project_tag, OsfWebRenderer('tags.mako')),
         Rule('/api/v1/folder/<nid>', 'post', project_views.node.folder_new_post, json_renderer),
@@ -809,9 +792,14 @@ def make_url_map(app):
             OsfWebRenderer('project/draft_registration.mako')),
         Rule([
             '/project/<pid>/draft/<draft_id>/',
-            '/project/<pid>/node/<nidB>/draft/<draft_id>',
+            '/project/<pid>/node/<nidB>/draft/<draft_id>/',
         ], 'get', project_views.drafts.edit_draft_registration,
-            OsfWebRenderer('project/edit_draft.mako')),
+            OsfWebRenderer('project/edit_draft_registration.mako')),
+        Rule([
+            '/project/<pid>/draft/<draft_id>/register/',
+            '/project/<pid>/node/<nid>/draft/<draft_id>/register/',
+        ], 'get', project_views.drafts.draft_before_register_page,
+            OsfWebRenderer('project/register_draft.mako')),
         Rule([
             '/project/<pid>/retraction/',
             '/project/<pid>/node/<nid>/retraction/',
@@ -1067,12 +1055,9 @@ def make_url_map(app):
         ], 'get', project_views.node.get_registrations, json_renderer),
 
         # Draft Registrations
-         Rule([
-            '/drafts/<uid>/',
-        ], 'get', project_views.drafts.get_all_draft_registrations, json_renderer),
         Rule([
-            '/project/<pid>/draft/submit/<uid>/',
-        ], 'post', project_views.drafts.submit_for_review, json_renderer),
+            '/project/<pid>/draft/<draft_pk>/submit/',
+        ], 'post', project_views.drafts.submit_draft_for_review, json_renderer),
         Rule([
             '/project/<pid>/draft/',
         ], 'get', project_views.drafts.get_draft_registrations, json_renderer),
@@ -1189,20 +1174,6 @@ def make_url_map(app):
             json_renderer,
         ),
 
-        # API keys
-        Rule([
-            '/project/<pid>/create_key/',
-            '/project/<pid>/node/<nid>/create_key/',
-        ], 'post', project_views.key.create_node_key, json_renderer),
-        Rule([
-            '/project/<pid>/revoke_key/',
-            '/project/<pid>/node/<nid>/revoke_key/'
-        ], 'post', project_views.key.revoke_node_key, json_renderer),
-        Rule([
-            '/project/<pid>/keys/',
-            '/project/<pid>/node/<nid>/keys/',
-        ], 'get', project_views.key.get_node_keys, json_renderer),
-
         # Reorder components
         Rule('/project/<pid>/reorder_components/', 'post',
              project_views.node.project_reorder_components, json_renderer),
@@ -1261,11 +1232,6 @@ def make_url_map(app):
                 '/project/<pid>/node/<nid>/pointer/fork/',
             ], 'post', project_views.node.fork_pointer, json_renderer,
         ),
-        # TODO
-        Rule([
-            '/project/<pid>/draft/<template>/',
-            '/project/<pid>/node/<nid>/draft/<template>/',
-        ], 'get', project_views.register.node_draft_template_page, json_renderer),
         # View forks
         Rule([
             '/project/<pid>/forks/',
@@ -1273,10 +1239,19 @@ def make_url_map(app):
         ], 'get', project_views.node.node_forks, json_renderer),
 
         # Registrations
+        # NOTE: This route is deprecated and left only for backwards compatiblity
         Rule([
             '/project/<pid>/beforeregister/',
             '/project/<pid>/node/<nid>/beforeregister',
         ], 'get', project_views.register.project_before_register, json_renderer),
+        Rule([
+            '/project/<pid>/draft/<draft_id>/beforeregister/',
+            '/project/<pid>/node/<nid>/draft/<draft_id>/beforeregister',
+        ], 'get', project_views.drafts.draft_before_register, json_renderer),
+        Rule([
+            '/project/<pid>/draft/<draft_id>/register/',
+            '/project/<pid>/node/<nid>/draft/<draft_id>/register/',
+        ], 'post', project_views.drafts.register_draft_registration, json_renderer),
         Rule([
             '/project/<pid>/register/<template>/',
             '/project/<pid>/node/<nid>/register/<template>/',
@@ -1285,11 +1260,6 @@ def make_url_map(app):
             '/project/<pid>/retraction/',
             '/project/<pid>/node/<nid>/retraction/'
         ], 'post', project_views.register.node_registration_retraction_post, json_renderer),
-
-        Rule([
-            '/project/<pid>/register/<template>/',
-            '/project/<pid>/node/<nid>/register/<template>/',
-        ], 'post', project_views.register.node_register_template_page_post, json_renderer),
 
         Rule(
             [

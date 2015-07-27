@@ -257,15 +257,6 @@ describe('osfHelpers', () => {
     });
 
     describe('FormattableDate', () => {
-        it('should have local and utc time', () => {
-            var date = new Date();
-            var fd = new $osf.FormattableDate(date);
-            var expectedLocal = moment(date).format('YYYY-MM-DD hh:mm A');
-            assert.equal(fd.local, expectedLocal);
-            var expectedUTC = moment.utc(date).format('YYYY-MM-DD HH:mm UTC');
-            assert.equal(fd.utc, expectedUTC);
-        });
-        it('should parse date and datetime strings', () => {
             var year = 2014;
             var month = 11;
             var day = 15;
@@ -277,24 +268,57 @@ describe('osfHelpers', () => {
             var dateString = [year, month, day].join('-');
             var dateTimeString = dateString + 'T' + [hour, minute, second].join(':') + '.' + millisecond.toString();
 
+            var assertDateEqual = function(date, year, month, day, hour, minute, second, millisecond) {
+                assert.equal(date.getUTCFullYear(), year);
+                assert.equal(date.getUTCMonth(), month - 1); // Javascript months count from 0
+                assert.equal(date.getUTCDate(), day);
+                assert.equal(date.getUTCHours(), hour);
+                assert.equal(date.getUTCMinutes(), minute);
+                assert.equal(date.getUTCSeconds(), second);
+                assert.equal(date.getUTCMilliseconds(), millisecond);
+            };
+
+
+        it('should have local and utc time', () => {
+            var date = new Date();
+            var fd = new $osf.FormattableDate(date);
+            var expectedLocal = moment(date).format('YYYY-MM-DD hh:mm A');
+            assert.equal(fd.local, expectedLocal);
+            var expectedUTC = moment.utc(date).format('YYYY-MM-DD HH:mm UTC');
+            assert.equal(fd.utc, expectedUTC);
+        });
+        it('should parse date strings', () => {
             var parsedDate = new $osf.FormattableDate(dateString).date;
             var parsedDateTime = new $osf.FormattableDate(dateTimeString).date;
+            assertDateEqual(parsedDate, year, month, day, 0, 0, 0, 0);
+        });
+        it('should parse datetime strings', () => {
+            var parsedDateTime = new $osf.FormattableDate(dateTimeString).date;
+            assertDateEqual(parsedDateTime, year, month, day, hour, minute, second, millisecond);
+        });
+        it('should allow datetimes with UTC offsets', () => {
+            var parsedDateTime = null;
+            var UTCOffsets = ['+00', '+00:00', '+0000', 'Z'];
 
-            assert.equal(parsedDate.getUTCFullYear(), year);
-            assert.equal(parsedDate.getUTCMonth(), month - 1); // Javascript months count from 0
-            assert.equal(parsedDate.getUTCDate(), day);
-            assert.equal(parsedDate.getUTCHours(), 0);
-            assert.equal(parsedDate.getUTCMinutes(), 0);
-            assert.equal(parsedDate.getUTCSeconds(), 0);
-            assert.equal(parsedDate.getUTCMinutes(), 0);
+            UTCOffsets.forEach(function(offset) {
+                parsedDateTime = new $osf.FormattableDate(dateTimeString + offset).date;
+                assertDateEqual(parsedDateTime, year, month, day, hour, minute, second, millisecond);
+            });
+        });
+        it('should allow datetimes with positive offsets', () => {
+            var parsedDateTime = null;
+            var positiveOffset = '+02:00';
 
-            assert.equal(parsedDateTime.getUTCFullYear(), year);
-            assert.equal(parsedDateTime.getUTCMonth(), month - 1); // Javascript months count from 0
-            assert.equal(parsedDateTime.getUTCDate(), day);
-            assert.equal(parsedDateTime.getUTCHours(), hour);
-            assert.equal(parsedDateTime.getUTCMinutes(), minute);
-            assert.equal(parsedDateTime.getUTCSeconds(), second);
-            assert.equal(parsedDateTime.getUTCMilliseconds(), millisecond);
+            parsedDateTime = new $osf.FormattableDate(dateTimeString + positiveOffset).date;
+            assertDateEqual(parsedDateTime, year, month, day, hour - 2, minute, second, millisecond);
+
+        });
+        it('should allow datetimes with negative offsets', () => {
+            var parsedDateTime = null;
+            var negativeOffset = '-02:00';
+
+            parsedDateTime = new $osf.FormattableDate(dateTimeString + negativeOffset).date;
+            assertDateEqual(parsedDateTime, year, month, day, hour + 2, minute, second, millisecond);
         });
     });
 
@@ -310,6 +334,86 @@ describe('osfHelpers', () => {
         it('should trigger bootbox', () => {
             $osf.confirmDangerousAction({callback: callbackStub});
             assert.calledOnce(bootboxStub);
+        });
+    });
+
+    describe('iterObject', () => {
+        var get = function(obj, key) {
+            return obj[key];
+        };
+
+        it('maps an object to an array {key: KEY, value: VALUE} pairs', () => {
+            var obj = {
+                foo: 'bar',
+                cat: 'dog'
+            };
+            var keys = Object.keys(obj);
+            var values = keys.map(get.bind(null, obj));
+            var iterable = $osf.iterObject(obj);
+            for(var i = 0; i < iterable.length; i++) {
+                var item = iterable[i];
+                assert.include(keys, item.key);
+                assert.include(values, item.value);
+            }            
+        });
+    });
+
+    describe('isBlank', () => {
+        it('is false for flasey and strings of zero or more whitespace characters', () => {
+            assert.isTrue($osf.isBlank(false));
+            assert.isTrue($osf.isBlank(null));
+            assert.isTrue($osf.isBlank(undefined));
+            assert.isTrue($osf.isBlank('        '));
+
+            assert.isFalse($osf.isBlank(1));
+            assert.isFalse($osf.isBlank(true));
+            assert.isFalse($osf.isBlank('abcd'));
+            assert.isFalse($osf.isBlank('   a'));
+        });
+    });
+
+    describe('indexOf', () => {
+        it('returns a positive integer index if it finds a matching item', () => {
+            var list = [];
+            for(var i = 0; i < 5; i++){                
+                list.push({
+                    foo: 'bar' + i
+                });
+            }
+            var idx = Math.floor(Math.random() * 5);
+            var search = function(item) {
+                return item.foo === 'bar' + idx;
+            };
+            var found = $osf.indexOf(list, search);
+            assert.equal(idx, found);
+        });
+        it('returns -1 if no item is matched', () => {
+            var list = [];
+            for(var i = 0; i < 5; i++){                
+                list.push({
+                    foo: 'bar' + i
+                });
+            }
+            var search = function(item) {
+                return item.foo === 42;
+            };
+            var found = $osf.indexOf(list, search);
+            assert.equal(-1, found);
+        });
+    });
+    
+    describe('not', () => {
+        it('returns a partial function that negates the return value of callables', () => {
+            var I = function(cond){
+                return !!cond;
+            };
+            var notI = $osf.not(I);
+            assert.isTrue(notI(false));
+            assert.isFalse(notI(true));
+        });
+        it('returns a partial function that negates the value of non callables', () => {
+            assert.isTrue($osf.not(false)());
+            assert.isFalse($osf.not(true)());
         });
     });
 });

@@ -60,6 +60,7 @@
           <br />
           <div class="scripted" data-bind="foreach: drafts">
             <li class="project list-group-item list-group-item-node">
+              <h4 data-bind="text: schema().title" ></h4>
               <h4 class="list-group-item-heading">          
                 <div class="progress progress-bar-md">
                   <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"
@@ -68,16 +69,43 @@
                     <span class="sr-only"></span>
                   </div>
                 </div>
-                <p data-bind="text: schema.title"></p>
-                <p>initiated by <span data-bind="text: initiator.fullname"></span>
-                <p>started about <span data-bind="text: $root.formattedDate(initiated)"></span></p>
-                <p>last updated about <span data-bind="text: $root.formattedDate(updated)"></span></p>
-                <p>
-                  <button class="btn btn-success"
-                          data-bind="click: $root.editDraft"><i style="margin-right: 5px;" class="fa fa-pencil"></i>Edit</button>
-                  <button class="btn btn-danger"
-                          data-bind="click: $root.deleteDraft"><i style="margin-right: 5px;" class="fa fa-times"></i>Delete</button>
-                </p>
+                <small>
+                <p>initiated by: <span data-bind="text: initiator.fullname"></span>
+                <p>started: <span data-bind="text: initiated"></span></p>
+                <p>last updated: <span data-bind="text: updated"></span></p>
+                <!-- TOOO: uncomment to show approval states
+                <span data-bind="if: requiresApproval">
+                  <div data-bind="if: isApproved">
+                    <div class="draft-status-badge bg-success"> Approved</div>                       
+                  </div>                
+                  <div data-bind="ifnot: isApproved">
+                    <div class="draft-status-badge bg-warning"> Pending Approval </div>
+                  </div>
+                  <div data-bind="if: isPendingReview">
+                    <div class="draft-status-badge bg-warning"> Pending Review</div>
+                  </div>
+                </span>
+                -->
+                </small>
+                <div class="row">
+                  <div class="col-md-10">
+                    <a class="btn btn-info"
+                       data-bind="click: $root.maybeWarn"><i style="margin-right: 5px;" class="fa fa-pencil"></i>Edit</a>
+                    <button class="btn btn-danger"
+                            data-bind="click: $root.deleteDraft"><i style="margin-right: 5px;" class="fa fa-times"></i>Delete</button>
+                  </div>
+                  <div class="col-md-1">
+                    <!-- TODO: uncomment for exposing registration approval logic 
+                    <a class="btn btn-success" data-bind="attr.href: urls.register,
+                                                          tooltip: {
+                                                            placement: top, 
+                                                            title: isApproved ? 'Finialize this draft' : 'This draft must be approved before it can be registered'
+                                                          },
+                                                          css: {'disabled': !isApproved}">Register</a>
+                    -->
+                    <a class="btn btn-success" data-bind="attr.href: urls.register_page">Register</a>
+                  </div>
+                </div>                
               </h4>
             </li>
           </div>
@@ -110,9 +138,14 @@
         <div class="row" data-bind="if: selectedSchema">
           <div class="col-md-12" data-bind="with: selectedSchema">
             <h4> Fulfills: </h4 >
-            <p data-bind="foreach: schema.fulfills">
-              <span data-bind="text: $data + '|'"></span>
-            </p>
+            <div class="row">
+              <div class="col-md-12 schema-fulfillment" data-bind="foreach: schema.config.fulfills">
+                <span class="well">
+                  <span data-bind="text: name"></span>&nbsp;&nbsp;
+                  <a class="fa fa-info-circle" target="_blank" data-bind="attr.href: info"></a>
+                </span>
+              </div>
+            </div>
             <h4> Description: </h4> 
             <blockquote>
               <p data-bind="html: schema.description"></p>
@@ -134,63 +167,3 @@
 </%def>
 
 <%include file="project/registration_preview.mako" />
-<!--
-<script type="text/html" id="preRegisterMessageTemplate">
-  <div data-bind="if: parentUrl">
-    You are about to register the 
-    <span data-bind="text: category"></span>  
-    <b data-bind="text: title"></b> 
-    including all components and data within it. This will <b>not</b> register its parent, 
-    <b data-bind="text: parentTitle"></b>. If you want to register the parent, please go 
-    <a data-bind="attr.href: parentUrl">here.</a>
-    After selecting OK, you will next select a registration form.
-  </div>
-  <div data-bind="ifnot: parentUrl">
-    You are about to register <b data-bind="text: title"></b>
-    including all components and data within it. Registration creates a permanent, 
-    time-stamped, uneditable version of the project. If you would prefer to register 
-    only one particular component, please navigate to that component and then initiate registration. 
-  </div>
-  <br />
-  <div class="form-group">
-    <label>Please select a registration schema to continue:</label>
-    <br />
-    <div data-bind="foreach: schemas">
-      <div class="panel-group" id="accordion" role="tablist" aria-multiselectable="true">
-        <div class="panel panel-default">
-          <div class="panel-heading" role="tab" data-bind="attr.id: id">            
-            <h3 class="panel-title">
-              <div class="row">
-                <div class="col-md-9">
-                  <span role="button" data-toggle="collapse" data-parent="#accordion" aria-expanded="true"
-                     data-bind="text: name,
-                                attr.aria-controls: id + '-collapse',
-                                attr.href: id + '-collapse'">
-                  </span>
-                </div>
-                <div class="col-md-1">
-                  <button data-bind="click: $root.launchEditor.bind($root, $root.blankDraft($data))" class="btn btn-primary">Use</button>
-                </div>
-              </div>
-            </h3>
-          </div>
-          <div class="panel-collapse collapse in p-md" role="tabpanel" data-bind="attr.id: id + '-collapse', 
-                                                                             attr.aria-labelledby: id">
-            <h4> Fulfills: </h4>
-            <div class="btn-group" data-bind="foreach: schema.fulfills">
-              <span data-bind="text: $data"></span>
-            </div>
-            <hr />
-            <h4> Description: </h4>
-            <p data-bind="html: schema.description"></p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-  <hr />
-  <div class="form-group" style="text-align: right">
-    <button class="btn btn-default" data-bind="click: cancel">Cancel</button>
-  </div>
-</script>
--->

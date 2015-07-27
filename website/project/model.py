@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
 import re
-import uuid
-import urllib
 import logging
 import datetime
 import urlparse
@@ -31,7 +29,7 @@ from framework.exceptions import PermissionsError
 from framework.guid.model import GuidStoredObject
 from framework.auth.utils import privacy_info_handle
 from framework.analytics import tasks as piwik_tasks
-from framework.mongo.utils import to_mongo, to_mongo_key, unique_on
+from framework.mongo.utils import to_mongo_key, unique_on
 from framework.analytics import (
     get_basic_counters, increment_user_activity_counters
 )
@@ -257,25 +255,6 @@ class Comment(GuidStoredObject):
             self.save()
 
 
-class ApiKey(StoredObject):
-
-    # The key is also its primary key
-    _id = fields.StringField(
-        primary=True,
-        default=lambda: str(ObjectId()) + str(uuid.uuid4())
-    )
-    # A display name
-    label = fields.StringField()
-
-    @property
-    def user(self):
-        return self.user__keyed[0] if self.user__keyed else None
-
-    @property
-    def node(self):
-        return self.node__keyed[0] if self.node__keyed else None
-
-
 @unique_on(['params.node', '_id'])
 class NodeLog(StoredObject):
 
@@ -289,7 +268,6 @@ class NodeLog(StoredObject):
     was_connected_to = fields.ForeignField('node', list=True)
 
     user = fields.ForeignField('user', backref='created')
-    api_key = fields.ForeignField('apikey', backref='created')
     foreign_user = fields.StringField()
 
     DATE_FORMAT = '%m/%d/%Y %H:%M UTC'
@@ -649,8 +627,6 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
     # The node (if any) used as a template for this node's creation
     template_node = fields.ForeignField('node', backref='template_node', index=True)
 
-    api_keys = fields.ForeignField('apikey', list=True, backref='keyed')
-
     piwik_site_id = fields.StringField()
 
     # Dictionary field mapping user id to a list of nodes in node.nodes which the user has subscriptions for
@@ -988,6 +964,10 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
             self.visible_contributor_ids.append(user._id)
             self.update_visible_ids(save=False)
         elif not visible and user._id in self.visible_contributor_ids:
+            if len(self.visible_contributor_ids) == 1:
+                raise ValueError(
+                    'Must have at least one visible contributor'
+                )
             self.visible_contributor_ids.remove(user._id)
         else:
             return
@@ -1176,7 +1156,7 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
 
         # set attributes which may NOT be overridden by `changes`
         new.creator = auth.user
-        new.add_contributor(contributor=auth.user, log=False, save=False)
+        new.add_contributor(contributor=auth.user, permissions=('read', 'write', 'admin'), log=False, save=False)
         new.template_node = self
         new.is_fork = False
         new.is_registration = False
@@ -1705,7 +1685,7 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
 
         return forked
 
-    def register_node(self, schema, auth, template, data, parent=None):
+    def register_node(self, schema, auth, data, parent=None):
         """Make a frozen copy of a node.
 
         :param schema: Schema object
@@ -1722,9 +1702,6 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
             )
         if self.is_folder:
             raise NodeStateError("Folders may not be registered")
-
-        template = urllib.unquote_plus(template)
-        template = to_mongo(template)
 
         when = datetime.datetime.utcnow()
 
@@ -1747,7 +1724,7 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
         registered.registered_from = original
         if not registered.registered_meta:
             registered.registered_meta = {}
-        registered.registered_meta[template] = data
+        registered.registered_meta = data
 
         registered.contributors = self.contributors
         registered.forked_from = self.forked_from
@@ -1770,7 +1747,7 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
         for node_contained in original.nodes:
             if not node_contained.is_deleted:
                 child_registration = node_contained.register_node(
-                    schema, auth, template, data, parent=registered
+                    schema, auth, data, parent=registered
                 )
                 if child_registration and not child_registration.primary:
                     registered.nodes.append(child_registration)
@@ -1820,13 +1797,11 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
 
     def add_log(self, action, params, auth, foreign_user=None, log_date=None, save=True):
         user = auth.user if auth else None
-        api_key = auth.api_key if auth else None
         params['node'] = params.get('node') or params.get('project')
         log = NodeLog(
             action=action,
             user=user,
             foreign_user=foreign_user,
-            api_key=api_key,
             params=params,
         )
         if log_date:
@@ -2110,6 +2085,9 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
         self.clear_permission(contributor)
         if contributor._id in self.visible_contributor_ids:
             self.visible_contributor_ids.remove(contributor._id)
+
+        if not self.visible_contributor_ids:
+            return False
 
         # Node must have at least one registered admin user
         # TODO: Move to validator or helper
@@ -3074,54 +3052,145 @@ class DraftRegistration(AddonModelMixin, StoredObject):
     registration_schema = fields.ForeignField('metaschema')
     registered_node = fields.ForeignField('node')
 
-    is_pending_review = fields.BooleanField(default=False)
-
-    schema_name = fields.StringField()
-
     storage = fields.ForeignField('osfstoragenodesettings')
 
-    # proxy fields from branched_from Node
-    def __getattr__(self, attr):
-        try:
-            return self.__dict__[attr]
-        except KeyError:
-            return getattr(self.branched_from, attr, None)
+    config = fields.DictionaryField()
+    flags = fields.DictionaryField()
+
+    def __init__(self, *args, **kwargs):
+        super(DraftRegistration, self).__init__(*args, **kwargs)
+
+        meta_schema = self.registration_schema or kwargs.get('registration_schema')
+        if meta_schema:
+            schema = meta_schema.schema
+            config = schema.get('config', {})
+            self.config = config
+            # TODO: uncomment to set flags
+            # if not self.registration_schema:
+            #    flags = schema.get('flags', {})
+            #    for flag, value in flags.iteritems():
+            #        self.flags[flag] = value
+
+    # TODO: uncomment to expose approval/review properties
+    #    @property
+    #    def is_pending_review(self):
+    #        return self.flags.get('isPendingReview')
+    #
+    #    @is_pending_review.setter
+    #    def is_pending_review(self, value):
+    #        self.flags['isPendingReview'] = value
+    #
+    #    @property
+    #    def is_approved(self):
+    #        self.flags.get('isApproved')
+    #
+    #    @is_approved.setter
+    #    def is_approved(self, value):
+    #        self.flags['isApproved'] = value
+
+    def update_metadata(self, metadata, save=True):
+        # TODO: uncommnet to disallow editing drafts that are approved or pending approval
+        # if self.is_pending_review or self.is_approved:
+        #    raise HTTPError(http.BAD_REQUEST)
+        changes = []
+        for key, value in metadata.iteritems():
+            old_value = self.registration_metadata.get(key)
+            if not old_value or old_value.get('value') != value.get('value'):
+                changes.append(key)
+        self.registration_metadata.update(metadata)
+        if save:
+            self.save()
+        # TODO: uncomment to nullify approval state if edited
+        # self.after_edit(changes)
+
+    def before_edit(self, auth):
+        messages = []
+        # TODO: uncomment to provide pre-edit warnings for drafts that are approved or are pending approval
+        # if self.flags.get('isApproved'):
+        #     messages.append('The draft registration you are editing is currently approved. Please note that if you make any changes (excluding comments) this approval status will be revoked and you will need to submit for approval again.')
+        # if self.flags.get('isPendingReview'):
+        #     messages.append('The draft registration you are editing is currently pending review. Please note that if you make any changes (excluding comments) this request will be cancelled and you will need to submit for approval again.')
+        return messages
+
+    def after_edit(self, changes):
+        # revoke approval and review status if changed
+        if changes:
+            self.flags.update({
+                'isPendingReview': False,
+                'isApproved': False
+            })
+            self.save()
+
+    def find_question(self, qid):
+        for page in self.registration_schema.schema['pages']:
+            for question_id, question in page['questions'].iteritems():
+                if question_id == qid and 'description' in question:
+                    return question['description']
 
     def get_comments(self):
         """ Returns a list of all comments made on a draft in the format of :
         [{
-            'page1': [{
-                user: 'user',
-                last_modified: 'Thu, 09 Jul 2015 21:45:56 GMT',
-                value: 'Comment text'
-            }],
-            'page2': [{
-                user: 'user',
-                last_modified: 'Thu, 09 Jul 2015 21:45:56 GMT',
-                value: 'Comment text'
-            },
-            {
-                user: 'user',
-                last_modified: 'Thu, 09 Jul 2015 21:45:56 GMT',
-                value: 'Comment text'
-            }]
-        }]
+          [QUESTION_ID]: {
+            'question': [QUESTION],
+            'comments': [LIST_OF_COMMENTS]
+            }
+        },]
         """
-        pages = self.registration_schema['schema']['pages']
-        all_comments = list()
 
-        # there has to be a more pythonic way to do this
-        page_num = 1
-        for page in pages:
-            comment_obj = dict()
-            comments = page['comments']
-
-            comment_obj['page{}'.format(page_num)] = list()
-
-            if comments:
-                for comment in comments:
-                    all_comments.append(comment)
-
-            page_num += 1
-
+        all_comments = []
+        for question_id, value in self.registration_metadata.iteritems():
+            all_comments.append({
+                question_id: {
+                    'question': self.find_question(question_id),
+                    'comments': value['comments'] if 'comments' in value else ''
+                }
+            })
         return all_comments
+
+    def get_flat_comments(self):
+        """ Returns a flat list of all comments made on a draft
+        """
+        flat_comments = list()
+        for question_id, value in self.registration_metadata.iteritems():
+            if 'comments' in value:
+                for comment in value['comments']:
+                    flat_comments.append(comment)
+        return flat_comments
+
+    def get_new_comments(self):
+        """ Returns a list of all comments admins haven't seen
+        In the same format as get_comments
+        """
+        comments = self.get_comments()
+
+        if comments:
+            for question_id, value in comments.iteritems():
+                for comment in value['comments']:
+                    if comment['adminHasSeen'] is False:
+                        comments.remove(question_id)
+
+        return comments
+
+    def has_new_comments(self):
+        """ Checks is a draft has comments that an admin hasn't seen
+        """
+        comments = self.get_flat_comments()
+
+        if comments:
+            for comment in comments:
+                if comment['adminHasSeen'] is False:
+                    return True
+
+        return False
+
+    def register(self, auth):
+
+        node = self.branched_from
+
+        # Create the registration
+        register = node.register_node(
+            self.registration_schema, auth, self.registration_metadata
+        )
+        self.registered_node = register
+        self.save()
+        return register

@@ -1,20 +1,18 @@
 # -*- coding: utf-8 -*-
 import json
 import httplib as http
-from dateutil.parser import parse as parse_date
 import itertools
 
 from flask import request
 from modularodm import Q
-from modularodm.exceptions import NoResultsFound, ValidationValueError
+from modularodm.exceptions import NoResultsFound
 
 from framework import status
 from framework.exceptions import HTTPError, PermissionsError
 from framework.flask import redirect  # VOL-aware redirect
 
-from framework.status import push_status_message
-from framework.mongo.utils import to_mongo, get_or_http_error
-from framework.forms.utils import process_payload, unprocess_payload
+from framework.mongo.utils import to_mongo
+from framework.forms.utils import unprocess_payload
 from framework.auth.decorators import must_be_signed
 
 from website.archiver import ARCHIVER_SUCCESS, ARCHIVER_FAILURE
@@ -33,12 +31,9 @@ from website.project.decorators import (
 )
 from website.identifiers.model import Identifier
 from website.identifiers.metadata import datacite_metadata_for_node
-from website.project.metadata.schemas import OSF_META_SCHEMAS
 from website.project.utils import serialize_node
-from website.project import utils as project_utils
 from website.util.permissions import ADMIN
 from website.models import MetaSchema, NodeLog
-from website.project.model import DraftRegistration
 from website import language, mails
 from website.project import signals as project_signals
 from website import util
@@ -48,119 +43,16 @@ from website.archiver.decorators import fail_archive_on_error
 from website.identifiers.client import EzidClient
 
 from .node import _view_project
-from .. import clean_template_name
-
-get_draft_or_fail = lambda pk: get_or_http_error(DraftRegistration, pk)
 
 @must_be_valid_project
 @must_have_permission(ADMIN)
-def node_create_draft_registration(auth, node, **kwargs):
-    if settings.DISK_SAVING_MODE:
-        raise HTTPError(
-            http.METHOD_NOT_ALLOWED,
-            redirect_url=node.url
-        )
-
-    draft = DraftRegistration(
-        branched_from=node,
-        initiator=auth.user
-    )
-    schema_name = request.args.get('schema_name')
-    schema_version = request.args.get('schema_version', 1)
-    if schema_name:
-        try:
-            meta_schema = MetaSchema.find_one(
-                Q('name', 'eq', schema_name) &
-                Q('version', 'eq', schema_version)
-            )
-        except NoResultsFound:
-            raise HTTPError(http.BAD_REQUEST)
-        draft.registration_schema = meta_schema
-    draft.save()
-    return redirect(node.web_url_for('node_get_draft_registration', draft_pk=draft._id))
-
-@must_be_valid_project
-@must_have_permission(ADMIN)
-def node_get_draft_registration(auth, node, draft_pk, **kwargs):
-    if settings.DISK_SAVING_MODE:
-        raise HTTPError(
-            http.METHOD_NOT_ALLOWED,
-            redirect_url=node.url
-        )
-    draft = get_draft_or_fail(draft_pk)
-    ret = serialize_node(node, auth, primary=True)
-    ret['draft'] = draft
-    return ret
-
-@must_be_valid_project
-@must_have_permission(ADMIN)
-@must_not_be_registration
 def node_register_page(auth, node, **kwargs):
-    ret = {
-        'options': [
-            {
-                'template_name': metaschema['name'],
-                'template_name_clean': clean_template_name(metaschema['name'])
-            }
-            for metaschema in OSF_META_SCHEMAS
-        ]
-    }
-    ret.update(_view_project(node, auth, primary=True))
-    return ret
 
-@must_be_valid_project
-def update_metaschema(node, *args, **kwargs):
-
-    data = request.get_json()
-    schema_id = data.get('schema_id')
-    schema_version = data.get('schema_version', 1)
-    if not schema_id:
-        # TODO messages
-        raise HTTPError(http.BAD_REQUEST)
-    # TODO validate
-    created = False
-    if not node.registered_schema:
-        created = True
-        try:
-            meta_schema = MetaSchema.find_one(
-                Q('name', 'eq', schema_id) &
-                Q('schema_version', 'eq', schema_version)
-            )
-        except NoResultsFound:
-            raise HTTPError(http.NOT_FOUND)
-        node.registered_schema = meta_schema
-    node.registered_meta.update(data.get('schema_data', {}))
-    node.save()
-    return {}, 201 if created else 200
-
-@must_be_valid_project
-def get_metaschema(node, *args, **kwargs):
-    if not node.registered_schema:
-        return {}
-    schema = node.registered_schema
-    return {
-        'schema_id': schema.name,
-        'schema_version': schema.schema_version,
-        'schema_data': node.registered_meta or {},
-    }
-
-def get_metaschema_by_name():
-    """ By default returns a list of all available OSF metaschemas
-    Accepts a query string in the form of ?id=name_of_schema that will return just that schema if the ids match exactly
-    """
-    schema_id = request.args.get('id')
-    if schema_id:
-        schema = {
-            schema['id']: schema
-            for schema in OSF_META_SCHEMAS
-        }.get(schema_id)
-        if schema:
-            return schema
-        else:
-            # TODO messages
-            raise HTTPError(http.NOT_FOUND)
+    if node.is_registration:
+        return serialize_node(node, auth)
     else:
-        return OSF_META_SCHEMAS
+        status.push_status_message('You have been redirected to the project\'s registrations page .From here you can initiate a new Draft Registration to complete the registration process')
+        return redirect(node.web_url_for('node_registrations', view='draft'))
 
 @must_be_valid_project
 @must_have_permission(ADMIN)
@@ -400,6 +292,7 @@ def node_registration_embargo_disapprove(auth, node, token, **kwargs):
 @must_be_valid_project
 @must_be_contributor_or_public
 def node_register_template_page(auth, node, **kwargs):
+
     template_name = kwargs['template'].replace(' ', '_')
     # Error to raise if template can't be found
     not_found_error = HTTPError(
@@ -427,106 +320,30 @@ def node_register_template_page(auth, node, **kwargs):
                 )
             except NoResultsFound:
                 raise not_found_error
+
+        schema = meta_schema.schema
+        ret = {
+            'template_name': template_name,
+            'schema': json.dumps(schema),
+            'metadata_version': meta_schema.metadata_version,
+            'schema_version': meta_schema.schema_version,
+            'registered': registered,
+            'payload': payload,
+            'children_ids': node.nodes._to_primary_keys(),
+        }
+        ret.update(_view_project(node, auth, primary=True))
+        return ret
     else:
-        # Anyone with view access can see this page if the current node is
-        # registered, but only admins can view the registration page if not
-        # TODO: Test me @jmcarp
-        if not node.has_permission(auth.user, ADMIN):
-            raise HTTPError(http.FORBIDDEN)
-        registered = False
-        payload = None
-        metaschema_query = MetaSchema.find(
-            Q('name', 'eq', template_name)
-        ).sort('-schema_version')
-        if metaschema_query:
-            meta_schema = metaschema_query[0]
-        else:
-            raise not_found_error
-    schema = meta_schema.schema
-
-    # TODO: Notify if some components will not be registered
-
-    ret = {
-        'template_name': template_name,
-        'schema': json.dumps(schema),
-        'metadata_version': meta_schema.metadata_version,
-        'schema_version': meta_schema.schema_version,
-        'registered': registered,
-        'payload': payload,
-        'children_ids': node.nodes._to_primary_keys(),
-    }
-    ret.update(_view_project(node, auth, primary=True))
-    return ret
-
-
-# TODO
-@must_be_valid_project
-@must_be_contributor_or_public
-def node_draft_template_page(auth, node, **kwargs):
-    template_name = kwargs['template'].replace(' ', '_')
-    # Error to raise if template can't be found
-    not_found_error = HTTPError(
-        http.NOT_FOUND,
-        data=dict(
-            message_short='Template not found.',
-            message_long='The registration template you entered '
-                         'in the URL is not valid.'
-        )
-    )
-
-    if node.is_registration and node.registered_meta:
-        registered = True
-        payload = node.registered_meta.get(to_mongo(template_name))
-        payload = json.loads(payload)
-        payload = unprocess_payload(payload)
-
-        if node.registered_schema:
-            meta_schema = node.registered_schema
-        else:
-            try:
-                meta_schema = MetaSchema.find_one(
-                    Q('name', 'eq', template_name) &
-                    Q('schema_version', 'eq', 1)
-                )
-            except NoResultsFound:
-                raise not_found_error
-    else:
-        # Anyone with view access can see this page if the current node is
-        # registered, but only admins can view the registration page if not
-        # TODO: Test me @jmcarp
-        if not node.has_permission(auth.user, ADMIN):
-            raise HTTPError(http.FORBIDDEN)
-        registered = False
-        payload = None
-        metaschema_query = MetaSchema.find(
-            Q('name', 'eq', template_name)
-        ).sort('-schema_version')
-        if metaschema_query:
-            meta_schema = metaschema_query[0]
-        else:
-            raise not_found_error
-    schema = meta_schema.schema
-
-    # TODO: Notify if some components will not be registered
-
-    ret = {
-        'template_name': template_name,
-        'schema': json.dumps(schema),
-        'metadata_version': meta_schema.metadata_version,
-        'schema_version': meta_schema.schema_version,
-        'registered': registered,
-        'payload': payload,
-        'children_ids': node.nodes._to_primary_keys(),
-    }
-    ret.update(_view_project(node, auth, primary=True))
-    return ret
-
+        status.push_status_message('You have been redirected to the project\'s registrations page. From here you can initiate a new Draft Registration to complete the registration process')
+        return redirect(node.web_url_for('node_registrations', view=kwargs.get('template')))
 
 @must_be_valid_project  # returns project
 @must_have_permission(ADMIN)
 @must_not_be_registration
 def project_before_register(auth, node, **kwargs):
     """Returns prompt informing user that addons, if any, won't be registered."""
+
+    # NOTE: This route is deprecated and left only for backwards compatiblity
 
     messages = {
         'full': {
@@ -578,104 +395,6 @@ def project_before_register(auth, node, **kwargs):
         'prompts': prompts,
         'errors': errors
     }
-
-
-@must_be_valid_project  # returns project TODO
-@must_have_permission(ADMIN)
-@must_not_be_registration
-def project_before_draft(auth, node, **kwargs):
-    user = auth.user
-
-    prompts = node.callback('before_draft', user=user)
-
-    if node.has_pointers_recursive:
-        prompts.append(
-            language.BEFORE_REGISTER_HAS_POINTERS.format(
-                category=node.project_or_component
-            )
-        )
-
-    return {'prompts': prompts}
-
-
-@must_be_valid_project
-@must_have_permission(ADMIN)
-@must_not_be_registration
-def node_register_template_page_post(auth, node, **kwargs):
-    data = request.json
-
-    if settings.DISK_SAVING_MODE:
-        raise HTTPError(
-            http.METHOD_NOT_ALLOWED,
-            redirect_url=node.url
-        )
-
-    # Sanitize payload data
-    clean_data = process_payload(data)
-
-    template = kwargs['template']
-    # TODO: Using json.dumps because node_to_use.registered_meta's values are
-    # expected to be strings (not dicts). Eventually migrate all these to be
-    # dicts, as this is unnecessary
-    schema = MetaSchema.find(
-        Q('name', 'eq', template)
-    ).sort('-schema_version')[0]
-
-    # Create the registration
-    register = node.register_node(
-        schema, auth, template, json.dumps(clean_data),
-    )
-
-    if data.get('registrationChoice', 'immediate') == 'embargo':
-        embargo_end_date = parse_date(data['embargoEndDate'], ignoretz=True)
-
-        # Initiate embargo
-        try:
-            register.embargo_registration(auth.user, embargo_end_date)
-            register.save()
-        except ValidationValueError as err:
-            raise HTTPError(http.BAD_REQUEST, data=dict(message_long=err.message))
-        if settings.ENABLE_ARCHIVER:
-            register.archive_job.meta = {
-                'embargo_urls': {
-                    contrib._id: project_utils.get_embargo_urls(register, contrib)
-                    for contrib in node.active_contributors()
-                }
-            }
-            register.archive_job.save()
-    else:
-        register.set_privacy('public', auth, log=False)
-        for child in register.get_descendants_recursive(lambda n: n.primary):
-            child.set_privacy('public', auth, log=False)
-
-    push_status_message('Files are being copied to the newly created registration, and you will receive an email notification containing a link to the registration when the copying is finished.')
-
-    return {
-        'status': 'success',
-        'result': register.url,
-    }, http.CREATED
-
-
-@must_be_valid_project
-@must_have_permission(ADMIN)
-@must_not_be_registration
-def node_draft_template_page_post(auth, node, **kwargs):
-    if settings.DISK_SAVING_MODE:
-        raise HTTPError(
-            http.METHOD_NOT_ALLOWED,
-            redirect_url=node.url
-        )
-
-    # TODO: Using json.dumps because node_to_use.registered_meta's values are
-    # expected to be strings (not dicts). Eventually migrate all these to be
-    # dicts, as this is unnecessary
-    draft = node.register_node(auth)
-
-    return {
-        'status': 'success',
-        'result': draft.url,
-    }, http.CREATED
-
 
 def _build_ezid_metadata(node):
     """Build metadata for submission to EZID using the DataCite profile. See

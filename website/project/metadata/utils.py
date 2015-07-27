@@ -1,6 +1,3 @@
-from website.profile.utils import serialize_user
-from website.project.utils import serialize_node
-
 def serialize_meta_schema(meta_schema):
     if not meta_schema:
         return None
@@ -11,11 +8,12 @@ def serialize_meta_schema(meta_schema):
     }
 
 def serialize_draft_registration(draft, auth=None):
-    ret = {
-        key: getattr(draft, key)
-        for key in ['title', 'description']
-    }
-    ret.update({
+    from website.profile.utils import serialize_user  # noqa
+    from website.project.utils import serialize_node  # noqa
+
+    node = draft.branched_from
+
+    return {
         'pk': draft._id,
         'branched_from': serialize_node(draft.branched_from, auth),
         'initiator': serialize_user(draft.initiator),
@@ -23,6 +21,13 @@ def serialize_draft_registration(draft, auth=None):
         'registration_schema': serialize_meta_schema(draft.registration_schema),
         'initiated': str(draft.datetime_initiated),
         'updated': str(draft.datetime_updated),
-        'completion': 50  # TODO
-    })
-    return ret
+        'config': draft.config or {},
+        'flags': draft.flags,
+        'urls': {
+            'edit': node.web_url_for('edit_draft_registration', draft_id=draft._id),
+            'before_register': node.api_url_for('draft_before_register', draft_id=draft._id),
+            'register': node.api_url_for('register_draft_registration', draft_id=draft._id),
+            'register_page': node.web_url_for('draft_before_register_page', draft_id=draft._id),
+            'registrations': node.web_url_for('node_registrations')
+        }
+    }

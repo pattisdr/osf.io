@@ -1,55 +1,105 @@
 from flask import request, redirect
 import httplib as http
+from dateutil.parser import parse as parse_date
 
 from modularodm import Q
+from modularodm.exceptions import ValidationValueError
 
+from framework import status
 from framework.mongo.utils import get_or_http_error
 from framework.exceptions import HTTPError
+from framework.status import push_status_message
 
 from website.util.permissions import ADMIN
 from website.project.decorators import (
     must_be_valid_project,
     must_have_permission,
+    http_error_if_disk_saving_mode
 )
-from framework.auth import Auth
+from website import settings
 from website.mails import Mail, send_mail
-from website.project.utils import serialize_node
-from website.project.model import MetaSchema, DraftRegistration, User
+from website.project import utils as project_utils
+from website.project.model import MetaSchema, DraftRegistration
 from website.project.metadata.utils import serialize_meta_schema, serialize_draft_registration
+from website.project.utils import serialize_node
 
 get_draft_or_fail = lambda pk: get_or_http_error(DraftRegistration, pk)
 get_schema_or_fail = lambda query: get_or_http_error(MetaSchema, query)
-ADMIN_USERNAMES = ['vndqr', 'szj4b']
 
+@must_have_permission(ADMIN)
 @must_be_valid_project
-def submit_for_review(node, uid, *args, **kwargs):
-    user = User.load(uid)
-    auth = Auth(user)
+def submit_draft_for_review(auth, node, draft_pk, *args, **kwargs):
+    user = auth.user
 
-    node.is_pending_review = True
+    draft = get_draft_or_fail(draft_pk)
+    draft.is_pending_review = True
+    draft.save()
 
     REVIEW_EMAIL = Mail(tpl_prefix='prereg_review', subject='New Prereg Prize registration ready for review')
-    for uid in ADMIN_USERNAMES:
-        admin = User.load(uid)
-        send_mail(admin.email, REVIEW_EMAIL, user=user, src=node)
+    send_mail(draft.initiator.email, REVIEW_EMAIL, user=user, src=node)
 
-    ret = serialize_node(node, auth)
+    ret = project_utils.serialize_node(node, auth)
     ret['success'] = True
     return ret
 
-def get_all_draft_registrations(uid, *args, **kwargs):
-    user = User.load(uid)
-    auth = Auth(user)
-    count = request.args.get('count', 100)
+@must_have_permission(ADMIN)
+@must_be_valid_project
+def draft_before_register_page(auth, node, draft_id, *args, **kwargs):
+    ret = serialize_node(node, auth, primary=True)
 
-    all_drafts = DraftRegistration.find(
-        # Q('is_pending_review', 'eq', True) &
-        # Q('schema_name', 'eq' 'Prereg Prize')
-    )[:count]
+    draft = get_draft_or_fail(draft_id)
+    ret['draft'] = serialize_draft_registration(draft, auth)
+    return ret
+
+@must_have_permission(ADMIN)
+@must_be_valid_project
+def draft_before_register(auth, node, draft_id, *args, **kwargs):
+    ret = serialize_node(node, auth, primary=True)
+
+    draft = get_draft_or_fail(draft_id)
+    ret['draft'] = serialize_draft_registration(draft, auth)
+    return ret
+
+@must_have_permission(ADMIN)
+@must_be_valid_project
+@http_error_if_disk_saving_mode
+def register_draft_registration(auth, node, draft_id, *args, **kwargs):
+
+    data = request.get_json()
+
+    draft = get_draft_or_fail(draft_id)
+    register = draft.register(auth)
+
+    if data.get('registrationChoice', 'immediate') == 'embargo':
+        embargo_end_date = parse_date(data['embargoEndDate'], ignoretz=True)
+
+        # Initiate embargo
+        try:
+            register.embargo_registration(auth.user, embargo_end_date)
+            register.save()
+        except ValidationValueError as err:
+            raise HTTPError(http.BAD_REQUEST, data=dict(message_long=err.message))
+        if settings.ENABLE_ARCHIVER:
+            register.archive_job.meta = {
+                'embargo_urls': {
+                    contrib._id: project_utils.get_embargo_urls(register, contrib)
+                    for contrib in node.active_contributors()
+                }
+            }
+            register.archive_job.save()
+    else:
+        register.set_privacy('public', auth, log=False)
+        for child in register.get_descendants_recursive(lambda n: n.primary):
+            child.set_privacy('public', auth, log=False)
+
+    push_status_message('Files are being copied to the newly created registration, and you will receive an email notification containing a link to the registration when the copying is finished.')
 
     return {
-        'drafts': [serialize_draft_registration(d, auth) for d in all_drafts]
-    }
+        'status': 'initiated',
+        'urls': {
+            'registrations': node.web_url_for('node_registrations')
+        }
+    }, http.CREATED
 
 @must_have_permission(ADMIN)
 @must_be_valid_project
@@ -64,7 +114,9 @@ def get_draft_registrations(auth, node, *args, **kwargs):
     count = request.args.get('count', 100)
 
     drafts = DraftRegistration.find(
-        Q('initiator', 'eq', auth.user)
+        Q('branched_from', 'eq', node) &
+        Q('initiator', 'eq', auth.user) &
+        Q('registered_node', 'eq', None)
     )[:count]
     return {
         'drafts': [serialize_draft_registration(d, auth) for d in drafts]
@@ -92,7 +144,6 @@ def create_draft_registration(auth, node, *args, **kwargs):
         branched_from=node,
         registration_schema=meta_schema,
         registration_metadata=schema_data,
-        schema_name = schema_name
     )
     draft.save()
     return serialize_draft_registration(draft, auth), http.CREATED
@@ -131,7 +182,11 @@ def edit_draft_registration(auth, node, draft_id, **kwargs):
     if not draft:
         raise HTTPError(http.NOT_FOUND)
 
-    ret = serialize_node(node, auth, primary=True)
+    messages = draft.before_edit(auth)
+    for message in messages:
+        status.push_status_message(message)
+
+    ret = project_utils.serialize_node(node, auth, primary=True)
     ret['draft'] = serialize_draft_registration(draft, auth)
     return ret
 
@@ -155,8 +210,7 @@ def update_draft_registration(auth, node, draft_pk, *args, **kwargs):
         if (existing_schema.name, existing_schema.schema_version) != (meta_schema.name, meta_schema.schema_version):
             draft.registration_schema = meta_schema
 
-    draft.registration_metadata.update(schema_data)
-    draft.save()
+    draft.update_metadata(schema_data)
     return serialize_draft_registration(draft, auth), http.OK
 
 @must_have_permission(ADMIN)

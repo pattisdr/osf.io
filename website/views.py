@@ -235,16 +235,6 @@ def dashboard(auth):
             'dashboard_id': dashboard_id,
             }
 
-#TODO
-@must_be_logged_in
-def preregAdmin(auth):
-    user = auth.user
-    dashboard_folder = find_dashboard(user)
-    dashboard_id = dashboard_folder._id
-    return {'addons_enabled': user.get_addon_names(),
-            'dashboard_id': dashboard_id,
-            }
-
 def validate_page_num(page, pages):
     if page < 0 or (pages and page >= pages):
         raise HTTPError(http.BAD_REQUEST, data=dict(
@@ -298,7 +288,6 @@ def serialize_log(node_log, auth=None, anonymous=False):
         if isinstance(node_log.user, User)
         else {'fullname': node_log.foreign_user},
         'contributors': [node_log._render_log_contributor(c) for c in node_log.params.get("contributors", [])],
-        'api_key': node_log.api_key.label if node_log.api_key else '',
         'action': node_log.action,
         'params': sanitize.safe_unescape_html(node_log.params),
         'date': utils.iso8601format(node_log.date),
@@ -378,13 +367,3 @@ def resolve_guid(guid, suffix=None):
 
     # GUID not found
     raise HTTPError(http.NOT_FOUND)
-
-@must_be_logged_in
-def edit_draft(auth):
-    user = auth.user
-    dashboard_folder = find_dashboard(user)
-    dashboard_id = dashboard_folder._id
-    return {
-        'addons_enabled': user.get_addon_names(),
-        'dashboard_id': dashboard_id,
-    }

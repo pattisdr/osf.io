@@ -16,12 +16,14 @@ $(document).ready(function() {
     var draftEditor = new RegistrationEditor({
         schemas: '/api/v1/project/schema/',
         create: node.urls.api + 'draft/',
+	submit: node.urls.api + 'draft/{draft_pk}/submit/',
         update: node.urls.api + 'draft/{draft_pk}/',
         get: node.urls.api + 'draft/{draft_pk}/'
     }, 'registrationEditor');
 
-    var draft = new registrationUtils.Draft(window.contextVars.draft);    
+    var draft = new registrationUtils.Draft(window.contextVars.draft);
     draftEditor.init(draft);
+    window.draftEditor = draftEditor;
     $osf.applyBindings(draftEditor, '#draftRegistrationScope');
 
 });
