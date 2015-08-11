@@ -57,13 +57,14 @@ class DraftRegistrationList(generics.ListCreateAPIView, ODMFilterMixin):
     def create(self, request, *args):
         user = request.user
         draft = get_object_or_404(DraftRegistration, request.data['draft_id'])
-        if draft.is_deleted:
-            raise exceptions.NotFound(_('This resource has been deleted'))
-        if user._id in draft.permissions.keys():
-            if 'write' in draft.permissions[user._id]:
+        node = draft.branched_from
+        if node.is_deleted:
+             raise exceptions.NotFound(_('This resource has been deleted'))
+        if user._id in node.permissions:
+            if 'write' in node.permissions[user._id]:
                 token = token_creator(draft._id, user._id)
                 url = absolute_reverse('draft_registrations:registration-create', kwargs={'token': token})
-                registration_warning = REGISTER_WARNING.format((draft.title))
+                registration_warning = REGISTER_WARNING.format((node.title))
                 return Response({'data': {'draft_id': draft._id, 'warning_message': registration_warning, 'links': {'confirm_register': url}}}, status=status.HTTP_202_ACCEPTED)
         raise exceptions.PermissionDenied
 
