@@ -149,10 +149,9 @@ class TestRegistrationCreate(ApiTestCase):
         token_url = res.json['data']['links']['confirm_register']
         assert_equal(res.status_code, 202)
 
-        assert_equal(self.private_draft.is_registration, False)
         res = self.app.post(token_url, self.private_payload, auth=self.basic_auth, expect_errors = True)
         assert_equal(res.status_code, 201)
-        assert_equal(res.json['data']['title'], self.private_draft.title)
+        assert_equal(res.json['data']['title'], self.private_project.title)
         assert_equal(res.json['data']['properties']['registration'], True)
 
     def test_create_private_registration_logged_in_non_contributor(self):
