@@ -11,7 +11,7 @@ from api.nodes.views import NodeMixin
 from api.base.filters import ODMFilterMixin
 from website.models import DraftRegistration
 from website.language import REGISTER_WARNING
-from api.nodes.permissions import ContributorOrPublic
+from api.draft_registrations.permissions import ContributorOrPublic
 from api.base.utils import get_object_or_404, token_creator, absolute_reverse
 from api.draft_registrations.serializers import DraftRegSerializer, RegistrationCreateSerializer, RegistrationCreateSerializerWithToken
 
