@@ -189,7 +189,7 @@ class NodeDraftRegistrationsList(generics.ListCreateAPIView, NodeMixin):
             auth = Auth(user)
         drafts = DraftRegistration.find(
             Q('branched_from', 'eq', node))
-        draft_registrations = [reg for reg in drafts if reg.can_view(auth)]
+        draft_registrations = [reg for reg in drafts if node.can_view(auth)]
         return draft_registrations
 
 
