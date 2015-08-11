@@ -394,8 +394,10 @@ class TestDraftRegistrationPartialUpdate(ApiTestCase):
         assert_equal(res.status_code, 403)
 
     def test_partial_update_private_registration_draft_logged_in_read_only_contributor(self):
-        self.private_draft.add_contributor(self.user_two, permissions=['read'])
-        res = self.app.patch(self.private_url, {
+        self.private_project.save()
+        draft = DraftRegistrationFactory(initiator=self.user, branched_from=self.private_project)
+        url = '/{}draft_registrations/{}/'.format(API_BASE, draft._id)
+        res = self.app.patch(url, {
             'registration_metadata': self.registration_metadata,
         }, auth=self.basic_auth_two, expect_errors=True)
         assert_equal(res.status_code, 403)
