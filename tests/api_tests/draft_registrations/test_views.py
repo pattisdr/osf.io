@@ -101,22 +101,23 @@ class TestRegistrationCreate(ApiTestCase):
 
         res = self.app.post(token_url, self.public_payload, auth=self.basic_auth, expect_errors = True)
         assert_equal(res.status_code, 201)
-        assert_equal(res.json['data']['title'], self.public_draft.title)
+        assert_equal(res.json['data']['title'], self.public_project.title)
         assert_equal(res.json['data']['properties']['registration'], True)
 
-    def test_create_registration_from_deleted_draft(self):
-        self.public_draft.is_deleted = True
-        self.public_draft.save()
-        res = self.app.post(self.public_url, self.public_payload, auth=self.basic_auth, expect_errors=True)
-        assert_equal(res.status_code, 404)
+    # Draft has no field is_deleted
+    # def test_create_registration_from_deleted_draft(self):
+    #     self.public_draft.is_deleted = True
+    #     self.public_draft.save()
+    #     res = self.app.post(self.public_url, self.public_payload, auth=self.basic_auth, expect_errors=True)
+    #     assert_equal(res.status_code, 404)
 
-    def test_create_registration_with_token_from_deleted_draft(self):
-        self.public_draft.is_deleted = True
-        self.public_draft.save()
-        token = token_creator(self.private_draft._id, self.user._id)
-        url = '/{}draft_registrations/{}/'.format(API_BASE, token)
-        res = self.app.post(self.public_url, self.public_payload, auth=self.basic_auth, expect_errors=True)
-        assert_equal(res.status_code, 404)
+    # def test_create_registration_with_token_from_deleted_draft(self):
+    #     self.public_draft.is_deleted = True
+    #     self.public_draft.save()
+    #     token = token_creator(self.private_draft._id, self.user._id)
+    #     url = '/{}draft_registrations/{}/'.format(API_BASE, token)
+    #     res = self.app.post(self.public_url, self.public_payload, auth=self.basic_auth, expect_errors=True)
+    #     assert_equal(res.status_code, 404)
 
     def test_invalid_token_create_registration(self):
         res = self.app.post(self.private_url, self.private_payload, auth=self.basic_auth, expect_errors=True)
@@ -159,8 +160,10 @@ class TestRegistrationCreate(ApiTestCase):
         assert_equal(res.status_code, 403)
 
     def test_create_private_registration_logged_in_read_only_contributor(self):
-        self.private_draft.add_contributor(self.user_two, permissions = ['read'])
-        res = self.app.post(self.private_url, self.private_payload, auth=self.basic_auth_two, expect_errors=True)
+        self.private_project.add_contributor(self.user_two, permissions=['read'])
+        self.private_project.save()
+        draft = DraftRegistrationFactory(initiator=self.user, branched_from=self.private_project)
+        res = self.app.post(self.private_url, {'draft_id': draft._id}, auth=self.basic_auth_two, expect_errors=True)
         assert_equal(res.status_code, 403)
 
 
