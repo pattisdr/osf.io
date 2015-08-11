@@ -78,7 +78,6 @@ class RegistrationCreateSerializerWithToken(NodeSerializer):
         registration = node.register_node(
             schema=schema,
             auth=Auth(user),
-            template=schema.schema['title'],
             data=data
         )
         registration.is_deleted = False
