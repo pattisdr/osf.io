@@ -1,7 +1,7 @@
 from framework.auth import Auth
 from rest_framework import permissions
 
-from website.models import Node, Pointer, DraftRegistration
+from website.models import Node, Pointer
 
 def get_user_auth(request):
     user = request.user
@@ -15,7 +15,7 @@ def get_user_auth(request):
 class ContributorOrPublic(permissions.BasePermission):
 
     def has_object_permission(self, request, view, obj):
-        assert isinstance(obj, (Node, Pointer, DraftRegistration)), 'obj must be a Node or Pointer, got {}'.format(obj)
+        assert isinstance(obj, (Node, Pointer)), 'obj must be a Node or Pointer, got {}'.format(obj)
         auth = get_user_auth(request)
         if request.method in permissions.SAFE_METHODS:
             return obj.is_public or obj.can_view(auth)
@@ -45,7 +45,7 @@ class ReadOnlyIfRegistration(permissions.BasePermission):
     """Makes PUT and POST forbidden for registrations."""
 
     def has_object_permission(self, request, view, obj):
-        assert isinstance(obj, (Node)), 'obj must be a Node'
+        assert isinstance(obj, Node), 'obj must be a Node'
         if obj.is_registration:
             return request.method in permissions.SAFE_METHODS
         return True
