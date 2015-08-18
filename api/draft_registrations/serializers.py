@@ -5,7 +5,7 @@ from rest_framework.exceptions import PermissionDenied, NotFound
 
 from website.project.model import Q
 from api.base.utils import token_creator
-from website.project.views import drafts
+from website.project.views.drafts import get_schema_or_fail
 from api.base.utils import get_object_or_404
 from api.base.serializers import JSONAPISerializer
 from website.project.model import DraftRegistration, Node
@@ -17,23 +17,25 @@ class DraftRegSerializer(DraftRegistrationSerializer):
         """Update instance with the validated data. Requires
         the request to be in the serializer context.
         """
+
+        schema_data = validated_data.get('registration_metadata', {})
+        schema_name = validated_data.get('schema_name')
         schema_version = int(validated_data.get('schema_version', 1))
-        if "schema_name" in validated_data.keys():
-            schema_name = validated_data['schema_name']
-            meta_schema = drafts.get_schema_or_fail(
+        if "schema_name":
+            meta_schema = get_schema_or_fail(
                 Q('name', 'eq', schema_name) &
                 Q('schema_version', 'eq', schema_version)
             )
-            instance.registration_schema = meta_schema
+            existing_schema = instance.registration_schema
 
-        if "registration_metadata" in validated_data.keys():
-            instance.registration_metadata = validated_data.get('registration_metadata', {})
+            if (existing_schema.name, existing_schema.schema_version) != (meta_schema.name, meta_schema.schema_version):
+                instance.registration_schema = meta_schema
 
+        instance.registration_metadata = schema_data
         instance.save()
         return instance
     class Meta:
         type_ = 'registrations'
-
 
 class RegistrationCreateSerializer(JSONAPISerializer):
     draft_id = ser.CharField(source='_id')
