@@ -6,7 +6,7 @@ from framework.exceptions import HTTPError
 from rest_framework import serializers as ser
 
 from modularodm import Q
-from website.project.views import drafts
+from website.project.views.drafts import get_schema_or_fail
 from website.project.metadata.schemas import OSF_META_SCHEMAS
 from website.models import Node, DraftRegistration
 from api.base.serializers import JSONAPISerializer, LinksField, Link, WaterbutlerLink
@@ -150,6 +150,7 @@ class DraftRegistrationSerializer(JSONAPISerializer):
     datetime_initiated = ser.DateTimeField(read_only=True)
     datetime_updated = ser.DateTimeField(read_only=True)
 
+    # TODO Add self link and html link for Draft Registration
     # links = LinksField({
     #     'html': 'get_absolute_url',
     # })
@@ -160,26 +161,48 @@ class DraftRegistrationSerializer(JSONAPISerializer):
 
         """
         request = self.context['request']
-        schema_name = validated_data['schema_name']
+        schema_name = validated_data.get('schema_name')
         if not schema_name:
-            raise HTTPError(http.BAD_REQUEST)
+            raise HTTPError(
+                http.BAD_REQUEST,
+                data={
+                    'message_short': 'Must specify a schema_name',
+                    'message_long': 'Please specify a schema_name'
+                }
+            )
 
         schema_version = int(validated_data.get('schema_version', 1))
-        meta_schema = drafts.get_schema_or_fail(
+        meta_schema = get_schema_or_fail(
             Q('name', 'eq', schema_name) &
             Q('schema_version', 'eq', schema_version)
         )
         questions = validated_data.get('registration_metadata', {})
         node = self.context['view'].get_node()
         user = request.user
-        draft = DraftRegistration(
-            branched_from=node,
-            initiator=user,
-            registration_schema=meta_schema,
-            registration_metadata=questions,
-        )
-        draft.save()
+        draft = node.create_draft_registration(user, meta_schema, questions, save=True)
         return draft
+
+
+    # data = request.values
+    #
+    # schema_name = data.get('schema_name')
+    # if not schema_name:
+    #     raise HTTPError(
+    #         http.BAD_REQUEST,
+    #         data={
+    #             'message_short': 'Must specify a schema_name',
+    #             'message_long': 'Please specify a schema_name'
+    #         }
+    #     )
+    #
+    # schema_version = data.get('schema_version', 1)
+    #
+    # meta_schema = get_schema_or_fail(
+    #     Q('name', 'eq', schema_name) &
+    #     Q('schema_version', 'eq', int(schema_version))
+    # )
+    # draft = node.create_draft_registration(auth.user, meta_schema, {}, save=True)
+    # return redirect(node.web_url_for('edit_draft_registration_page', draft_id=draft._id))
 
     # def get_absolute_url(self, obj):
     #     return obj.absolute_url
