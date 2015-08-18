@@ -11,7 +11,6 @@ def get_user_auth(request):
         auth = Auth(user)
     return auth
 
-
 class ContributorOrPublic(permissions.BasePermission):
 
     def has_object_permission(self, request, view, obj):
@@ -39,7 +38,6 @@ class ContributorOrPublicForPointers(permissions.BasePermission):
         else:
             has_auth = parent_node.can_edit(auth) and pointer_node.can_edit(auth)
             return has_auth
-
 
 class ReadOnlyIfRegistration(permissions.BasePermission):
     """Makes PUT and POST forbidden for registrations."""
