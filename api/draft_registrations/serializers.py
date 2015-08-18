@@ -21,7 +21,7 @@ class DraftRegSerializer(DraftRegistrationSerializer):
         schema_data = validated_data.get('registration_metadata', {})
         schema_name = validated_data.get('schema_name')
         schema_version = int(validated_data.get('schema_version', 1))
-        if "schema_name":
+        if schema_name:
             meta_schema = get_schema_or_fail(
                 Q('name', 'eq', schema_name) &
                 Q('schema_version', 'eq', schema_version)
