@@ -889,6 +889,7 @@ class TestNodeRegistrationList(ApiTestCase):
 
 class TestNodeDraftRegistrationList(ApiTestCase):
     def setUp(self):
+        ensure_schemas()
         super(TestNodeDraftRegistrationList, self).setUp()
         self.user = UserFactory.build()
         password = fake.password()

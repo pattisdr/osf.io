@@ -10,6 +10,7 @@ from tests.factories import UserFactory, ProjectFactory, RegistrationFactory, Dr
 
 class TestDraftRegistrationList(ApiTestCase):
     def setUp(self):
+        ensure_schemas()
         super(TestDraftRegistrationList, self).setUp()
         self.user = UserFactory.build()
         password = fake.password()
@@ -333,7 +334,7 @@ class TestDraftRegistrationPartialUpdate(ApiTestCase):
     def test_partial_update_schema_version_does_not_exist(self):
         res = self.app.patch(self.public_url, {
             'schema_name': self.schema_name,
-            'schema_version': 2
+            'schema_version': 5
         }, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 404)
 
