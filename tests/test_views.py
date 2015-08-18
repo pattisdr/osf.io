@@ -9,6 +9,8 @@ import datetime as dt
 import mock
 import httplib as http
 import math
+import datetime
+import time
 
 from nose.tools import *  # noqa PEP8 asserts
 from tests.test_features import requires_search
@@ -22,16 +24,18 @@ from framework.auth import User, Auth
 from framework.auth.utils import impute_names_model
 from framework.auth.exceptions import InvalidTokenError
 from framework.tasks import handlers
+from framework.mongo import database
 
 from website import mailchimp_utils
 from website.views import _rescale_ratio
-from website.util import permissions, sanitize
-from website.models import Node, Pointer, NodeLog
+from website.util import permissions
+from website.models import Node, Pointer, NodeLog, MetaSchema, DraftRegistration
 from website.project.model import ensure_schemas, has_anonymous_link
 from website.project.views.contributor import (
     send_claim_email,
     deserialize_contributors,
     send_claim_registered_email,
+    notify_added_contributor
 )
 from website.profile.utils import add_contributor_json, serialize_unregistered
 from website.profile.views import fmt_date_or_none
@@ -41,8 +45,9 @@ from website.util import rubeus
 from website.project.views.node import _view_project, abbrev_authors, _should_show_wiki_widget
 from website.project.views.comment import serialize_comment
 from website.project.decorators import check_can_access
+from website.project.signals import contributor_added
 from website.addons.github.model import AddonGitHubOauthSettings
-from website.archiver import utils as archiver_utils
+
 
 from tests.base import (
     OsfTestCase,
@@ -55,11 +60,22 @@ from tests.factories import (
     UserFactory, ProjectFactory, WatchConfigFactory,
     NodeFactory, NodeLogFactory, AuthUserFactory, UnregUserFactory,
     RegistrationFactory, CommentFactory, PrivateLinkFactory, UnconfirmedUserFactory, DashboardFactory, FolderFactory,
-    ProjectWithAddonFactory,
+    ProjectWithAddonFactory, MockAddonNodeSettings, DraftRegistrationFactory
 )
-
 from website.settings import ALL_MY_REGISTRATIONS_ID, ALL_MY_PROJECTS_ID
 
+class Addon(MockAddonNodeSettings):
+    @property
+    def complete(self):
+        return True
+    def archive_errors(self):
+        return 'Error'
+class Addon2(MockAddonNodeSettings):
+    @property
+    def complete(self):
+        return True
+    def archive_errors(self):
+        return 'Error'
 
 class TestViewingProjectWithPrivateLink(OsfTestCase):
 
@@ -134,6 +150,15 @@ class TestViewingProjectWithPrivateLink(OsfTestCase):
 
 
 class TestProjectViews(OsfTestCase):
+
+    ADDONS_UNDER_TEST = {
+        'addon1': {
+            'node_settings': Addon,
+        },
+        'addon2': {
+            'node_settings': Addon2,
+        },
+    }
 
     def setUp(self):
         super(TestProjectViews, self).setUp()
@@ -447,7 +472,7 @@ class TestProjectViews(OsfTestCase):
         assert_equal(len(res.json['others_count']), 1)
         assert_equal(res.json['contributors'][0]['separator'], ',')
         assert_equal(res.json['contributors'][1]['separator'], ',')
-        assert_equal(res.json['contributors'][2]['separator'], '&nbsp;&')
+        assert_equal(res.json['contributors'][2]['separator'], ' &')
 
     def test_edit_node_title(self):
         url = "/api/v1/project/{0}/edit/".format(self.project._id)
@@ -521,66 +546,11 @@ class TestProjectViews(OsfTestCase):
         assert_equal("tag_removed", self.project.logs[-1].action)
         assert_equal("foo'ta#@%#%^&g?", self.project.logs[-1].params['tag'])
 
-    @mock.patch('website.archiver.tasks.archive.si')
-    def test_register_template_page(self, mock_archive):
-        url = "/api/v1/project/{0}/register/Replication_Recipe_(Brandt_et_al.,_2013):_Post-Completion/".format(
-            self.project._primary_key)
-        self.app.post_json(url, {'registrationChoice': 'Make registration public immediately'}, auth=self.auth)
-        self.project.reload()
-        archiver_utils.archive_success(self.project.node__registrations[0], self.project.creator)
-        # A registration was added to the project's registration list
-        assert_equal(len(self.project.node__registrations), 1)
-        # A log event was saved
-        assert_equal(self.project.logs[-1].action, "project_registered")
-        # Most recent node is a registration
-        reg = Node.load(self.project.node__registrations[-1])
-        assert_true(reg.is_registration)
-
-    @mock.patch('framework.tasks.handlers.enqueue_task')
-    def test_register_template_make_public_creates_public_registration(self, mock_enquque):
-        url = "/api/v1/project/{0}/register/Replication_Recipe_(Brandt_et_al.,_2013):_Post-Completion/".format(
-            self.project._primary_key)
-        self.app.post_json(url, {'registrationChoice': 'immediate'}, auth=self.auth)
-        self.project.reload()
-        # Most recent node is a registration
-        reg = Node.load(self.project.node__registrations[-1])
-        assert_true(reg.is_registration)
-        # The registration created is public
-        assert_true(reg.is_public)
-
-    @mock.patch('website.archiver.tasks.archive.si')
-    def test_register_template_with_embargo_creates_embargo(self, mock_archive):
-        url = "/api/v1/project/{0}/register/Replication_Recipe_(Brandt_et_al.,_2013):_Post-Completion/".format(
-            self.project._primary_key)
-        self.app.post_json(
-            url,
-            {
-                'registrationChoice': 'embargo',
-                'embargoEndDate': "Fri, 01 Jan {year} 05:00:00 GMT".format(year=str(dt.date.today().year + 1))
-            },
-            auth=self.auth)
-
-        self.project.reload()
-        # Most recent node is a registration
-        reg = Node.load(self.project.node__registrations[-1])
-        assert_true(reg.is_registration)
-        # The registration created is not public
-        assert_false(reg.is_public)
-        # The registration is pending an embargo that has not been approved
-        assert_true(reg.pending_embargo)
-        assert_false(reg.embargo_end_date)
-
-    def test_register_template_page_with_invalid_template_name(self):
-        url = self.project.web_url_for('node_register_template_page', template='invalid')
-        res = self.app.get(url, expect_errors=True, auth=self.auth)
-        assert_equal(res.status_code, 404)
-        assert_in('Template not found', res)
-
     # Regression test for https://github.com/CenterForOpenScience/osf.io/issues/1478
     @mock.patch('website.archiver.tasks.archive.si')
     def test_registered_projects_contributions(self, mock_archive):
         # register a project
-        self.project.register_node(None, Auth(user=self.project.creator), '', None)
+        self.project.register_node(None, Auth(user=self.project.creator), None)
         # get the first registered project of a project
         url = self.project.api_url_for('get_registrations')
         res = self.app.get(url, auth=self.auth)
@@ -1590,6 +1560,7 @@ class TestAddingContributorViews(OsfTestCase):
         self.project = ProjectFactory(creator=self.creator)
         # Authenticate all requests
         self.app.authenticate(*self.creator.auth)
+        contributor_added.connect(notify_added_contributor)
 
     def test_serialize_unregistered_without_record(self):
         name, email = fake.name(), fake.email()
@@ -1717,11 +1688,43 @@ class TestAddingContributorViews(OsfTestCase):
 
         # send request
         url = self.project.api_url_for('project_contributors_post')
-        assert self.project.can_edit(user=self.creator)
+        assert_true(self.project.can_edit(user=self.creator))
         self.app.post_json(url, payload, auth=self.creator.auth)
 
         # finalize_invitation should only have been called once
         assert_equal(mock_send_claim_email.call_count, 1)
+
+    @mock.patch('website.mails.send_mail')
+    def test_add_contributors_post_only_sends_one_email_to_registered_user(self, mock_send_mail):
+        # Project has components
+        comp1, comp2 = NodeFactory(
+            creator=self.creator), NodeFactory(creator=self.creator)
+        self.project.nodes.append(comp1)
+        self.project.nodes.append(comp2)
+        self.project.save()
+
+        # A registered user is added to the project AND its components
+        user = UserFactory()
+        user_dict = {
+            'id': user._id,
+            'fullname': user.fullname,
+            'email': user.username,
+            'permission': 'write',
+            'visible': True}
+
+        payload = {
+            'users': [user_dict],
+            'node_ids': [comp1._primary_key, comp2._primary_key]
+        }
+
+        # send request
+        url = self.project.api_url_for('project_contributors_post')
+        assert self.project.can_edit(user=self.creator)
+        self.app.post_json(url, payload, auth=self.creator.auth)
+
+        # send_mail should only have been called once
+        assert_equal(mock_send_mail.call_count, 1)
+
 
     @mock.patch('website.project.views.contributor.send_claim_email')
     def test_email_sent_when_unreg_user_is_added(self, send_mail):
@@ -1742,6 +1745,81 @@ class TestAddingContributorViews(OsfTestCase):
         self.app.post_json(url, payload).maybe_follow()
         assert_true(send_mail.called)
         assert_true(send_mail.called_with(email=email))
+
+    @mock.patch('website.mails.send_mail')
+    def test_email_sent_when_reg_user_is_added(self, send_mail):
+        contributor = UserFactory()
+        contributors = [{
+            'user': contributor,
+            'visible': True,
+            'permissions': ['read', 'write']
+        }]
+        project = ProjectFactory()
+        project.add_contributors(contributors, auth=Auth(self.project.creator))
+        project.save()
+        assert_true(send_mail.called)
+        send_mail.assert_called_with(
+            contributor.username,
+            mails.CONTRIBUTOR_ADDED,
+            user=contributor,
+            node=project)
+        assert_equal(contributor.contributor_added_email_records[project._id]['last_sent'], int(time.time()))
+
+    @mock.patch('website.mails.send_mail')
+    def test_contributor_added_email_not_sent_to_unreg_user(self, send_mail):
+        unreg_user = UnregUserFactory()
+        contributors = [{
+            'user': unreg_user,
+            'visible': True,
+            'permissions': ['read', 'write']
+        }]
+        project = ProjectFactory()
+        project.add_contributors(contributors, auth=Auth(self.project.creator))
+        project.save()
+        assert_false(send_mail.called)
+
+    @mock.patch('website.mails.send_mail')
+    def test_forking_project_does_not_send_contributor_added_email(self, send_mail):
+        project = ProjectFactory()
+        project.fork_node(auth=Auth(project.creator))
+        assert_false(send_mail.called)
+
+    @mock.patch('website.mails.send_mail')
+    def test_templating_project_does_not_send_contributor_added_email(self, send_mail):
+        project = ProjectFactory()
+        project.use_as_template(auth=Auth(project.creator))
+        assert_false(send_mail.called)
+
+    @mock.patch('website.archiver.tasks.archive.si')
+    @mock.patch('website.mails.send_mail')
+    def test_registering_project_does_not_send_contributor_added_email(self, send_mail, mock_archive):
+        project = ProjectFactory()
+        project.register_node(None, Auth(user=project.creator), '', None)
+        assert_false(send_mail.called)
+
+    @mock.patch('website.mails.send_mail')
+    def test_notify_contributor_email_does_not_send_before_throttle_expires(self, send_mail):
+        contributor = UserFactory()
+        project = ProjectFactory()
+        notify_added_contributor(project, contributor)
+        assert_true(send_mail.called)
+
+        # 2nd call does not send email because throttle period has not expired
+        notify_added_contributor(project, contributor)
+        assert_equal(send_mail.call_count, 1)
+
+    @mock.patch('website.mails.send_mail')
+    def test_notify_contributor_email_sends_after_throttle_expires(self, send_mail):
+        throttle = 0.5
+
+        contributor = UserFactory()
+        project = ProjectFactory()
+        notify_added_contributor(project, contributor, throttle=throttle)
+        assert_true(send_mail.called)
+
+        time.sleep(1)  # throttle period expires
+        notify_added_contributor(project, contributor, throttle=throttle)
+        assert_equal(send_mail.call_count, 2)
 
     def test_add_multiple_contributors_only_adds_one_log(self):
         n_logs_pre = len(self.project.logs)
@@ -1792,6 +1870,10 @@ class TestAddingContributorViews(OsfTestCase):
         child.reload()
         assert_equal(len(child.contributors),
                      n_contributors_pre + len(payload['users']))
+
+    def tearDown(self):
+        super(TestAddingContributorViews, self).tearDown()
+        contributor_added.disconnect(notify_added_contributor)
 
 
 class TestUserInviteViews(OsfTestCase):
@@ -4358,6 +4440,246 @@ class TestUserConfirmSignal(OsfTestCase):
 
         assert_equal(mock_signals.signals_sent(), set([auth.signals.user_confirmed]))
 
+class TestDraftRegistrationViews(OsfTestCase):
+
+    def setUp(self, *args, **kwargs):
+        super(TestDraftRegistrationViews, self).setUp(*args, **kwargs)
+
+        self.user = AuthUserFactory()
+        self.auth = self.user.auth
+        self.node = ProjectFactory(creator=self.user)
+
+        MetaSchema.remove()
+        ensure_schemas()
+        self.meta_schema = MetaSchema.find_one(
+            Q('name', 'eq', 'Open-Ended Registration') &
+            Q('schema_version', 'eq', 1)
+        )
+        self.draft = DraftRegistrationFactory(
+            initiator=self.user,
+            branched_from=self.node,
+            registration_schema=self.meta_schema,
+            registration_metadata={
+                'summary': {'value': 'Some airy'}
+            }
+        )
+        self.draft.save()
+
+        current_month = datetime.datetime.now().strftime("%B")
+        current_year = datetime.datetime.now().strftime("%Y")
+
+        valid_date = datetime.datetime.now() + datetime.timedelta(days=180)
+        self.valid_embargo_payload = json.dumps({
+            u'embargoEndDate': unicode(valid_date.strftime('%a, %d, %B %Y %H:%M:%S')) + u' GMT',
+            u'registrationChoice': 'embargo',
+            u'summary': unicode(fake.sentence())
+        })
+        self.invalid_embargo_date_payload = json.dumps({
+            u'embargoEndDate': u"Thu, 01 {month} {year} 05:00:00 GMT".format(
+                month=current_month,
+                year=str(int(current_year) - 1)
+            ),
+            u'registrationChoice': 'embargo',
+            u'summary': unicode(fake.sentence())
+        })
+
+    def tearDown(self, *args, **kwargs):
+        super(TestDraftRegistrationViews, self).tearDown(*args, **kwargs)
+        DraftRegistration.remove()
+
+    @unittest.skip('TODO: test when we support draft review')
+    def test_submit_draft_for_review(self):
+        pass
+
+    @mock.patch('website.project.model.DraftRegistration.register', autospec=True)
+    def test_register_draft_registration(self, mock_register_draft):
+
+        url = self.node.api_url_for('register_draft_registration', draft_id=self.draft._id)
+        self.app.post_json(url, {
+            'registrationChoice': 'Make registration public immediately'
+        }, auth=self.auth)
+        assert_equal(mock_register_draft.call_args[0][0]._id, self.draft._id)
+
+    @mock.patch('framework.tasks.handlers.enqueue_task')
+    def test_register_template_make_public_creates_public_registration(self, mock_enquque):
+        url = self.node.api_url_for('register_draft_registration', draft_id=self.draft._id)
+        self.app.post_json(url, {'registrationChoice': 'immediate'}, auth=self.auth)
+        self.node.reload()
+        # Most recent node is a registration
+        reg = Node.load(self.node.node__registrations[-1])
+        assert_true(reg.is_registration)
+        # The registration created is public
+        assert_true(reg.is_public)
+
+    @mock.patch('framework.tasks.handlers.enqueue_task')
+    def test_register_template_make_public_makes_children_public(self, mock_enquque):
+        comp1 = NodeFactory(parent=self.node)
+        NodeFactory(parent=comp1)
+
+        url = self.node.api_url_for('register_draft_registration', draft_id=self.draft._id)
+        self.app.post_json(url, {'registrationChoice': 'immediate'}, auth=self.auth)
+        self.node.reload()
+        # Most recent node is a registration
+        reg = Node.load(self.node.node__registrations[-1])
+        for node in reg.get_descendants_recursive():
+            assert_true(node.is_registration)
+            assert_true(node.is_public)
+
+    @mock.patch('framework.tasks.handlers.enqueue_task')
+    def test_register_draft_registration_with_embargo_creates_embargo(self, mock_enquque):
+        url = self.node.api_url_for('register_draft_registration', draft_id=self.draft._id)
+        self.app.post_json(
+            url,
+            {
+                'registrationChoice': 'embargo',
+                'embargoEndDate': "Fri, 01 Jan {year} 05:00:00 GMT".format(year=str(dt.date.today().year + 1))
+            },
+            auth=self.auth)
+
+        self.node.reload()
+        # Most recent node is a registration
+        reg = Node.load(self.node.node__registrations[-1])
+        assert_true(reg.is_registration)
+        # The registration created is not public
+        assert_false(reg.is_public)
+        # The registration is pending an embargo that has not been approved
+        assert_true(reg.pending_embargo)
+        assert_false(reg.embargo_end_date)
+
+    @mock.patch('framework.tasks.handlers.enqueue_task')
+    def test_register_draft_registration_with_embargo_adds_to_parent_project_logs(self, mock_enquque):
+        initial_project_logs = len(self.node.logs)
+        self.app.post(
+            self.node.api_url_for('register_draft_registration', draft_id=self.draft._id),
+            self.valid_embargo_payload,
+            content_type='application/json',
+            auth=self.user.auth
+        )
+        self.node.reload()
+        # Logs: Created, registered, embargo initiated
+        assert_equal(len(self.node.logs), initial_project_logs + 1)
+
+    @mock.patch('framework.tasks.handlers.enqueue_task')
+    def test_register_draft_registration_with_embargo_is_not_public(self, mock_enqueue):
+        res = self.app.post(
+            self.node.api_url_for('register_draft_registration', draft_id=self.draft._id),
+            self.valid_embargo_payload,
+            content_type='application/json',
+            auth=self.user.auth
+        )
+
+        assert_equal(res.status_code, 202)
+
+        registration = Node.find().sort('-registered_date')[0]
+
+        assert_true(registration.is_registration)
+        assert_false(registration.is_public)
+        assert_true(registration.pending_registration)
+        assert_is_not_none(registration.embargo)
+
+    @mock.patch('framework.tasks.handlers.enqueue_task')
+    def test_register_draft_registration_invalid_embargo_end_date_raises_HTTPError(self, mock_enqueue):
+        res = self.app.post(
+            self.node.api_url_for('register_draft_registration', draft_id=self.draft._id),
+            self.invalid_embargo_date_payload,
+            content_type='application/json',
+            auth=self.user.auth,
+            expect_errors=True
+        )
+
+        assert_equal(res.status_code, 400)
+
+    def test_get_draft_registrations_gets_drafts_for_node(self):
+
+        dummy = NodeFactory()
+        for i in range(5):
+            d = DraftRegistrationFactory(
+                initiator=self.user,
+                branched_from=dummy,
+                meta_schema=self.meta_schema,
+                schema_data={}
+            )
+            d.save()
+        found = [self.draft]
+        for i in range(3):
+            d = DraftRegistrationFactory(
+                initiator=self.user,
+                branched_from=self.node,
+                meta_schema=self.meta_schema,
+                schema_data={}
+            )
+            d.save()
+            found.append(d)
+        url = self.node.api_url_for('get_draft_registrations')
+        res = self.app.get(url, auth=self.auth).json
+        # 3 new, 1 from setUp
+        assert_equal(len(res['drafts']), 4)
+        for draft in res['drafts']:
+            assert_in(draft['pk'], [f._id for f in found])
+
+    def test_create_draft_registration(self):
+        target = NodeFactory(creator=self.user)
+        metadata = {
+            'summary': {'value': 'Some airy'}
+        }
+        payload = {
+            'schema_name': 'Open-Ended Registration',
+            'schema_version': 1,
+            'schema_data': metadata,
+        }
+        url = target.api_url_for('create_draft_registration')
+        res = self.app.post_json(url, payload, auth=self.auth)
+        assert_equal(res.status_code, 201)
+        draft = DraftRegistration.find_one(Q('branched_from', 'eq', target))
+        assert_equal(draft.registration_schema, self.meta_schema)
+        assert_equal(draft.registration_metadata, metadata)
+
+    def test_new_draft_registration(self):
+        target = NodeFactory(creator=self.user)
+        payload = {
+            'schema_name': 'Open-Ended Registration',
+            'schema_version': 1
+        }
+        url = target.web_url_for('new_draft_registration')
+        res = self.app.post(url, payload, auth=self.auth)
+        assert_equal(res.status_code, 302)
+        draft = DraftRegistration.find_one(Q('branched_from', 'eq', target))
+        assert_equal(draft.registration_schema, self.meta_schema)
+
+    def test_update_draft_registration(self):
+        metadata = {
+            'summary': {'value': 'updated'}
+        }
+        payload = {
+            'schema_data': metadata,
+            'schema_name': 'OSF-Standard Pre-Data Collection Registration',
+            'schema_version': 1
+        }
+        url = self.node.api_url_for('update_draft_registration', draft_id=self.draft._id)
+        self.app.put_json(url, payload, auth=self.auth)
+
+        open_ended_schema = MetaSchema.find_one(
+            Q('name', 'eq', 'OSF-Standard Pre-Data Collection Registration') &
+            Q('schema_version', 'eq', 1)
+        )
+        self.draft.reload()
+        assert_equal(open_ended_schema, self.draft.registration_schema)
+        assert_equal(metadata, self.draft.registration_metadata)
+
+    def test_delete_draft_registration(self):
+        assert_equal(1, DraftRegistration.find().count())
+        url = self.node.api_url_for('delete_draft_registration', draft_id=self.draft._id)
+        self.app.delete(url, auth=self.auth)
+        assert_equal(0, DraftRegistration.find().count())
+
+    def test_get_metaschemas(self):
+        url = '/api/v1/project/schema/'
+        res = self.app.get(url).json
+        schema_names = database['metaschema'].distinct('name')
+        assert_equal(len(res['meta_schemas']), len(schema_names))
+        url = '/api/v1/project/schema/?include=all'
+        res = self.app.get(url).json
+        assert_equal(len(res['meta_schemas']), MetaSchema.find().count())
 
 if __name__ == '__main__':
     unittest.main()

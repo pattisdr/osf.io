@@ -60,8 +60,8 @@
       <div class="col-md-12">
         <div class="form-group">
           <label class="control-label" data-bind="text: title"></label>
-          <p class="help-block" data-bind="text: description"></p>
-          <span class="example-block">
+          <p class="help-block" data-bind="text: description"></p>          
+          <span data-bind="if: help" class="example-block">
             <a data-bind="click: toggleExample">Show Example</a>
             <p data-bind="visible: showExample, text: help"></p>
           </span>
@@ -71,11 +71,14 @@
             <div class="col-md-12">
               <div class="form-group" data-bind="css: {has-success: $data.isComplete}">
                 <span data-bind="with: $root.context($data)">
-                  <span data-bind="if: $root.validate"> 
-                    <ul class="list-group" data-bind="foreach: validationMessages">
-                      <li class="list-group-item" 
-                          data-bind="text: validationMessages,
-                                     css: validationState"></span>
+                  <span data-bind="if: $root.showValidation">
+                    <p class="text-error" data-bind="validationMessage: $data.value"></p>
+                    <ul class="list-group" data-bind="foreach: $data.validationMessages">
+                      <li class="list-group-item">
+                        <span class="text-danger"
+                              data-bind="text: $data">
+                        </span>
+                      </li>
                     </ul>
                   </span>
                   <div data-bind="template: {data: $data, name: type}"></div>
@@ -137,10 +140,18 @@
         </li>
     </ul>
     <div class="input-group">
-      <input class="form-control registration-editor-comment" type="text" data-bind="value: nextComment, valueUpdate: 'keyup', event: {'keyup': $root.save}" />
+      <input class="form-control registration-editor-comment" type="text" 
+             data-bind="value: nextComment,
+                        valueUpdate: 'keyup',
+                        event: {'keyup': $root.save},
+                        onKeyPress: {
+                          keyCode: 13,
+                          listener: addComment.bind($data, root.save)
+                        }" />
       <span class="input-group-btn">
-        <button class="btn btn primary" data-bind="click: $data.addComment.bind($data, $root.save),
-                                                   enable: $data.allowAddNext">Add</button>
+        <button class="btn btn primary" 
+                data-bind="click: addComment.bind($data, $root.save),
+                           enable: allowAddNext">Add</button>
       </span>
     </div>
 </script>

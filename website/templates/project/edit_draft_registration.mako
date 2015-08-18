@@ -1,7 +1,7 @@
 <%inherit file="project/project_base.mako" />
 <%def name="title()">Edit ${node['title']} registration</%def>
 
-<div id="draftRegistrationScope">
+<div id="draftRegistrationScope" class="scripted">
   <div class="row">
     <h3>
       <div class="row">
@@ -42,7 +42,9 @@
                       <ul class="list-group" data-bind="foreach: {data: Object.keys(page.questions), as: 'qid'}">
                         <span data-bind="with: page.questions[qid]">
                           <li data-bind="css: {
-                                           registration-editor-question-current: $root.currentQuestion().id === $data.id
+                                           list-item-warning: !$data.value.isValid(),
+                                           registration-editor-question-current: $root.currentQuestion().id === $data.id,
+                                           list-group-item-danger: $root.showValidation() && $data.validationStatus()
                                          },
                                          click: $root.currentQuestion.bind($root, $data)"
                               class="registration-editor-question list-group-item">
@@ -55,10 +57,20 @@
                 </ul>
               </div>
               <div class="span8 col-md-9 columns eight large-8">
-                <a id="editorPreviousQuestion" data-bind="click: previousQuestion" style="padding-left: 5px;">
+                <a id="editorPreviousQuestion" 
+                   data-bind="click: previousQuestion,
+                              onKeyPress: {
+                                keyCode: 37,
+                                listener: previousQuestion.bind($data)
+                              }" style="padding-left: 5px;">
                   <i style="display:inline-block; padding-left: 5px; padding-right: 5px;" class="fa fa-arrow-left"></i>Previous
                 </a>
-                <a id="editorNextQuestion" data-bind="click: nextQuestion" style="float:right; padding-right:5px;">Next
+                <a id="editorNextQuestion" 
+                   data-bind="click: nextQuestion,
+                              onKeyPress: {
+                                keyCode: 39,
+                                listener: nextQuestion.bind($data)
+                              }" style="float:right; padding-right:5px;">Next
                   <i style="display:inline-block; padding-right: 5px; padding-left: 5px;" class="fa fa-arrow-right"></i>
                 </a>
                 <br />
@@ -72,7 +84,7 @@
                 </p>
                 <button data-bind="click: save" type="button" class="btn btn-primary">Save
                 </button>
-                <a data-bind="attr.href: draft().urls.register_page" type="button" class="pull-right btn btn-success">Register
+                <a data-bind="click: $root.check" type="button" class="pull-right btn btn-success">Register
                 </a>
               </div>
             </div>
@@ -84,17 +96,18 @@
 </div>
 
 <%def name="javascript_bottom()">
-    ${parent.javascript_bottom()}
-    <script>
-        <%
-        import json %>
-            window.contextVars = $.extend(true, {}, window.contextVars, {
-                draft: ${json.dumps(draft)}
+  ${parent.javascript_bottom()}
 
-            });
-    </script>
-    <script src=${ "/static/public/js/registration-edit-page.js" | webpack_asset}>
-    </script>
+  <% import json %>
+  <script>
+   window.contextVars = $.extend(true, {}, window.contextVars, {
+     draft: ${draft | sjson, n}
+   });
+
+  </script>
+  <script src=${ "/static/public/js/registration-edit-page.js" | webpack_asset}>
+  </script>
+
 </%def>
 
 <%include file="project/registration_editor_templates.mako" />

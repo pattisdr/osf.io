@@ -46,8 +46,6 @@ var User = function(result){
     self.degree = result.degree;
     self.school = result.school;
     self.url = result.url;
-    self.wikiUrl = result.url+'wiki/';
-    self.filesUrl = result.url+'files/';
     self.user = result.user;
 
     $.ajax('/api/v1'+ result.url).success(function(data){
@@ -76,6 +74,7 @@ var ViewModel = function(params) {
     self.resultsPerPage = ko.observable(10);
     self.categories = ko.observableArray([]);
     self.searchStarted = ko.observable(false);
+    self.jsonData = ko.observable('');
     self.showSearch = true;
     self.showClose = false;
     self.searchCSS = ko.observable('active');
@@ -243,7 +242,11 @@ var ViewModel = function(params) {
                         result.wikiUrl = result.url+'wiki/';
                         result.filesUrl = result.url+'files/';
                     }
+
                     self.results.push(result);
+                }
+                if(result.category === 'registration'){
+                    result.dateRegistered = new $osf.FormattableDate(result.date_registered);
                 }
             });
 
@@ -282,7 +285,17 @@ var ViewModel = function(params) {
             }
 
             $osf.postJSON('/api/v1/share/search/?count&v=1', jsonData).success(function(data) {
-                self.categories.push(new Category('SHARE', data.count, 'SHARE'));
+                var shareCheck = true;
+                for (var i = 0; i < self.categories.length; i++){
+                    if (self.categories[i].name === 'SHARE' && self.categories[i].count === data.count && self.jsonData() === jsonData){
+                        shareCheck = false;
+                        break;
+                    }
+                }
+                if(shareCheck) {
+                    self.categories.push(new Category('SHARE', data.count, 'SHARE'));
+                    self.jsonData(jsonData);
+                }
             });
         }).fail(function(response){
             self.totalResults(0);

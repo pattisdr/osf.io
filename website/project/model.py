@@ -10,7 +10,6 @@ import warnings
 import pytz
 from flask import request
 from django.core.urlresolvers import reverse
-from HTMLParser import HTMLParser
 
 from modularodm import Q
 from modularodm import fields
@@ -40,6 +39,7 @@ from framework.utils import iso8601format
 from website import language, settings, security
 from website.util import web_url_for
 from website.util import api_url_for
+from website.util import sanitize
 from website.exceptions import (
     NodeStateError, InvalidRetractionApprovalToken,
     InvalidRetractionDisapprovalToken, InvalidEmbargoApprovalToken,
@@ -52,8 +52,6 @@ from website.util.permissions import CREATOR_PERMISSIONS
 from website.project.metadata.schemas import OSF_META_SCHEMAS
 from website.util.permissions import DEFAULT_CONTRIBUTOR_PERMISSIONS
 from website.project import signals as project_signals
-
-html_parser = HTMLParser()
 
 logger = logging.getLogger(__name__)
 
@@ -83,31 +81,33 @@ class MetaSchema(StoredObject):
     schema = fields.DictionaryField()
     category = fields.StringField()
 
-    # Version of the Knockout metadata renderer to use (e.g. if data binds
-    # change)
+    # Deprecated legacy field
     metadata_version = fields.IntegerField()
+
     # Version of the schema to use (e.g. if questions, responses change)
     schema_version = fields.IntegerField()
 
+def ensure_schema(schema, name, version=1):
+    try:
+        schema_obj = MetaSchema.find_one(
+            Q('name', 'eq', name) &
+            Q('schema_version', 'eq', version)
+        )
+    except NoResultsFound:
+        meta_schema = {
+            'name': name,
+            'schema_version': version,
+            'schema': schema,
+        }
+        schema_obj = MetaSchema(**meta_schema)
+        schema_obj.save()
+    return schema_obj
 
 def ensure_schemas():
     """Import meta-data schemas from JSON to database if not already loaded
     """
     for schema in OSF_META_SCHEMAS:
-        try:
-            MetaSchema.find_one(
-                Q('name', 'eq', schema['name']) &
-                Q('schema_version', 'eq', schema.get('version', 1))
-            )
-        except NoResultsFound:
-            meta_schema = {
-                'name': schema['name'],
-                'schema_version': schema.get('version', 1),
-                'schema': schema,
-            }
-            schema_obj = MetaSchema(**meta_schema)
-            schema_obj.save()
-
+        ensure_schema(schema, schema['name'], schema.get('version', 1))
 
 class MetaData(GuidStoredObject):
 
@@ -590,7 +590,7 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
     retraction = fields.ForeignField('retraction')
     embargo = fields.ForeignField('embargo')
 
-    draft_registrations = fields.ForeignField('draftregistration', backref='branched')
+    draft_registrations = fields.ForeignField('draftregistration', backref='branched', list=True, default=[])
 
     is_fork = fields.BooleanField(default=False, index=True)
     forked_date = fields.DateTimeField(index=True)
@@ -1156,8 +1156,8 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
 
         # set attributes which may NOT be overridden by `changes`
         new.creator = auth.user
-        new.add_contributor(contributor=auth.user, permissions=('read', 'write', 'admin'), log=False, save=False)
         new.template_node = self
+        new.add_contributor(contributor=auth.user, permissions=CREATOR_PERMISSIONS, log=False, save=False)
         new.is_fork = False
         new.is_registration = False
         new.piwik_site_id = None
@@ -1572,7 +1572,7 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
         for addon in self.get_addons():
             message = addon.after_delete(self, auth.user)
             if message:
-                status.push_status_message(message)
+                status.push_status_message(message, kind='info', trust=False)
 
         log_date = date or datetime.datetime.utcnow()
 
@@ -1662,7 +1662,12 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
         forked.permissions = {}
         forked.visible_contributor_ids = []
 
-        forked.add_contributor(contributor=user, log=False, save=False)
+        forked.add_contributor(
+            contributor=user,
+            permissions=CREATOR_PERMISSIONS,
+            log=False,
+            save=False
+        )
 
         forked.add_log(
             action=NodeLog.NODE_FORKED,
@@ -1681,9 +1686,22 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
         for addon in original.get_addons():
             _, message = addon.after_fork(original, forked, user)
             if message:
-                status.push_status_message(message)
+                status.push_status_message(message, kind='info', trust=True)
 
         return forked
+
+    def create_draft_registration(self, user, schema, data=None, save=False):
+        draft = DraftRegistration(
+            initiator=user,
+            branched_from=self,
+            registration_schema=schema,
+            registration_metadata=data or {},
+        )
+        draft.save()
+        self.draft_registrations.append(draft)
+        if save:
+            self.save()
+        return draft
 
     def register_node(self, schema, auth, data, parent=None):
         """Make a frozen copy of a node.
@@ -1692,7 +1710,7 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
         :param auth: All the auth information including user, API key.
         :param template: Template name
         :param data: Form data
-        :param parent Node: parent registration of regitstration to be created
+        :param parent Node: parent registration of registration to be created
         """
         # NOTE: Admins can register child nodes even if they don't have write access them
         if not self.can_edit(auth=auth) and not self.is_admin_parent(user=auth.user):
@@ -1742,7 +1760,7 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
         for addon in original.get_addons():
             _, message = addon.after_register(original, registered, auth.user)
             if message:
-                status.push_status_message(message)
+                status.push_status_message(message, kind='info', trust=False)
 
         for node_contained in original.nodes:
             if not node_contained.is_deleted:
@@ -1869,7 +1887,7 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
         """
         csl = {
             'id': self._id,
-            'title': html_parser.unescape(self.title),
+            'title': sanitize.unescape_entities(self.title),
             'author': [
                 contributor.csl_name  # method in auth/model.py which parses the names of authors
                 for contributor in self.visible_contributors
@@ -2106,7 +2124,7 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
         for addon in self.get_addons():
             message = addon.after_remove_contributor(self, contributor, auth)
             if message:
-                status.push_status_message(message)
+                status.push_status_message(message, kind='info', trust=True)
 
         if log:
             self.add_log(
@@ -2298,7 +2316,8 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
             if save:
                 self.save()
 
-            project_signals.contributor_added.send(self, contributor=contributor, auth=auth)
+            project_signals.contributor_added.send(self, contributor=contributor)
+
             return True
 
         #Permissions must be overridden if changed when contributor is added to parent he/she is already on a child of.
@@ -2314,7 +2333,12 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
     def add_contributors(self, contributors, auth=None, log=True, save=False):
         """Add multiple contributors
 
-        :param contributors: A list of User objects to add as contributors.
+        :param list contributors: A list of dictionaries of the form:
+            {
+                'user': <User object>,
+                'permissions': <Permissions list, e.g. ['read', 'write']>,
+                'visible': <Boolean indicating whether or not user is a bibliographic contributor>
+            }
         :param auth: All the auth information including user, API key.
         :param log: Add log to self
         :param save: Save after adding contributor
@@ -2402,7 +2426,7 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
         for addon in self.get_addons():
             message = addon.after_set_privacy(self, permissions)
             if message:
-                status.push_status_message(message)
+                status.push_status_message(message, kind='info', trust=False)
 
         if log:
             action = NodeLog.MADE_PUBLIC if permissions == 'public' else NodeLog.MADE_PRIVATE
@@ -2598,7 +2622,7 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
             'node_type': self.project_or_component,
             'url': self.url,
             # TODO: Titles shouldn't contain escaped HTML in the first place
-            'title': html_parser.unescape(self.title),
+            'title': sanitize.unescape_entities(self.title),
             'path': self.path_above(auth),
             'api_url': self.api_url,
             'is_public': self.is_public,
@@ -3048,17 +3072,55 @@ class DraftRegistration(AddonModelMixin, StoredObject):
 
     initiator = fields.ForeignField('user')
 
-    registration_metadata = fields.DictionaryField({})
+    # Dictionary field mapping question id to a question's comments and answer
+    # {
+    #   <qid>: {
+    #     'comments': [{
+    #       'user': {
+    #         'id': <uid>,
+    #         'name': <name>
+    #       },
+    #       value: <value>,
+    #       lastModified: <datetime>
+    #     }],
+    #     'value': <value>
+    #   }
+    # }
+    registration_metadata = fields.DictionaryField(default=dict)
     registration_schema = fields.ForeignField('metaschema')
     registered_node = fields.ForeignField('node')
 
-    storage = fields.ForeignField('osfstoragenodesettings')
+    # TODO (samchrisinger): It would be better to run Archiver tasks when a new
+    # DraftRegistration gets created. Files could be copied to a DraftRegistration
+    # rather than a Node, which would be much much cleaner in the event of a
+    # failure during archival.
+    # Additionally, future registration schemas will require users to select files
+    # that fulfill a certain requirement. Right now we will have to restrict those
+    # choices to OsfStorage files, but this is a non-issue if the third-party files
+    # have already been archived.
+    # storage = fields.ForeignField('osfstoragenodesettings')
 
-    config = fields.DictionaryField()
-    flags = fields.DictionaryField()
+    # Dictionary field mapping
+    # { 'requiresApproval': true, 'fulfills': [{ 'name': 'Prereg Prize', 'info': <infourl> }]}
+    # config = fields.DictionaryField()
+
+    # Dictionary field mapping a draft's states during the review process to their value
+    # { 'isApproved': false, 'isPendingReview': false, 'paymentSent': false }
+    # flags = fields.DictionaryField()
 
     def __init__(self, *args, **kwargs):
         super(DraftRegistration, self).__init__(*args, **kwargs)
+        # TODO (samchrisinger): uncomment when we have flags/config
+        #meta_schema = self.registration_schema  # or kwargs.get('registration_schema')
+        #if meta_schema:
+        #    schema = meta_schema.schema
+        #    config = schema.get('config', {})
+        #    self.config = config
+        # TODO: uncomment to set flags
+        #     if not self.registration_schema:
+        #         flags = schema.get('flags', {})
+        #         for flag, value in flags.iteritems():
+        #             self.flags[flag] = value
 
         meta_schema = self.registration_schema # or kwargs.get('registration_schema')
         if meta_schema:
@@ -3091,7 +3153,7 @@ class DraftRegistration(AddonModelMixin, StoredObject):
     def update_metadata(self, metadata, save=True):
         # TODO: uncommnet to disallow editing drafts that are approved or pending approval
         # if self.is_pending_review or self.is_approved:
-        #    raise HTTPError(http.BAD_REQUEST)
+        #    raise NodeStateError('Cannot edit while this draft is being reviewed')
         changes = []
         for key, value in metadata.iteritems():
             old_value = self.registration_metadata.get(key)
@@ -3101,7 +3163,9 @@ class DraftRegistration(AddonModelMixin, StoredObject):
         if save:
             self.save()
         # TODO: uncomment to nullify approval state if edited
+        # project_signals.draft_edited.send(self, changes)
         # self.after_edit(changes)
+        return changes
 
     def before_edit(self, auth):
         messages = []
@@ -3113,75 +3177,42 @@ class DraftRegistration(AddonModelMixin, StoredObject):
         return messages
 
     def after_edit(self, changes):
-        # revoke approval and review status if changed
-        if changes:
-            self.flags.update({
-                'isPendingReview': False,
-                'isApproved': False
-            })
-            self.save()
+        pass
+        # TODO: uncomment when we support review/approval
+        ## revoke approval and review status if changed
+        #if changes:
+        #    self.flags.update({
+        #        'isPendingReview': False,
+        #        'isApproved': False
+        #    })
+        #    self.save()
 
     def find_question(self, qid):
         for page in self.registration_schema.schema['pages']:
             for question_id, question in page['questions'].iteritems():
-                if question_id == qid and 'description' in question:
-                    return question['description']
+                if question_id == qid:
+                    return question
 
-    def get_comments(self):
-        """ Returns a list of all comments made on a draft in the format of :
-        [{
-          [QUESTION_ID]: {
-            'question': [QUESTION],
-            'comments': [LIST_OF_COMMENTS]
-            }
-        },]
-        """
-
-        all_comments = []
-        for question_id, value in self.registration_metadata.iteritems():
-            all_comments.append({
-                question_id: {
-                    'question': self.find_question(question_id),
-                    'comments': value['comments'] if 'comments' in value else ''
-                }
-            })
-        return all_comments
-
-    def get_flat_comments(self):
-        """ Returns a flat list of all comments made on a draft
-        """
-        flat_comments = list()
-        for question_id, value in self.registration_metadata.iteritems():
-            if 'comments' in value:
-                for comment in value['comments']:
-                    flat_comments.append(comment)
-        return flat_comments
-
-    def get_new_comments(self):
-        """ Returns a list of all comments admins haven't seen
-        In the same format as get_comments
-        """
-        comments = self.get_comments()
-
-        if comments:
-            for question_id, value in comments.iteritems():
-                for comment in value['comments']:
-                    if comment['adminHasSeen'] is False:
-                        comments.remove(question_id)
-
-        return comments
-
-    def has_new_comments(self):
-        """ Checks is a draft has comments that an admin hasn't seen
-        """
-        comments = self.get_flat_comments()
-
-        if comments:
-            for comment in comments:
-                if comment['adminHasSeen'] is False:
-                    return True
-
-        return False
+    # TODO: uncomment when we support commenting
+    # def get_comments(self):
+    #    """ Returns a list of all comments made on a draft in the format of :
+    #    [{
+    #      [QUESTION_ID]: {
+    #        'question': [QUESTION],
+    #        'comments': [LIST_OF_COMMENTS]
+    #        }
+    #    },]
+    #    """
+    #
+    #    all_comments = []
+    #    for question_id, value in self.registration_metadata.iteritems():
+    #        all_comments.append({
+    #            question_id: {
+    #                'question': self.find_question(question_id),
+    #                'comments': value['comments'] if 'comments' in value else ''
+    #            }
+    #        })
+    #    return all_comments
 
     def register(self, auth):
 

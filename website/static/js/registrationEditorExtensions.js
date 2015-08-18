@@ -4,13 +4,13 @@ var moment = require('moment');
 var ko = require('knockout');
 var m = require('mithril');
 
-var FilesWidget = require('js/FilesWidget');
+var FilesWidget = require('js/filesWidget');
 var Fangorn = require('js/fangorn');
 var $osf = require('js/osfHelpers');
 
 var node = window.contextVars.node;
 
-var NO_FILE = 'no file selected';
+var NO_FILE = 'No file selected';
 
 var limitOsfStorage = function(item) {
     if (item.data.provider !== undefined && item.data.provider !== 'osfstorage') {

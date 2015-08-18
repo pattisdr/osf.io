@@ -12,7 +12,9 @@
 <div class="tab-content registrations-view">
   <div role="tabpanel" class="tab-pane active" id="registrations">
     <div class="row" style="min-height: 150px">
-      <h2> Registrations </h2>
+      <div class="col-md-9">
+        <h2> Registrations </h2>
+      </div>
       <div class="col-md-9">
         % if node["registration_count"]:
         <div mod-meta='{
@@ -47,7 +49,9 @@
   <div role="tabpanel" class="tab-pane" id="drafts">
     <div id="draftRegistrationScope" class="row" style="min-height: 150px">
       <div data-bind="visible: !preview()">
-        <h2> Draft Registrations </h2>
+        <div class="col-md-9">
+          <h2> Draft Registrations </h2>
+        </div>
         <div class="col-md-9">
           <div>
             % if 'admin' in user['permissions'] and not disk_saving_mode:
@@ -112,6 +116,7 @@
         </div>
       </div>
       <div data-bind="if: preview">
+        <br />
         <button data-bind="click: preview.bind($root, false)"
                 class="btn btn-primary"><i class="fa fa-arrow-circle-o-left"></i>&nbsp;&nbsp;&nbsp;Back</button>
         <br />
@@ -137,15 +142,17 @@
         <hr />
         <div class="row" data-bind="if: selectedSchema">
           <div class="col-md-12" data-bind="with: selectedSchema">
-            <h4> Fulfills: </h4 >
-            <div class="row">
-              <div class="col-md-12 schema-fulfillment" data-bind="foreach: schema.config.fulfills">
-                <span class="well">
-                  <span data-bind="text: name"></span>&nbsp;&nbsp;
-                  <a class="fa fa-info-circle" target="_blank" data-bind="attr.href: info"></a>
-                </span>
+            <span data-bind="if: schema.config">
+              <h4> Fulfills: </h4>
+              <div class="row">
+                <div class="col-md-12 schema-fulfillment" data-bind="foreach: schema.config.fulfills">
+                  <span class="well">
+                    <span data-bind="text: name"></span>&nbsp;&nbsp;
+                    <a class="fa fa-info-circle" target="_blank" data-bind="attr.href: info"></a>
+                  </span>
+                </div>
               </div>
-            </div>
+            </span>
             <h4> Description: </h4> 
             <blockquote>
               <p data-bind="html: schema.description"></p>

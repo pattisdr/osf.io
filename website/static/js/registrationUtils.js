@@ -18,7 +18,6 @@ var currentUser = window.contextVars.currentUser || {
     name: 'Anonymous'
 };
 
-
 /**
  * @class Comment
  * Model for storing/editing/deleting comments on form fields
@@ -53,12 +52,8 @@ function Comment(data) {
     });
 
     self.seenBy = ko.observableArray([self.user.id] || []);
-    self.viewComment = function(user) {
-        self.seenBy.push(user.id);
-    };
-
     /**
-     * Returns the author as the actual user, not 'You' 
+     * Returns the author as the actual user, not 'You'
      **/
     self.author = ko.pureComputed(function() {
       return self.user.fullname;
@@ -89,6 +84,7 @@ function Comment(data) {
         return !self.isDeleted() && self.saved() && self.user.id === currentUser.id;
     });
 }
+/** Toggle the comment's save state **/
 Comment.prototype.toggleSaved = function(save) {
     var self = this;
 
@@ -97,42 +93,16 @@ Comment.prototype.toggleSaved = function(save) {
         save();
     }
 };
+/** Indicate that a comment is deleted **/
 Comment.prototype.delete = function(save) {
     var self = this;
 
     self.isDeleted(true);
     save();
 };
-// Let ENTER keypresses add a comment if comment <input> is in focus
-$(document).keydown(function(e) {
-    if (e.keyCode === 13) {
-        $target = $(e.target);
-        if ($target.hasClass('registration-editor-comment')) {
-            var $button = $target.siblings('span').find('button');
-            if(!$button.is(':disabled')) {
-                $button.click();
-            }
-        }
-    }
-    if (e.keyCode === 39) {
-        $('#editorNextQuestion').click();
-    }
-    if (e.keyCode === 37) {
-        $('#editorPreviousQuestion').click();
-    }
-});
-
-var validate = function(checks, value) {
-    var valid = true;
-    $.each(checks, function(i, check) {
-        valid = valid && check(value);
-    });
-    return valid;
-};
-
-var validators = {
-    string: validate.bind(null, [$osf.not($osf.isBlank)]),
-    number: validate.bind(null, [$osf.not($osf.isBlank), $osf.not(isNaN.bind(parseFloat))])
+/** Indicate that a user has seen a comment **/
+Comment.prototype.viewComment = function(user) {
+    this.seenBy.push(user.id);
 };
 
 /**
@@ -146,8 +116,10 @@ var validators = {
  * @param {String} data.format: 'text' | 'textarea' | 'list'; format corresponding with data.type
  * @param {String} data.description
  * @param {String} data.help
+ * @param {String} data.required
  * @param {String[]} data.options: array of options for 'choose' types
  * @param {Object[]} data.properties: object of sub-Question properties for 'object' types
+ * @param {String} data.match: optional string that must be matched
  * @param {String} id: unique identifier
  **/
 var Question = function(data, id) {
@@ -164,11 +136,22 @@ var Question = function(data, id) {
     self.nav = data.nav || 'Untitled';
     self.type = data.type || 'string';
     self.format = data.format || 'text';
+    self.required = data.required || false;
     self.description = data.description || '';
-    self.help = data.help || 'no help text provided';
+    self.help = data.help;
     self.options = data.options || [];
     self.properties = data.properties || {};
     self.match = data.match || '';
+
+    if ( self.required ) {
+        self.value.extend({
+            required: true
+        });
+    } else {
+      self.value.extend({
+        required: false
+      });
+    }
 
     self.extra = {};
 
@@ -193,16 +176,6 @@ var Question = function(data, id) {
      **/
     self.isComplete = ko.computed(function() {
         return !$osf.isBlank(self.value());
-    });
-
-    /**
-     * @returns {Boolean} true if the validator matching the question's type returns true,
-     * if no validator matches also return true
-     **/
-    self.valid = ko.computed(function() {
-        var value = self.value();
-        var isValid = validators[self.type] || function(){ return true; };
-        return isValid(value);
     });
 
     self.init();
@@ -230,7 +203,6 @@ Question.prototype.addComment = function(save) {
     comment.seenBy.push(currentUser.id);
     self.nextComment('');
     self.comments.push(comment);
-    save();
 };
 /**
  * Shows/hides the Question example
@@ -238,7 +210,6 @@ Question.prototype.addComment = function(save) {
 Question.prototype.toggleExample = function(){
     this.showExample(!this.showExample());
 };
-
 /**
  * Shows/hides the Question uploader
  **/
@@ -335,7 +306,7 @@ var Draft = function(params, metaSchema) {
     self.updated = new Date(params.updated);
 
     self.urls = params.urls || {};
-    
+
     // TODO: uncomment to support draft approval states
     //    self.fulfills = params.fulfills || [];
     //    self.isPendingReview = params.flags.isPendingReview || false;
@@ -348,7 +319,7 @@ var Draft = function(params, metaSchema) {
     //    $.each(params.flags || {}, function(key, value) {
     //        self[key] = value;
     //    });
-    
+
     self.completion = ko.computed(function() {
         var total = 0;
         var complete = 0;
@@ -368,46 +339,46 @@ var Draft = function(params, metaSchema) {
         return 0;
     });
 };
+Draft.prototype.preRegisterPrompts = function(response, confirm) {
+    var self = this;
+    bootbox.confirm(
+        {
+            size: 'large',
+            title : language.registerConfirm,
+            message : $osf.joinPrompts(response.prompts),
+            callback: function(result) {
+                if (result) {
+                    confirm();
+                }
+            }
+        }
+    );
+};
+Draft.prototype.preRegisterErrors = function(response, confirm) {
+    bootbox.confirm(
+        $osf.joinPrompts(
+            response.errors,
+            'Before you continue...'
+        ) + '<br />' + language.registerSkipAddons,
+        function(result) {
+            if(result) {
+                confirm();
+            }
+        }
+    );
+};
 Draft.prototype.beforeRegister = function(data) {
     var self = this;
 
     $osf.block();
-
-    $.getJSON(self.urls.before_register).then(function(response) {
-        var preRegisterWarnings = function() {
-            bootbox.confirm(
-                {
-                    size: 'large',
-                    title : language.registerConfirm,
-                    message : $osf.joinPrompts(response.prompts),
-                    callback: function(result) {
-                        if (result) {
-                            self.register(data);
-                        }
-                    }
-                }
-            );
-        };
-        var preRegisterErrors = function(confirm, reject) {
-            bootbox.confirm(
-                $osf.joinPrompts(
-                    response.errors, 
-                    'Before you continue...'
-                ) + '<br /><hr /> ' + language.registerSkipAddons,
-                function(result) {
-                    if(result) {
-                        confirm();
-                    }
-                }
-            );
-        };
-        
+    
+    return $.getJSON(self.urls.before_register).then(function(response) {
         if (response.errors && response.errors.length) {
-            preRegisterErrors(preRegisterWarnings);
+            self.preRegisterErrors(response, self.preRegisterWarnings);
         }
         else if (response.prompts && response.prompts.length) {
-            preRegisterWarnings();
-        } 
+            self.preRegisterPrompts(response, self.register.bind(self, data));
+        }
         else {
             self.register(data);
         }
@@ -422,20 +393,15 @@ Draft.prototype.register = function(data) {
 
     $osf.block();
 
-    $.ajax({
-        url:  self.urls.register,
-        type: 'POST',
-        data: JSON.stringify(data),
-        contentType: 'application/json',
-        dataType: 'json'
-    }).done(function(response) {
-        if (response.status === 'initiated') {            
-            window.location.assign(response.urls.registrations);
-        }
-        else if (response.status === 'error') {
-            self.onRegisterFail();
-        }
-    }).always($osf.unblock).fail(self.onRegisterFail);
+    $osf.postJSON(self.urls.register, data)
+        .done(function(response) {
+            if (response.status === 'initiated') {
+                window.location.assign(response.urls.registrations);
+            }
+            else if (response.status === 'error') {
+                self.onRegisterFail();
+            }
+        }).always($osf.unblock).fail(self.onRegisterFail);
 };
 
 
@@ -466,6 +432,7 @@ var RegistrationEditor = function(urls, editorId) {
     self.draft = ko.observable();
 
     self.currentQuestion = ko.observable();
+    self.showValidation = ko.observable(false);
 
     self.currentPages = ko.computed(function() {
         var draft = self.draft();
@@ -489,13 +456,15 @@ var RegistrationEditor = function(urls, editorId) {
         var t = self.lastSaveTime();
         if (t) {
             return t.toGMTString();
-        } else {
+        } 
+        else {
             return 'never';
         }
     });
 
     self.iterObject = $osf.iterObject;
 
+    // TODO: better extensions system? 
     self.extensions = {
         'osf-upload': editorExtensions.Uploader
     };
@@ -525,17 +494,19 @@ RegistrationEditor.prototype.init = function(draft) {
                     val = schemaData[question.id][prop];
                     if(val) {
                         subQuestion.value(val.value);
-                        subQuestion.comments($.map(val.comments, function(data) {
-                            return new Comment(data);
-                        }));
+                        // TODO: uncomment when we support comments
+                        //subQuestion.comments($.map(val.comments, function(data) {
+                        //    return new Comment(data);
+                        //}));
                     }
                 });
             }
             else {
                 question.value(val.value);
-                question.comments($.map(val.comments, function(data) {
-                    return new Comment(data);
-                }));
+                // TODO: uncomment when we support comments
+                //question.comments($.map(val.comments, function(data) {
+                //    return new Comment(data);
+                //}));
             }
         }
     });
@@ -569,40 +540,68 @@ RegistrationEditor.prototype.context = function(data) {
     return data;
 };
 /**
- * Extend the editor's recognized types
- *
- * @param {String} type: unique type
- * @param {Constructor} ViewModel
- **/
-RegistrationEditor.prototype.extendEditor = function(type, ViewModel) {
-    this.extensions[type] = ViewModel;
-};
-RegistrationEditor.prototype.viewComments = function() {
-  var self = this;
-
-  var comments = self.currentQuestion().comments();
-  $.each(comments, function(index, comment) {
-    if (comment.seenBy().indexOf(currentUser.id) === -1) {
-      comment.seenBy.push(currentUser.id);
-    }
-  });
-};
-RegistrationEditor.prototype.getUnseenComments = function(qid) {
+ * Check that the Draft is valid before registering
+ */
+RegistrationEditor.prototype.check = function() {
     var self = this;
 
-    var question = self.draft().schemaData[qid];
-    var comments = question.comments || [];
-    for (var key in question) {
-        if (key === 'comments') {
-            for (var i = 0; i < question[key].length - 1; i++) {
-                if (question[key][i].indexOf(currentUser.id) === -1) {
-                    comments.push(question[key][i]);
+    var proceed = true;
+    $.each(self.flatQuestions(), function(i, question) {
+        if ( question.required ) {
+            var valid = question.value.isValid();
+            proceed = proceed && valid;
+        }
+    });
+    if (!proceed) {
+
+        bootbox.dialog({
+            title: 'Registration Not Complete',
+            message: 'There are errors in your registration. Please double check it and submit again.',
+            buttons: {
+                success: {
+                    label: 'Ok',
+                    className: 'btn-success',
+                    callback: function() {
+                        self.showValidation(true);
+                    }
                 }
             }
-        }
+        });
     }
-    return comments.length !== 0 ? comments.length : '';
+    else {
+        window.location = self.draft().urls.register_page;
+    }
 };
+// TODO: uncomment when we support commenting
+//RegistrationEditor.prototype.viewComments = function() {
+//    var self = this;
+//    
+//    var comments = self.currentQuestion().comments();
+//    $.each(comments, function(index, comment) {
+//        if (comment.seenBy().indexOf(currentUser.id) === -1) {
+//            comment.seenBy.push(currentUser.id);
+//        }
+//    });
+//};
+//RegistrationEditor.prototype.getUnseenComments = function(qid) {
+//    var self = this;
+//
+//    var question = self.draft().schemaData[qid];
+//    var comments = question.comments || [];
+//    for (var key in question) {
+//        if (key === 'comments') {
+//            for (var i = 0; i < question[key].length - 1; i++) {
+//                if (question[key][i].indexOf(currentUser.id) === -1) {
+//                    comments.push(question[key][i]);
+//                }
+//            }
+//        }
+//    }
+//    return comments;
+//};
+/**
+ * Load the next question into the editor, wrapping around if needed
+ **/
 RegistrationEditor.prototype.nextQuestion = function() {
     var self = this;
 
@@ -614,13 +613,16 @@ RegistrationEditor.prototype.nextQuestion = function() {
     });
     if(index + 1 === questions.length) {
         self.currentQuestion(questions.shift());
-        self.viewComments();
+        //self.viewComments();
     }
     else {
         self.currentQuestion(questions[index + 1]);
-        self.viewComments();
+        //self.viewComments();
     }
 };
+/**
+ * Load the previous question into the editor, wrapping around if needed
+ **/
 RegistrationEditor.prototype.previousQuestion = function() {
     var self = this;
 
@@ -632,20 +634,26 @@ RegistrationEditor.prototype.previousQuestion = function() {
     });
     if(index - 1 < 0){
         self.currentQuestion(questions.pop());
-        self.viewComments();
+        //self.viewComments();
     }
     else {
         self.currentQuestion(questions[index - 1]);
-        self.viewComments();
+        //self.viewComments();
     }
 };
+/**
+ * Select a page, selecting the first question on that page
+ **/
 RegistrationEditor.prototype.selectPage = function(page) {
     var self = this;
 
     var firstQuestion = page.questions[Object.keys(page.questions)[0]];
     self.currentQuestion(firstQuestion);
-    self.viewComments();
+    //self.viewComments();
 };
+/**
+ * Update draft primary key and updated time on server response
+ **/
 RegistrationEditor.prototype.updateData = function(response) {
     var self = this;
 
@@ -680,6 +688,40 @@ RegistrationEditor.prototype.updateData = function(response) {
 //	}
 //    });
 //};
+// TODO: uncomment when we allow submitting for review
+//RegistrationEditor.prototype.submit = function() {
+//    var self = this;
+//
+//    var currentNode = window.contextVars.node;
+//    var currentUser = window.contextVars.currentUser;
+//
+//    var messages = self.draft().messages;
+//    bootbox.confirm(messages.beforeSubmitForApproval, function(result) {
+//        if(result) {
+//            $osf.postJSON(self.urls.submit.replace('{draft_pk}', self.draft().pk), {
+//                node: currentNode,
+//                auth: currentUser
+//            }).then(function() {
+//                bootbox.dialog({
+//                    message: messages.afterSubmitForApproval,
+//                    title: 'Pre-Registration Prize Submission',
+//                    buttons: {
+//                        registrations: {
+//                            label: 'Return to registrations page',
+//                            className: 'btn-primary pull-right',
+//                            callback: function() {
+//                                window.location.href = self.draft().urls.registrations;
+//                            }
+//                        }
+//                    }
+//                });
+//            }).fail($osf.growl.bind(null, 'Error submitting for review', language.submitForReviewFail));
+//        }
+//    });
+//};
+/**
+ * Create a new draft
+ **/
 RegistrationEditor.prototype.create = function(schemaData) {
     var self = this;
 
@@ -691,39 +733,15 @@ RegistrationEditor.prototype.create = function(schemaData) {
         schema_data: schemaData
     }).then(self.updateData.bind(self));
 };
-RegistrationEditor.prototype.submit = function() {
+RegistrationEditor.prototype.putSaveData = function(payload) {
     var self = this;
-
-    var currentNode = window.contextVars.node;
-    var currentUser = window.contextVars.currentUser;
-
-    var messages = self.draft().messages;
-    bootbox.confirm(messages.beforeSubmitForApproval, function(result) {
-        if(result) {
-            $osf.postJSON(self.urls.submit.replace('{draft_pk}', self.draft().pk), {
-                node: currentNode,
-                auth: currentUser
-            }).then(function() {
-                bootbox.dialog({
-                    message: messages.afterSubmitForApproval,
-                    title: 'Pre-Registration Prize Submission',
-                    buttons: {
-                        registrations: {
-                            label: 'Return to registrations page',
-                            className: 'btn-primary pull-right',
-                            callback: function() {
-                                window.location.href = self.draft().urls.registrations;
-                            }
-                        }
-                    }
-                });
-            }).fail($osf.growl.bind(null, 'Error submitting for review', language.submitForReviewFail));
-        }
-    });
+    $osf.putJSON(self.urls.update.replace('{draft_pk}', self.draft().pk), payload).then(self.updateData.bind(self));
 };
+/**
+ * Save the current Draft
+ **/
 RegistrationEditor.prototype.save = function() {
     var self = this;
-
     var metaSchema = self.draft().metaSchema;
     var schema = metaSchema.schema;
     var data = {};
@@ -733,39 +751,51 @@ RegistrationEditor.prototype.save = function() {
                 var value = {};
                 $.each(question.properties, function(prop, subQuestion) {
                     value[prop] = {
-                        value: subQuestion.value(),
-                        comments: ko.toJS(subQuestion.comments())
+                        value: subQuestion.value()
                     };
                 });
                 data[qid] = value;
             }
             else {
                 data[qid] = {
-                    value: question.value(),
-                    comments: ko.toJS(question.comments())
+                    value: question.value()
                 };
             }
         });
     });
 
-    if (!self.draft().pk){
-        return self.create(data);
+    if (typeof self.draft().pk === 'undefined'){
+        self.create(self);
     }
-    $osf.putJSON(self.urls.update.replace('{draft_pk}', self.draft().pk), {
-        schema_name: metaSchema.name,
-        schema_version: metaSchema.version,
-        schema_data: data
-    }).then(self.updateData.bind(self));
+    else{
+        self.putSaveData({
+            schema_name: metaSchema.name,
+            schema_version: metaSchema.version,
+            schema_data: data
+        });
+    }
 
     return true;
 };
 
-var RegistrationManager = function(node, draftsSelector, editorSelector, urls) {
+/**
+ * @class RegistrationManager
+ * Model for listing DraftRegistrations
+ *
+ * @param {Object} node: optional data to instatiate model with
+ * @param {String} draftsSelector: DOM node to bind VM to
+ * @param {Object} urls:
+ * @param {String} urls.list:
+ * @param {String} urls.get:
+ * @param {String} urls.delete:
+ * @param {String} urls.edit:
+ * @param {String} urls.schemas:
+ **/
+var RegistrationManager = function(node, draftsSelector, urls) {
     var self = this;
 
     self.node = node;
     self.draftsSelector = draftsSelector;
-    self.editorSelector = editorSelector;
 
     self.urls = urls;
 
@@ -785,12 +815,6 @@ var RegistrationManager = function(node, draftsSelector, editorSelector, urls) {
     // bound functions
     self.getDraftRegistrations = $.getJSON.bind(null, self.urls.list);
     self.getSchemas = $.getJSON.bind(null, self.urls.schemas);
-
-    self.sortedDrafts = ko.computed(function() {
-        return self.drafts().sort(function(a, b) {
-            return a.initiated > b.initiated;
-        });
-    });
 
     self.previewSchema = ko.computed(function() {
         var schema = self.selectedSchema();
@@ -829,33 +853,11 @@ RegistrationManager.prototype.init = function() {
         self.loading(false);
     });
 };
-RegistrationManager.prototype.refresh = function() {
-    var self = this;
-
-    var getSchemas = self.getSchemas();
-
-    getSchemas.then(function(response) {
-        self.schemas(
-            $.map(response.meta_schemas, function(schema) {
-                return new MetaSchema(schema);
-            })
-        );
-    });
-
-    var getDraftRegistrations = self.getDraftRegistrations();
-
-    getDraftRegistrations.then(function(response) {
-        self.drafts(
-            $.map(response.drafts, function(draft) {
-                return new Draft(draft);
-            })
-        );
-    });
-
-    $.when(getSchemas, getDraftRegistrations).then(function() {
-        self.loading(false);
-    });
-};
+/**
+ * Confirm and delete a draft registration
+ *
+ * @param {Draft} draft:
+ **/
 RegistrationManager.prototype.deleteDraft = function(draft) {
     var self = this;
 
@@ -872,6 +874,9 @@ RegistrationManager.prototype.deleteDraft = function(draft) {
         }
     });
 };
+/**
+ * Show the draft registration preview pane
+ **/
 RegistrationManager.prototype.beforeCreateDraft = function() {
     var self = this;
 
@@ -880,6 +885,9 @@ RegistrationManager.prototype.beforeCreateDraft = function() {
     self.selectedSchema(self.schemas()[0]);
     self.preview(true);
 };
+/**
+ * Redirect to the draft register page
+ **/
 RegistrationManager.prototype.maybeWarn = function(draft) {
     var redirect = function() {
         window.location.href = draft.urls.edit;
@@ -902,10 +910,6 @@ RegistrationManager.prototype.maybeWarn = function(draft) {
 };
 
 module.exports = {
-    utilities: {
-        validators: validators,
-        validate: validate
-    },
     Comment: Comment,
     Question: Question,
     MetaSchema: MetaSchema,

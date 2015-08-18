@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-
+import functools
 import re
 import httplib as http
 
 import pymongo
 from modularodm.query import QueryBase
-from modularodm.exceptions import ValidationValueError, NoResultsFound
+from modularodm.exceptions import ValidationValueError, NoResultsFound, MultipleResultsFound
 
 from rest_framework.exceptions import NotFound
 from framework.exceptions import HTTPError
@@ -63,29 +63,80 @@ def unique_on(*groups):
     return wrapper
 
 
-def get_or_http_error(Model, pk_or_query):
+def get_or_http_error(Model, pk_or_query, display_name=None):
+    """Load an instance of Model by primary key or modularodm.Q query. Raise an appropriate
+    HTTPError if no record is found or if the query fails to find a unique record
 
-    name = str(Model)
+    :param type Model: StoredObject subclass to query
+    :param pk_or_query:
+    :type pk_or_query: either
+      - a <basestring> representation of the record's primary key, e.g. 'abcdef'
+      - a <QueryBase> subclass query to uniquely select a record, e.g.
+        Q('title', 'eq', 'Entitled') & Q('version', 'eq', 1)
+    :param basestring display_name:
+    :return: Model instance
+    """
+    display_name = display_name or ''
 
     if isinstance(pk_or_query, QueryBase):
         try:
             instance = Model.find_one(pk_or_query)
         # TODO: shouldn't use rest-framework exceptions.  Why is HTTPError not working here?
         except NoResultsFound:
-            # raise HTTPError(http.NOT_FOUND, data=dict(
-            #     message_long="No {} resource matching that query could be found".format(name)
-            # ))
-            raise NotFound("No resource matching that query could be found.")
+            raise HTTPError(http.NOT_FOUND, data=dict(
+                message_long="No {name} record matching that query could be found".format(name=display_name)
+            ))
+        except MultipleResultsFound:
+            raise HTTPError(http.BAD_REQUEST, data=dict(
+                message_long="The query must match exactly one {name} record".format(name=display_name)
+            ))
         return instance
     else:
         instance = Model.load(pk_or_query)
         if not instance:
             raise HTTPError(http.NOT_FOUND, data=dict(
-                message_long="No {name} resource with that primary key could be found".format(name=name)
+                message_long="No {name} record with that primary key could be found".format(name=display_name)
             ))
         if getattr(instance, 'is_deleted', False):
             raise HTTPError(http.GONE, data=dict(
-                message_long="This {name} resource has been deleted".format(name=name)
+                message_long="This {name} record has been deleted".format(name=display_name)
             ))
         else:
             return instance
+
+def autoload(Model, extract_key, inject_key, func):
+    """Decorator to autoload a StoredObject instance by primary key and inject into kwargs. Raises
+    an appropriate HTTPError (see #get_or_http_error)
+
+    :param type Model: StoredObject subclass to query
+    :param basetring extract_key: kwargs key to extract Model instance's primary key
+    :param basestring inject_key: kwargs key to inject loaded Model instance into kwargs
+
+    Example usage: ::
+      def get_node(node_id):
+          node = Node.load(node_id)
+          ...
+
+      becomes
+
+      @autoload(Node, 'node_id', 'node')
+      def get_node(node):
+          ...
+
+    Alternatively:
+      import functools
+      autoload_node = functools.partial(autoload, Node, 'node_id', 'node')
+
+      @autoload_node
+      def get_node(node):
+          ...
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        primary_key = kwargs.get(extract_key)
+        instance = get_or_http_error(Model, primary_key)
+
+        kwargs[inject_key] = instance
+        return func(*args, **kwargs)
+    return wrapper

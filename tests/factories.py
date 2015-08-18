@@ -27,7 +27,7 @@ from website.oauth.models import ExternalAccount
 from website.oauth.models import ExternalProvider
 from website.project.model import (
     Node, NodeLog, WatchConfig, Tag, Pointer, Comment, PrivateLink,
-    Retraction, Embargo, DraftRegistration, MetaSchema, Q
+    Retraction, Embargo, MetaSchema, DraftRegistration, Q
 )
 from website.notifications.model import NotificationSubscription, NotificationDigest
 from website.archiver import utils as archiver_utils
@@ -172,7 +172,7 @@ class RegistrationFactory(AbstractNodeFactory):
 
     @classmethod
     def _create(cls, target_class, project=None, schema=None, user=None,
-               data=None, archive=False, *args, **kwargs):
+                data=None, archive=False, *args, **kwargs):
         save_kwargs(**kwargs)
 
         # Original project to be registered
@@ -197,8 +197,9 @@ class RegistrationFactory(AbstractNodeFactory):
             dst_node=register,
             initiator=user,
         )
+        reg = None
         if archive:
-            return register()
+            reg = register()
         else:
             with patch('framework.tasks.handlers.enqueue_task'):
                 reg = register()
@@ -208,9 +209,7 @@ class RegistrationFactory(AbstractNodeFactory):
                 )
                 return reg
 
-class DraftRegistrationFactory(ModularOdmFactory):
-    FACTORY_FOR = DraftRegistration
-    registration_schema = MetaSchema.find_one(Q('name', 'eq', 'Open-Ended Registration'))
+
 
 class PointerFactory(ModularOdmFactory):
     FACTORY_FOR = Pointer
@@ -486,3 +485,23 @@ class ArchiveTargetFactory(ModularOdmFactory):
 
 class ArchiveJobFactory(ModularOdmFactory):
     FACTORY_FOR = ArchiveJob
+
+class DraftRegistrationFactory(ModularOdmFactory):
+    FACTORY_FOR = DraftRegistration
+
+    @classmethod
+    def _create(cls, *args, **kwargs):
+        branched_from = kwargs.get('branched_from')
+        initiator = kwargs.get('initiator')
+        registration_schema = kwargs.get('registration_schema')
+        registration_metadata = kwargs.get('registration_metadata')
+        if not branched_from:
+            project_params = {}
+            if initiator:
+                project_params['creator'] = initiator
+            branched_from = ProjectFactory(**project_params)
+        initiator = branched_from.creator
+        registration_schema = registration_schema or MetaSchema.find()[0]
+        registration_metadata = registration_metadata or {}
+        draft = branched_from.create_draft_registration(initiator, registration_schema, registration_metadata, save=True)
+        return draft
