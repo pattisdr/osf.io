@@ -182,31 +182,6 @@ class DraftRegistrationSerializer(JSONAPISerializer):
         draft = node.create_draft_registration(user, meta_schema, questions, save=True)
         return draft
 
-
-    # data = request.values
-    #
-    # schema_name = data.get('schema_name')
-    # if not schema_name:
-    #     raise HTTPError(
-    #         http.BAD_REQUEST,
-    #         data={
-    #             'message_short': 'Must specify a schema_name',
-    #             'message_long': 'Please specify a schema_name'
-    #         }
-    #     )
-    #
-    # schema_version = data.get('schema_version', 1)
-    #
-    # meta_schema = get_schema_or_fail(
-    #     Q('name', 'eq', schema_name) &
-    #     Q('schema_version', 'eq', int(schema_version))
-    # )
-    # draft = node.create_draft_registration(auth.user, meta_schema, {}, save=True)
-    # return redirect(node.web_url_for('edit_draft_registration_page', draft_id=draft._id))
-
-    # def get_absolute_url(self, obj):
-    #     return obj.absolute_url
-
     class Meta:
         type_ = "draft_registrations"
 

@@ -182,15 +182,8 @@ class NodeDraftRegistrationsList(generics.ListCreateAPIView, NodeMixin):
     # overrides ListCreateAPIView
     def get_queryset(self):
         node = self.get_node()
-        user = self.request.user
-        if user.is_anonymous():
-            auth = Auth(None)
-        else:
-            auth = Auth(user)
-        drafts = DraftRegistration.find(
-            Q('branched_from', 'eq', node))
-        draft_registrations = [reg for reg in drafts if node.can_view(auth)]
-        return draft_registrations
+        drafts = node.draft_registrations.find(Q('registered_node', 'eq', None))
+        return drafts
 
 
 class NodeChildrenList(generics.ListAPIView, NodeMixin):
