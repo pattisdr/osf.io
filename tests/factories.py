@@ -27,7 +27,7 @@ from website.oauth.models import ExternalAccount
 from website.oauth.models import ExternalProvider
 from website.project.model import (
     Node, NodeLog, WatchConfig, Tag, Pointer, Comment, PrivateLink,
-    Retraction, Embargo, MetaSchema, DraftRegistration, Q
+    Retraction, Embargo, MetaSchema, DraftRegistration
 )
 from website.notifications.model import NotificationSubscription, NotificationDigest
 from website.archiver import utils as archiver_utils
@@ -207,7 +207,7 @@ class RegistrationFactory(AbstractNodeFactory):
                     reg,
                     reg.registered_user
                 )
-                return reg
+        return reg
 
 
 
