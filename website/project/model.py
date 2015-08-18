@@ -1734,7 +1734,6 @@ class Node(GuidStoredObject, AddonModelMixin, IdentifierMixin):
             raise NodeStateError('Cannot register deleted node.')
 
         registered = original.clone()
-        registered.is_deleted = False
         registered.is_registration = True
         registered.registered_date = when
         registered.registered_user = auth.user
@@ -3121,17 +3120,6 @@ class DraftRegistration(AddonModelMixin, StoredObject):
         #         flags = schema.get('flags', {})
         #         for flag, value in flags.iteritems():
         #             self.flags[flag] = value
-
-        meta_schema = self.registration_schema # or kwargs.get('registration_schema')
-        if meta_schema:
-            schema = meta_schema.schema
-            config = schema.get('config', {})
-            self.config = config
-            # TODO: uncomment to set flags
-            # if not self.registration_schema:
-            #    flags = schema.get('flags', {})
-            #    for flag, value in flags.iteritems():
-            #        self.flags[flag] = value
 
     # TODO: uncomment to expose approval/review properties
     #    @property

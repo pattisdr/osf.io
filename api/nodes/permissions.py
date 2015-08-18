@@ -1,7 +1,7 @@
-from framework.auth import Auth
+from website.models import Node, Pointer
 from rest_framework import permissions
 
-from website.models import Node, Pointer
+from framework.auth import Auth
 
 def get_user_auth(request):
     user = request.user
