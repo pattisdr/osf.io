@@ -50,7 +50,7 @@ class DraftRegistrationList(generics.ListCreateAPIView, ODMFilterMixin):
     def get_queryset(self):
         user = self.request.user
         if user.is_anonymous():
-            raise NotAuthenticated(_('Must be logged in to view draft registrations'))
+            raise NotAuthenticated()
         return DraftRegistration.find(Q('initiator', 'eq', user))
 
     # overrides ListCreateAPIView
