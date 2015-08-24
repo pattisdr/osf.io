@@ -1,6 +1,6 @@
 
 from django.utils.translation import ugettext_lazy as _
- 
+
 REGISTER_WARNING = _('You are about to register {} '
                     'and everything that is inside it. Registration creates a permanent, '
                     'time-stamped, uneditable version of the project. If you would prefer to '
