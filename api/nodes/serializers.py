@@ -9,7 +9,7 @@ from modularodm import Q
 from website.project.views.drafts import get_schema_or_fail
 from website.project.metadata.schemas import OSF_META_SCHEMAS
 from website.models import Node, DraftRegistration
-from api.base.serializers import JSONAPISerializer, LinksField, Link, WaterbutlerLink
+from api.base.serializers import JSONAPISerializer, LinksField, Link, WaterbutlerLink, HyperlinkedIdentityFieldWithMeta, HyperlinkedRelatedFieldWithMeta
 
 
 class NodeSerializer(JSONAPISerializer):
@@ -150,10 +150,11 @@ class DraftRegistrationSerializer(JSONAPISerializer):
     datetime_initiated = ser.DateTimeField(read_only=True)
     datetime_updated = ser.DateTimeField(read_only=True)
 
-    # TODO Add self link and html link for Draft Registration
-    # links = LinksField({
-    #     'html': 'get_absolute_url',
-    # })
+    links = LinksField({
+        'html': 'get_absolute_url',
+    })
+
+    nodes = HyperlinkedRelatedFieldWithMeta(view_name='nodes:node-detail', lookup_field='pk', lookup_url_kwarg='node_id', read_only=True, source='branched_from', link_type='related')
 
     def create(self, validated_data):
         """
@@ -181,6 +182,9 @@ class DraftRegistrationSerializer(JSONAPISerializer):
         user = request.user
         draft = node.create_draft_registration(user, meta_schema, questions, save=True)
         return draft
+
+    def get_absolute_url(self, obj):
+        return obj.absolute_url
 
     class Meta:
         type_ = "draft_registrations"
