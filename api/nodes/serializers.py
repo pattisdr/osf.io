@@ -4,6 +4,7 @@ from framework.auth.core import Auth
 from rest_framework import exceptions
 from framework.exceptions import HTTPError
 from rest_framework import serializers as ser
+from django.utils.translation import ugettext_lazy as _
 
 from modularodm import Q
 from website.project.views.drafts import get_schema_or_fail
@@ -162,6 +163,9 @@ class DraftRegistrationSerializer(JSONAPISerializer):
 
         """
         request = self.context['request']
+        node = self.context['view'].get_node()
+        if node.is_deleted:
+            raise exceptions.NotFound(_('This resource has been deleted'))
         schema_name = validated_data.get('schema_name')
         if not schema_name:
             raise HTTPError(
@@ -178,7 +182,6 @@ class DraftRegistrationSerializer(JSONAPISerializer):
             Q('schema_version', 'eq', schema_version)
         )
         questions = validated_data.get('registration_metadata', {})
-        node = self.context['view'].get_node()
         user = request.user
         draft = node.create_draft_registration(user, meta_schema, questions, save=True)
         return draft
