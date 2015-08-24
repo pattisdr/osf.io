@@ -468,8 +468,11 @@ class TestDeleteDraftRegistration(ApiTestCase):
         assert_equal(res.status_code, 403)
 
     def test_delete_private_registration_draft_logged_in_read_only_contributor(self):
-        self.private_draft.add_contributor(self.user_two, permissions=['read'])
-        res = self.app.delete(self.private_url, auth=self.basic_auth_two, expect_errors=True)
+        self.private_project.add_contributor(self.user_two, permissions=['read'])
+        self.private_project.save()
+        new_draft = DraftRegistrationFactory(initiator=self.user, branched_from=self.private_project)
+        url = '/{}draft_registrations/{}/'.format(API_BASE, new_draft._id)
+        res = self.app.delete(url, auth=self.basic_auth_two, expect_errors=True)
         assert_equal(res.status_code, 403)
 
 
