@@ -77,8 +77,6 @@ class DraftRegistrationList(generics.ListCreateAPIView, ODMFilterMixin):
                                         'confirm_register': url
                                     }
                                 }, status=status.HTTP_202_ACCEPTED)
-
-
         raise exceptions.PermissionDenied
 
 
