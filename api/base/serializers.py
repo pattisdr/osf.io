@@ -30,6 +30,29 @@ def _url_val(val, obj, serializer, **kwargs):
     else:
         return val
 
+class HyperlinkedRelatedFieldWithMeta(ser.HyperlinkedRelatedField):
+    def __init__(self, view_name=None, **kwargs):
+        self.meta = kwargs.pop('meta', None)
+        self.link_type = kwargs.pop('link_type', 'url')
+        super(HyperlinkedRelatedFieldWithMeta, self).__init__(view_name, **kwargs)
+
+    def to_representation(self, value):
+        """
+        Returns nested dictionary in format {'links': {'self.link_type': ... }
+        If no meta information, self.link_type is equal to a string containing link's URL.  Otherwise,
+        the link is represented as a links object with 'href' and 'meta' members.
+        """
+        url = super(HyperlinkedRelatedFieldWithMeta, self).to_representation(value)
+
+        if self.meta is None:
+            return {'links': {self.link_type: url}}
+        else:
+            meta = {}
+            for key in self.meta:
+                meta[key] = _rapply(self.meta[key], _url_val, obj=value, serializer=self.parent)
+            self.meta = meta
+
+            return {'links': {self.link_type: {'href': url, 'meta': self.meta}}}
 
 class HyperlinkedIdentityFieldWithMeta(ser.HyperlinkedIdentityField):
     """
@@ -240,7 +263,7 @@ class JSONAPISerializer(ser.Serializer):
             except SkipField:
                 continue
 
-            if isinstance(field, HyperlinkedIdentityFieldWithMeta):
+            if isinstance(field, (HyperlinkedIdentityFieldWithMeta, ser.HyperlinkedRelatedField)):
                 data['relationships'][field.field_name] = field.to_representation(attribute)
             elif field.field_name == 'id':
                 data['id'] = field.to_representation(attribute)
