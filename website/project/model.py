@@ -3223,3 +3223,24 @@ class DraftRegistration(AddonModelMixin, StoredObject):
         self.registered_node = register
         self.save()
         return register
+
+    @property
+    def absolute_api_v2_url(self):
+        return absolute_reverse('draft_registrations:registration-detail', kwargs={'draft_id': self._id})
+
+    # used by django and DRF
+    def get_absolute_url(self):
+        return self.absolute_api_v2_url
+
+    @property
+    def url(self):
+        return '/{}/registrations/#drafts/{}'.format(self.branched_from._id, self._primary_key)
+
+    @property
+    def absolute_url(self):
+        if not self.url:
+            return None
+        return urlparse.urljoin(settings.DOMAIN, self.url)
+
+
+
