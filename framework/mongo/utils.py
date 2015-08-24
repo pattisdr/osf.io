@@ -83,9 +83,10 @@ def get_or_http_error(Model, pk_or_query, display_name=None):
             instance = Model.find_one(pk_or_query)
         # TODO: shouldn't use rest-framework exceptions.  Why is HTTPError not working here?
         except NoResultsFound:
-            raise HTTPError(http.NOT_FOUND, data=dict(
-                message_long="No {name} record matching that query could be found".format(name=display_name)
-            ))
+            # raise HTTPError(http.NOT_FOUND, data=dict(
+            #     message_long="No {name} record matching that query could be found".format(name=display_name)
+            # ))
+            raise NotFound('No {name} record matching that query could be found'.format(name=display_name))
         except MultipleResultsFound:
             raise HTTPError(http.BAD_REQUEST, data=dict(
                 message_long="The query must match exactly one {name} record".format(name=display_name)
