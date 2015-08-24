@@ -448,21 +448,20 @@ class TestDeleteDraftRegistration(ApiTestCase):
         res = self.app.patch(self.public_url, auth=self.basic_auth_two, expect_errors=True)
         assert_equal(res.status_code, 403)
 
-        assert_equal(self.public_draft.is_deleted, False)
         res = self.app.delete(self.public_url, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 204)
-        assert_equal(self.public_draft.is_deleted, True)
+        res = self.app.get(self.public_url, auth=self.basic_auth, expect_errors=True)
+        assert_equal(res.status_code, 404)
 
     def test_delete_private_registration_draft_logged_out(self):
         res = self.app.delete(self.private_url, expect_errors=True)
-        print res
         assert_equal(res.status_code, 403)
 
     def test_delete_private_registration_draft_logged_in_contributor(self):
-        assert_equal(self.private_draft.is_deleted, False)
         res = self.app.delete(self.private_url, auth=self.basic_auth)
         assert_equal(res.status_code, 204)
-        assert_equal(self.private_draft.is_deleted, True)
+        res = self.app.get(self.private_url, auth=self.basic_auth, expect_errors=True)
+        assert_equal(res.status_code, 404)
 
     def test_delete_private_registration_draft_logged_in_non_contributor(self):
         res = self.app.delete(self.private_url, auth=self.basic_auth_two, expect_errors=True)
