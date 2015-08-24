@@ -31,6 +31,10 @@ def _url_val(val, obj, serializer, **kwargs):
         return val
 
 class HyperlinkedRelatedFieldWithMeta(ser.HyperlinkedRelatedField):
+    """
+    HyperlinkedRelated field that returns a nested dict with url,
+    optional meta information, and link_type.
+    """
     def __init__(self, view_name=None, **kwargs):
         self.meta = kwargs.pop('meta', None)
         self.link_type = kwargs.pop('link_type', 'url')
