@@ -36,7 +36,7 @@ class TestWelcomeToApi(ApiTestCase):
     def test_returns_current_user_info_when_logged_in(self):
         res = self.app.get(self.url, auth=self.user.auth)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['meta']['current_user']['data']['given_name'], self.user.given_name)
+        assert_equal(res.json['meta']['current_user']['data']['attributes']['given_name'], self.user.given_name)
 
 
 class TestNodeList(ApiTestCase):
@@ -330,9 +330,9 @@ class TestNodeCreate(ApiTestCase):
     def test_creates_public_project_logged_in(self):
         res = self.app.post_json(self.url, self.public_project, auth=self.user_one.auth)
         assert_equal(res.status_code, 201)
-        assert_equal(res.json['data']['title'], self.public_project['title'])
-        assert_equal(res.json['data']['description'], self.public_project['description'])
-        assert_equal(res.json['data']['category'], self.public_project['category'])
+        assert_equal(res.json['data']['attributes']['title'], self.public_project['title'])
+        assert_equal(res.json['data']['attributes']['description'], self.public_project['description'])
+        assert_equal(res.json['data']['attributes']['category'], self.public_project['category'])
 
     def test_creates_private_project_logged_out(self):
         res = self.app.post_json(self.url, self.private_project, expect_errors=True)
@@ -344,9 +344,9 @@ class TestNodeCreate(ApiTestCase):
     def test_creates_private_project_logged_in_contributor(self):
         res = self.app.post_json(self.url, self.private_project, auth=self.user_one.auth)
         assert_equal(res.status_code, 201)
-        assert_equal(res.json['data']['title'], self.private_project['title'])
-        assert_equal(res.json['data']['description'], self.private_project['description'])
-        assert_equal(res.json['data']['category'], self.private_project['category'])
+        assert_equal(res.json['data']['attributes']['title'], self.private_project['title'])
+        assert_equal(res.json['data']['attributes']['description'], self.private_project['description'])
+        assert_equal(res.json['data']['attributes']['category'], self.private_project['category'])
 
     def test_creates_project_creates_project_and_sanitizes_html(self):
         title = '<em>Cool</em> <strong>Project</strong>'
@@ -363,9 +363,9 @@ class TestNodeCreate(ApiTestCase):
         url = '/{}nodes/{}/'.format(API_BASE, project_id)
 
         res = self.app.get(url, auth=self.user_one.auth)
-        assert_equal(res.json['data']['title'], strip_html(title))
-        assert_equal(res.json['data']['description'], strip_html(description))
-        assert_equal(res.json['data']['category'], self.category)
+        assert_equal(res.json['data']['attributes']['title'], strip_html(title))
+        assert_equal(res.json['data']['attributes']['description'], strip_html(description))
+        assert_equal(res.json['data']['attributes']['category'], self.category)
 
 
 class TestNodeDetail(ApiTestCase):
@@ -383,16 +383,16 @@ class TestNodeDetail(ApiTestCase):
     def test_return_public_project_details_logged_out(self):
         res = self.app.get(self.public_url)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data']['title'], self.public_project.title)
-        assert_equal(res.json['data']['description'], self.public_project.description)
-        assert_equal(res.json['data']['category'], self.public_project.category)
+        assert_equal(res.json['data']['attributes']['title'], self.public_project.title)
+        assert_equal(res.json['data']['attributes']['description'], self.public_project.description)
+        assert_equal(res.json['data']['attributes']['category'], self.public_project.category)
 
     def test_return_public_project_details_logged_in(self):
         res = self.app.get(self.public_url, auth=self.user.auth)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data']['title'], self.public_project.title)
-        assert_equal(res.json['data']['description'], self.public_project.description)
-        assert_equal(res.json['data']['category'], self.public_project.category)
+        assert_equal(res.json['data']['attributes']['title'], self.public_project.title)
+        assert_equal(res.json['data']['attributes']['description'], self.public_project.description)
+        assert_equal(res.json['data']['attributes']['category'], self.public_project.category)
 
     def test_return_private_project_details_logged_out(self):
         res = self.app.get(self.private_url, expect_errors=True)
@@ -404,9 +404,9 @@ class TestNodeDetail(ApiTestCase):
     def test_return_private_project_details_logged_in_contributor(self):
         res = self.app.get(self.private_url, auth=self.user.auth)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data']['title'], self.private_project.title)
-        assert_equal(res.json['data']['description'], self.private_project.description)
-        assert_equal(res.json['data']['category'], self.private_project.category)
+        assert_equal(res.json['data']['attributes']['title'], self.private_project.title)
+        assert_equal(res.json['data']['attributes']['description'], self.private_project.description)
+        assert_equal(res.json['data']['attributes']['category'], self.private_project.category)
 
     def test_return_private_project_details_logged_in_non_contributor(self):
         res = self.app.get(self.private_url, auth=self.user_two.auth, expect_errors=True)
@@ -474,9 +474,9 @@ class TestNodeUpdate(ApiTestCase):
             'public': True,
         }, auth=self.user.auth)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data']['title'], self.new_title)
-        assert_equal(res.json['data']['description'], self.new_description)
-        assert_equal(res.json['data']['category'], self.new_category)
+        assert_equal(res.json['data']['attributes']['title'], self.new_title)
+        assert_equal(res.json['data']['attributes']['description'], self.new_description)
+        assert_equal(res.json['data']['attributes']['category'], self.new_category)
 
         # Public project, logged in, unauthorized
         res = self.app.put_json(self.public_url, {
@@ -507,9 +507,9 @@ class TestNodeUpdate(ApiTestCase):
             'public': False,
         }, auth=self.user.auth)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data']['title'], self.new_title)
-        assert_equal(res.json['data']['description'], self.new_description)
-        assert_equal(res.json['data']['category'], self.new_category)
+        assert_equal(res.json['data']['attributes']['title'], self.new_title)
+        assert_equal(res.json['data']['attributes']['description'], self.new_description)
+        assert_equal(res.json['data']['attributes']['category'], self.new_category)
 
     def test_update_private_project_logged_in_non_contributor(self):
         res = self.app.put_json(self.private_url, {
@@ -535,8 +535,8 @@ class TestNodeUpdate(ApiTestCase):
             'public': True,
         }, auth=self.user.auth)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data']['title'], strip_html(new_title))
-        assert_equal(res.json['data']['description'], strip_html(new_description))
+        assert_equal(res.json['data']['attributes']['title'], strip_html(new_title))
+        assert_equal(res.json['data']['attributes']['description'], strip_html(new_description))
 
     def test_partial_update_project_updates_project_correctly_and_sanitizes_html(self):
         new_title = 'An <script>alert("even cooler")</script> project'
@@ -551,9 +551,9 @@ class TestNodeUpdate(ApiTestCase):
 
         res = self.app.get(url)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data']['title'], strip_html(new_title))
-        assert_equal(res.json['data']['description'], self.description)
-        assert_equal(res.json['data']['category'], self.category)
+        assert_equal(res.json['data']['attributes']['title'], strip_html(new_title))
+        assert_equal(res.json['data']['attributes']['description'], self.description)
+        assert_equal(res.json['data']['attributes']['category'], self.category)
 
     def test_writing_to_public_field(self):
         title = "Cool project"
@@ -571,7 +571,7 @@ class TestNodeUpdate(ApiTestCase):
         res = self.app.patch_json(url, {
             'is_public': False,
         }, auth=self.user.auth, expect_errors=True)
-        assert_true(res.json['data']['public'])
+        assert_true(res.json['data']['attributes']['public'])
         # TODO: Figure out why the validator isn't raising when attempting to write to a read-only field
         # assert_equal(res.status_code, 403)
 
@@ -587,9 +587,9 @@ class TestNodeUpdate(ApiTestCase):
             'title': self.new_title,
         }, auth=self.user.auth)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data']['title'], self.new_title)
-        assert_equal(res.json['data']['description'], self.description)
-        assert_equal(res.json['data']['category'], self.category)
+        assert_equal(res.json['data']['attributes']['title'], self.new_title)
+        assert_equal(res.json['data']['attributes']['description'], self.description)
+        assert_equal(res.json['data']['attributes']['category'], self.category)
 
         # Public resource, logged in, unauthorized
         res = self.app.patch_json(self.public_url, {
@@ -607,9 +607,9 @@ class TestNodeUpdate(ApiTestCase):
     def test_partial_update_private_project_logged_in_contributor(self):
         res = self.app.patch_json(self.private_url, {'title': self.new_title}, auth=self.user.auth)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data']['title'], self.new_title)
-        assert_equal(res.json['data']['description'], self.description)
-        assert_equal(res.json['data']['category'], self.category)
+        assert_equal(res.json['data']['attributes']['title'], self.new_title)
+        assert_equal(res.json['data']['attributes']['description'], self.description)
+        assert_equal(res.json['data']['attributes']['category'], self.category)
 
     def test_partial_update_private_project_logged_in_non_contributor(self):
         res = self.app.patch_json(self.private_url,
@@ -807,12 +807,12 @@ class TestNodeRegistrationList(ApiTestCase):
     def test_return_public_registrations_logged_out(self):
         res = self.app.get(self.public_url)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data'][0]['title'], self.public_project.title)
+        assert_equal(res.json['data'][0]['attributes']['title'], self.public_project.title)
 
     def test_return_public_registrations_logged_in(self):
         res = self.app.get(self.public_url, auth=self.user.auth)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data'][0]['category'], self.public_project.category)
+        assert_equal(res.json['data'][0]['attributes']['category'], self.public_project.category)
 
     def test_return_private_registrations_logged_out(self):
         res = self.app.get(self.private_url, expect_errors=True)
@@ -824,7 +824,7 @@ class TestNodeRegistrationList(ApiTestCase):
     def test_return_private_registrations_logged_in_contributor(self):
         res = self.app.get(self.private_url, auth=self.user.auth)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data'][0]['category'], self.project.category)
+        assert_equal(res.json['data'][0]['attributes']['category'], self.project.category)
 
     def test_return_private_registrations_logged_in_non_contributor(self):
         res = self.app.get(self.private_url, auth=self.user_two.auth, expect_errors=True)
@@ -859,18 +859,18 @@ class TestNodeDraftRegistrationList(ApiTestCase):
     def test_return_public_registrations_logged_out(self):
         res = self.app.get(self.public_url, expect_errors=True)
         print res
-        source = res.json['data'][0]['branched_from']
+        source = res.json['data'][0]['attributes']['branched_from']
         assert_equal(res.status_code, 200)
         assert_equal(source, self.public_project._id)
 
     def test_return_public_registrations_logged_in(self):
         res = self.app.get(self.public_url, auth=self.basic_auth ,expect_errors = True)
         print res
-        source = res.json['data'][0]['branched_from']
+        source = res.json['data'][0]['attributes']['branched_from']
         assert_equal(res.status_code, 200)
         assert_equal(source, self.public_project._id)
-        assert_not_equal(res.json['data'][0]['registration_schema'], None)
-        assert_not_equal(res.json['data'][0]['datetime_initiated'], None)
+        assert_not_equal(res.json['data'][0]['attributes']['registration_schema'], None)
+        assert_not_equal(res.json['data'][0]['attributes']['datetime_initiated'], None)
 
     def test_return_private_registrations_logged_out(self):
         res = self.app.get(self.private_url, expect_errors=True)
@@ -880,9 +880,9 @@ class TestNodeDraftRegistrationList(ApiTestCase):
         res = self.app.get(self.private_url, auth=self.basic_auth, expect_errors=True)
         print res
         assert_equal(res.status_code, 200)
-        assert_equal((res.json['data'][0]['initiator']), self.user._id)
-        assert_not_equal(res.json['data'][0]['registration_schema'], None)
-        assert_not_equal(res.json['data'][0]['datetime_initiated'], None)
+        assert_equal((res.json['data'][0]['attributes']['initiator']), self.user._id)
+        assert_not_equal(res.json['data'][0]['attributes']['registration_schema'], None)
+        assert_not_equal(res.json['data'][0]['attributes']['datetime_initiated'], None)
 
     def test_return_private_registrations_logged_in_non_contributor(self):
         res = self.app.get(self.private_url, auth=self.basic_auth_two, expect_errors=True)
@@ -919,6 +919,12 @@ class TestCreateDraftRegistration(ApiTestCase):
         res = self.app.post(url, self.payload, expect_errors=True, auth=self.basic_auth)
         assert_equal(res.status_code, 404)
 
+    def test_create_public_registration_draft_deleted_node(self):
+        self.public_project.is_deleted = True
+        self.public_project.save()
+        res = self.app.post(self.public_url, self.payload, expect_errors=True, auth=self.basic_auth)
+        assert_equal(res.status_code, 404)
+
     def test_create_registration_of_registration(self):
         url = '/{}nodes/{}/draft_registrations/'.format(API_BASE, self.public_registration._id)
         res = self.app.post(url, expect_errors=True, auth=self.basic_auth)
@@ -931,11 +937,11 @@ class TestCreateDraftRegistration(ApiTestCase):
     def test_create_public_registration_draft_logged_in(self):
         res = self.app.post(self.public_url, self.payload, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 201)
-        source = res.json['data']['branched_from']
-        schema = res.json['data']['registration_schema']
+        source = res.json['data']['attributes']['branched_from']
+        schema = res.json['data']['attributes']['registration_schema']
         assert_equal(source, self.public_project._id)
         assert_equal(schema, self.payload['schema_name'])
-        assert_not_equal(res.json['data']['registration_schema'], None)
+        assert_not_equal(res.json['data']['attributes']['registration_schema'], None)
 
     def test_create_private_registration_draft_logged_out(self):
         res = self.app.post(self.private_url, self.payload, expect_errors=True)
@@ -945,11 +951,11 @@ class TestCreateDraftRegistration(ApiTestCase):
         res = self.app.post(self.private_url, self.payload, auth=self.basic_auth, expect_errors=True)
         print res
         assert_equal(res.status_code, 201)
-        source = res.json['data']['branched_from']
-        schema = res.json['data']['registration_schema']
+        source = res.json['data']['attributes']['branched_from']
+        schema = res.json['data']['attributes']['registration_schema']
         assert_equal(source, self.private_project._id)
         assert_equal(schema, self.payload['schema_name'])
-        assert_not_equal(res.json['data']['registration_schema'], None)
+        assert_not_equal(res.json['data']['attributes']['registration_schema'], None)
 
     def test_create_private_registration_draft_logged_in_non_contributor(self):
         res = self.app.post(self.private_url, self.payload, auth=self.basic_auth_two, expect_errors=True)
@@ -1054,9 +1060,9 @@ class TestNodeChildCreate(ApiTestCase):
     def test_creates_child_logged_in_owner(self):
         res = self.app.post_json(self.url, self.child, auth=self.user.auth)
         assert_equal(res.status_code, 201)
-        assert_equal(res.json['data']['title'], self.child['title'])
-        assert_equal(res.json['data']['description'], self.child['description'])
-        assert_equal(res.json['data']['category'], self.child['category'])
+        assert_equal(res.json['data']['attributes']['title'], self.child['title'])
+        assert_equal(res.json['data']['attributes']['description'], self.child['description'])
+        assert_equal(res.json['data']['attributes']['category'], self.child['category'])
 
         self.project.reload()
         assert_equal(res.json['data']['id'], self.project.nodes[0]._id)
@@ -1066,9 +1072,9 @@ class TestNodeChildCreate(ApiTestCase):
 
         res = self.app.post_json(self.url, self.child, auth=self.user_two.auth)
         assert_equal(res.status_code, 201)
-        assert_equal(res.json['data']['title'], self.child['title'])
-        assert_equal(res.json['data']['description'], self.child['description'])
-        assert_equal(res.json['data']['category'], self.child['category'])
+        assert_equal(res.json['data']['attributes']['title'], self.child['title'])
+        assert_equal(res.json['data']['attributes']['description'], self.child['description'])
+        assert_equal(res.json['data']['attributes']['category'], self.child['category'])
 
         self.project.reload()
         assert_equal(res.json['data']['id'], self.project.nodes[0]._id)
@@ -1105,9 +1111,9 @@ class TestNodeChildCreate(ApiTestCase):
         url = '/{}nodes/{}/'.format(API_BASE, child_id)
 
         res = self.app.get(url, auth=self.user.auth)
-        assert_equal(res.json['data']['title'], strip_html(title))
-        assert_equal(res.json['data']['description'], strip_html(description))
-        assert_equal(res.json['data']['category'], 'project')
+        assert_equal(res.json['data']['attributes']['title'], strip_html(title))
+        assert_equal(res.json['data']['attributes']['description'], strip_html(description))
+        assert_equal(res.json['data']['attributes']['category'], 'project')
 
         self.project.reload()
         assert_equal(res.json['data']['id'], self.project.nodes[0]._id)
@@ -1135,14 +1141,14 @@ class TestNodePointersList(ApiTestCase):
         res_json = res.json['data']
         assert_equal(len(res_json), 1)
         assert_equal(res.status_code, 200)
-        assert_in(res_json[0]['target_node_id'], self.public_pointer_project._id)
+        assert_in(res_json[0]['attributes']['target_node_id'], self.public_pointer_project._id)
 
     def test_return_public_node_pointers_logged_in(self):
         res = self.app.get(self.public_url, auth=self.user_two.auth)
         res_json = res.json['data']
         assert_equal(len(res_json), 1)
         assert_equal(res.status_code, 200)
-        assert_in(res_json[0]['target_node_id'], self.public_pointer_project._id)
+        assert_in(res_json[0]['attributes']['target_node_id'], self.public_pointer_project._id)
 
     def test_return_private_node_pointers_logged_out(self):
         res = self.app.get(self.private_url, expect_errors=True)
@@ -1156,7 +1162,7 @@ class TestNodePointersList(ApiTestCase):
         res_json = res.json['data']
         assert_equal(res.status_code, 200)
         assert_equal(len(res_json), 1)
-        assert_in(res_json[0]['target_node_id'], self.pointer_project._id)
+        assert_in(res_json[0]['attributes']['target_node_id'], self.pointer_project._id)
 
     def test_return_private_node_pointers_logged_in_non_contributor(self):
         res = self.app.get(self.private_url, auth=self.user_two.auth, expect_errors=True)
@@ -1197,7 +1203,7 @@ class TestCreateNodePointer(ApiTestCase):
 
         res = self.app.post(self.public_url, self.public_payload, auth=self.user.auth)
         assert_equal(res.status_code, 201)
-        assert_equal(res.json['data']['target_node_id'], self.public_pointer_project._id)
+        assert_equal(res.json['data']['attributes']['target_node_id'], self.public_pointer_project._id)
 
     def test_creates_private_node_pointer_logged_out(self):
         res = self.app.post(self.private_url, self.private_payload, expect_errors=True)
@@ -1209,7 +1215,7 @@ class TestCreateNodePointer(ApiTestCase):
     def test_creates_private_node_pointer_logged_in_contributor(self):
         res = self.app.post(self.private_url, self.private_payload, auth=self.user.auth)
         assert_equal(res.status_code, 201)
-        assert_equal(res.json['data']['target_node_id'], self.pointer_project._id)
+        assert_equal(res.json['data']['attributes']['target_node_id'], self.pointer_project._id)
 
     def test_creates_private_node_pointer_logged_in_non_contributor(self):
         res = self.app.post(self.private_url, self.private_payload, auth=self.user_two.auth, expect_errors=True)
@@ -1222,7 +1228,7 @@ class TestCreateNodePointer(ApiTestCase):
     def test_create_node_pointer_contributing_node_to_non_contributing_node(self):
         res = self.app.post(self.private_url, self.user_two_payload, auth=self.user.auth)
         assert_equal(res.status_code, 201)
-        assert_equal(res.json['data']['target_node_id'], self.user_two_project._id)
+        assert_equal(res.json['data']['attributes']['target_node_id'], self.user_two_project._id)
 
     def test_create_pointer_non_contributing_node_to_fake_node(self):
         res = self.app.post(self.private_url, self.fake_payload, auth=self.user_two.auth, expect_errors=True)
@@ -1245,12 +1251,12 @@ class TestCreateNodePointer(ApiTestCase):
 
         res = self.app.post(self.public_url, self.point_to_itself_payload, auth=self.user.auth)
         assert_equal(res.status_code, 201)
-        assert_equal(res.json['data']['target_node_id'], self.public_project._id)
+        assert_equal(res.json['data']['attributes']['target_node_id'], self.public_project._id)
 
     def test_create_node_pointer_already_connected(self):
         res = self.app.post(self.public_url, self.public_payload, auth=self.user.auth)
         assert_equal(res.status_code, 201)
-        assert_equal(res.json['data']['target_node_id'], self.public_pointer_project._id)
+        assert_equal(res.json['data']['attributes']['target_node_id'], self.public_pointer_project._id)
 
         res = self.app.post(self.public_url, self.public_payload, auth=self.user.auth, expect_errors=True)
         assert_equal(res.status_code, 400)
@@ -1272,12 +1278,12 @@ class TestNodeFilesList(ApiTestCase):
     def test_returns_public_files_logged_out(self):
         res = self.app.get(self.public_url, expect_errors=True)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data'][0]['provider'], 'osfstorage')
+        assert_equal(res.json['data'][0]['attributes']['provider'], 'osfstorage')
 
     def test_returns_public_files_logged_in(self):
         res = self.app.get(self.public_url, auth=self.user.auth)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data'][0]['provider'], 'osfstorage')
+        assert_equal(res.json['data'][0]['attributes']['provider'], 'osfstorage')
 
     def test_returns_private_files_logged_out(self):
         res = self.app.get(self.private_url, expect_errors=True)
@@ -1290,7 +1296,7 @@ class TestNodeFilesList(ApiTestCase):
         res = self.app.get(self.private_url, auth=self.user.auth)
         assert_equal(res.status_code, 200)
         assert_equal(len(res.json['data']), 1)
-        assert_equal(res.json['data'][0]['provider'], 'osfstorage')
+        assert_equal(res.json['data'][0]['attributes']['provider'], 'osfstorage')
 
     def test_returns_private_files_logged_in_non_contributor(self):
         res = self.app.get(self.private_url, auth=self.user_two.auth, expect_errors=True)
@@ -1300,7 +1306,7 @@ class TestNodeFilesList(ApiTestCase):
         user_auth = Auth(self.user)
         res = self.app.get(self.private_url, auth=self.user.auth)
         assert_equal(len(res.json['data']), 1)
-        assert_equal(res.json['data'][0]['provider'], 'osfstorage')
+        assert_equal(res.json['data'][0]['attributes']['provider'], 'osfstorage')
 
         self.project.add_addon('github', auth=user_auth)
         self.project.save()
@@ -1331,8 +1337,8 @@ class TestNodeFilesList(ApiTestCase):
 
         url = '/{}nodes/{}/files/?path=%2F&provider=osfstorage'.format(API_BASE, self.project._id)
         res = self.app.get(url, auth=self.user.auth)
-        assert_equal(res.json['data'][0]['name'], 'NewFile')
-        assert_equal(res.json['data'][0]['provider'], 'osfstorage')
+        assert_equal(res.json['data'][0]['attributes']['name'], 'NewFile')
+        assert_equal(res.json['data'][0]['attributes']['provider'], 'osfstorage')
 
     @mock.patch('api.nodes.views.requests.get')
     def test_handles_unauthenticated_waterbutler_request(self, mock_waterbutler_request):
@@ -1377,13 +1383,13 @@ class TestNodePointerDetail(ApiTestCase):
         res = self.app.get(self.public_url)
         assert_equal(res.status_code, 200)
         res_json = res.json['data']
-        assert_equal(res_json['target_node_id'], self.public_pointer_project._id)
+        assert_equal(res_json['attributes']['target_node_id'], self.public_pointer_project._id)
 
     def test_returns_public_node_pointer_detail_logged_in(self):
         res = self.app.get(self.public_url, auth=self.user.auth)
         res_json = res.json['data']
         assert_equal(res.status_code, 200)
-        assert_equal(res_json['target_node_id'], self.public_pointer_project._id)
+        assert_equal(res_json['attributes']['target_node_id'], self.public_pointer_project._id)
 
     def test_returns_private_node_pointer_detail_logged_out(self):
         res = self.app.get(self.private_url, expect_errors=True)
@@ -1396,7 +1402,7 @@ class TestNodePointerDetail(ApiTestCase):
         res = self.app.get(self.private_url, auth=self.user.auth)
         res_json = res.json['data']
         assert_equal(res.status_code, 200)
-        assert_equal(res_json['target_node_id'], self.pointer_project._id)
+        assert_equal(res_json['attributes']['target_node_id'], self.pointer_project._id)
 
     def returns_private_node_pointer_detail_logged_in_non_contributor(self):
         res = self.app.get(self.private_url, auth=self.user_two.auth, expect_errors=True)
