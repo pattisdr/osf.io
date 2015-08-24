@@ -1,5 +1,4 @@
 from rest_framework import status
-from framework.auth.core import Auth
 from rest_framework import exceptions
 from rest_framework.response import Response
 from rest_framework.exceptions import NotAuthenticated
@@ -97,11 +96,8 @@ class DraftRegistrationDetail(generics.RetrieveUpdateDestroyAPIView, DraftRegist
 
     # overrides RetrieveUpdateDestroyAPIView
     def perform_destroy(self, instance):
-        user = self.request.user
-        auth = Auth(user)
-        draft = self.get_object()
-        draft.remove_node(auth=auth)
-        draft.save()
+        DraftRegistration.remove_one(instance)
+        return True
 
 
 class RegistrationCreateWithToken(generics.CreateAPIView, NodeMixin):
