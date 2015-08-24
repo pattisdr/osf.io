@@ -3242,5 +3242,10 @@ class DraftRegistration(AddonModelMixin, StoredObject):
             return None
         return urlparse.urljoin(settings.DOMAIN, self.url)
 
+    # For Django compatibility
+    @property
+    def pk(self):
+        return self._id
+
 
 
