@@ -65,7 +65,20 @@ class DraftRegistrationList(generics.ListCreateAPIView, ODMFilterMixin):
                 token = token_creator(draft._id, user._id)
                 url = absolute_reverse('draft_registrations:registration-create', kwargs={'token': token})
                 registration_warning = REGISTER_WARNING.format((node.title))
-                return Response({'data': {'draft_id': draft._id, 'warning_message': registration_warning, 'links': {'confirm_register': url}}}, status=status.HTTP_202_ACCEPTED)
+                return Response({
+                                    'data': {
+                                        'id': draft._id,
+                                        'type': 'draft_registrations',
+                                        'attributes': {
+                                            'warning_message': registration_warning
+                                        }
+                                    },
+                                    'links': {
+                                        'confirm_register': url
+                                    }
+                                }, status=status.HTTP_202_ACCEPTED)
+
+
         raise exceptions.PermissionDenied
 
 
