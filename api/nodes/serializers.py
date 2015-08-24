@@ -165,7 +165,9 @@ class DraftRegistrationSerializer(JSONAPISerializer):
         request = self.context['request']
         node = self.context['view'].get_node()
         if node.is_deleted:
-            raise exceptions.NotFound(_('This resource has been deleted'))
+            raise exceptions.NotFound(_('This resource has been deleted.'))
+        if node.is_registration:
+            raise exceptions.ValidationError(_('This resource is a registration.'))
         schema_name = validated_data.get('schema_name')
         if not schema_name:
             raise HTTPError(
