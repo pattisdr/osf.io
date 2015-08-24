@@ -5,10 +5,10 @@ from rest_framework.exceptions import PermissionDenied, NotFound
 
 from website.project.model import Q
 from api.base.utils import token_creator
-from website.project.views.drafts import get_schema_or_fail
 from api.base.utils import get_object_or_404
 from api.base.serializers import JSONAPISerializer
 from website.project.model import DraftRegistration, Node
+from website.project.views.drafts import get_schema_or_fail
 from api.nodes.serializers import NodeSerializer, DraftRegistrationSerializer
 
 
@@ -26,9 +26,12 @@ class DraftRegSerializer(DraftRegistrationSerializer):
                 Q('name', 'eq', schema_name) &
                 Q('schema_version', 'eq', schema_version)
             )
-            existing_schema = instance.registration_schema
 
-            if (existing_schema.name, existing_schema.schema_version) != (meta_schema.name, meta_schema.schema_version):
+            existing_schema = instance.registration_schema
+            if existing_schema:
+                if (existing_schema.name, existing_schema.schema_version) != (meta_schema.name, meta_schema.schema_version):
+                    instance.registration_schema = meta_schema
+            else:
                 instance.registration_schema = meta_schema
 
         instance.registration_metadata = schema_data
@@ -36,6 +39,7 @@ class DraftRegSerializer(DraftRegistrationSerializer):
         return instance
     class Meta:
         type_ = 'registrations'
+
 
 class RegistrationCreateSerializer(JSONAPISerializer):
     draft_id = ser.CharField(source='_id')
