@@ -17,8 +17,7 @@ from tests.factories import (
     NodeFactory,
     ProjectFactory,
     RegistrationFactory,
-    UserFactory,
-    AuthUserFactory
+    AuthUserFactory,
     DraftRegistrationFactory,
     UserFactory
 )
