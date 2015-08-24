@@ -97,13 +97,13 @@ class TestRegistrationCreate(ApiTestCase):
 
     def test_create_public_registration_logged_in(self):
         res = self.app.post(self.public_url, self.public_payload, auth=self.basic_auth, expect_errors=True)
-        token_url = res.json['data']['links']['confirm_register']
+        token_url = res.json['links']['confirm_register']
         assert_equal(res.status_code, 202)
 
         res = self.app.post(token_url, self.public_payload, auth=self.basic_auth, expect_errors = True)
         assert_equal(res.status_code, 201)
-        assert_equal(res.json['data']['title'], self.public_project.title)
-        assert_equal(res.json['data']['properties']['registration'], True)
+        assert_equal(res.json['data']['attributes']['title'], self.public_project.title)
+        assert_equal(res.json['data']['attributes']['properties']['registration'], True)
 
     # Draft has no field is_deleted
     # def test_create_registration_from_deleted_draft(self):
@@ -127,7 +127,7 @@ class TestRegistrationCreate(ApiTestCase):
 
         res = self.app.post(token_url, self.private_payload, auth=self.basic_auth, expect_errors = True)
         assert_equal(res.status_code, 400)
-        assert_equal(res.json["non_field_errors"][0], "Incorrect token.")
+        assert_equal(res.json['errors'][0]['detail']['non_field_errors'][0], "Incorrect token.")
 
     def test_create_private_registration_logged_out(self):
         res = self.app.post(self.private_url, self.private_payload, expect_errors=True)
@@ -147,13 +147,13 @@ class TestRegistrationCreate(ApiTestCase):
 
     def test_create_private_registration_logged_in_contributor(self):
         res = self.app.post(self.private_url, self.private_payload, auth=self.basic_auth, expect_errors=True)
-        token_url = res.json['data']['links']['confirm_register']
+        token_url = res.json['links']['confirm_register']
         assert_equal(res.status_code, 202)
 
         res = self.app.post(token_url, self.private_payload, auth=self.basic_auth, expect_errors = True)
         assert_equal(res.status_code, 201)
-        assert_equal(res.json['data']['title'], self.private_project.title)
-        assert_equal(res.json['data']['properties']['registration'], True)
+        assert_equal(res.json['data']['attributes']['title'], self.private_project.title)
+        assert_equal(res.json['data']['attributes']['properties']['registration'], True)
 
     def test_create_private_registration_logged_in_non_contributor(self):
         res = self.app.post(self.private_url, self.private_payload, auth=self.basic_auth_two, expect_errors=True)
@@ -229,9 +229,9 @@ class TestDraftRegistrationUpdate(ApiTestCase):
             'schema_version': self.schema_version,
         }, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 200)
-        source = res.json['data']['branched_from']
-        metadata = res.json['data']['registration_metadata']
-        registration_schema = res.json['data']['registration_schema']
+        source = res.json['data']['attributes']['branched_from']
+        metadata = res.json['data']['attributes']['registration_metadata']
+        registration_schema = res.json['data']['attributes']['registration_schema']
         assert_equal(source, self.public_project._id)
         assert_equal(metadata, self.registration_metadata)
         assert_not_equal(registration_schema, None)
@@ -259,9 +259,9 @@ class TestDraftRegistrationUpdate(ApiTestCase):
             'schema_version': self.schema_version,
         }, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 200)
-        source = res.json['data']['branched_from']
-        metadata = res.json['data']['registration_metadata']
-        registration_schema = res.json['data']['registration_schema']
+        source = res.json['data']['attributes']['branched_from']
+        metadata = res.json['data']['attributes']['registration_metadata']
+        registration_schema = res.json['data']['attributes']['registration_schema']
         assert_equal(source, self.private_project._id)
         assert_equal(metadata, self.registration_metadata)
         assert_not_equal(registration_schema, None)
@@ -342,7 +342,7 @@ class TestDraftRegistrationPartialUpdate(ApiTestCase):
         res = self.app.patch(self.public_url, {
             'schema_name': self.schema_name,
         }, auth=self.basic_auth, expect_errors=True)
-        registration_schema = res.json['data']['registration_schema']
+        registration_schema = res.json['data']['attributes']['registration_schema']
         assert_equal(registration_schema, self.schema_name)
         assert_equal(res.status_code, 200)
 
@@ -350,7 +350,7 @@ class TestDraftRegistrationPartialUpdate(ApiTestCase):
             'schema_name': self.schema_name,
             'schema_version': self.schema_version
         }, auth=self.basic_auth, expect_errors=True)
-        registration_schema = res.json['data']['registration_schema']
+        registration_schema = res.json['data']['attributes']['registration_schema']
         assert_equal(registration_schema, self.schema_name)
         assert_equal(res.status_code, 200)
 
@@ -365,7 +365,7 @@ class TestDraftRegistrationPartialUpdate(ApiTestCase):
         res = self.app.patch(self.public_url, {
             'registration_metadata': self.registration_metadata,
         }, auth=self.basic_auth, expect_errors=True)
-        registration_metadata = res.json['data']['registration_metadata']
+        registration_metadata = res.json['data']['attributes']['registration_metadata']
         assert_equal(registration_metadata, self.registration_metadata)
         assert_equal(res.status_code, 200)
 
@@ -384,7 +384,7 @@ class TestDraftRegistrationPartialUpdate(ApiTestCase):
         res = self.app.patch(self.private_url, {
             'registration_metadata': self.registration_metadata,
         }, auth=self.basic_auth)
-        registration_metadata = res.json['data']['registration_metadata']
+        registration_metadata = res.json['data']['attributes']['registration_metadata']
         assert_equal(registration_metadata, self.registration_metadata)
         assert_equal(res.status_code, 200)
 
