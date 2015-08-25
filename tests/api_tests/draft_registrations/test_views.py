@@ -1,4 +1,3 @@
-import mock
 from nose.tools import *  # flake8: noqa
 
 from tests.base import ApiTestCase, fake
@@ -105,20 +104,21 @@ class TestRegistrationCreate(ApiTestCase):
         assert_equal(res.json['data']['attributes']['title'], self.public_project.title)
         assert_equal(res.json['data']['attributes']['properties']['registration'], True)
 
-    # Draft has no field is_deleted
-    # def test_create_registration_from_deleted_draft(self):
-    #     self.public_draft.is_deleted = True
-    #     self.public_draft.save()
-    #     res = self.app.post(self.public_url, self.public_payload, auth=self.basic_auth, expect_errors=True)
-    #     assert_equal(res.status_code, 404)
+    def test_create_registration_from_deleted_draft(self):
+        url = '/{}draft_registrations/{}/'.format(API_BASE, self.public_draft._id)
+        res = self.app.delete(url, auth=self.basic_auth)
+        assert_equal(res.status_code, 204)
+        res = self.app.post(self.public_url, self.public_payload, auth=self.basic_auth, expect_errors=True)
+        assert_equal(res.status_code, 404)
 
-    # def test_create_registration_with_token_from_deleted_draft(self):
-    #     self.public_draft.is_deleted = True
-    #     self.public_draft.save()
-    #     token = token_creator(self.private_draft._id, self.user._id)
-    #     url = '/{}draft_registrations/{}/'.format(API_BASE, token)
-    #     res = self.app.post(self.public_url, self.public_payload, auth=self.basic_auth, expect_errors=True)
-    #     assert_equal(res.status_code, 404)
+    def test_create_registration_with_token_from_deleted_draft(self):
+        url = '/{}draft_registrations/{}/'.format(API_BASE, self.public_draft._id)
+        res = self.app.delete(url, auth=self.basic_auth)
+        assert_equal(res.status_code, 204)
+        token = token_creator(self.public_draft._id, self.user._id)
+        url = '/{}draft_registrations/{}/'.format(API_BASE, token)
+        res = self.app.post(self.public_url, self.public_payload, auth=self.basic_auth, expect_errors=True)
+        assert_equal(res.status_code, 404)
 
     def test_invalid_token_create_registration(self):
         res = self.app.post(self.private_url, self.private_payload, auth=self.basic_auth, expect_errors=True)
@@ -358,7 +358,6 @@ class TestDraftRegistrationPartialUpdate(ApiTestCase):
         res = self.app.patch(self.public_url, {
             'schema_name': self.schema_name,
         }, expect_errors=True)
-        print res
         assert_equal(res.status_code, 403)
 
     def test_partial_update_public_draft_registration_logged_in(self):
