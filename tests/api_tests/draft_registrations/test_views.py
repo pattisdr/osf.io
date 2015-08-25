@@ -116,8 +116,8 @@ class TestRegistrationCreate(ApiTestCase):
         res = self.app.delete(url, auth=self.basic_auth)
         assert_equal(res.status_code, 204)
         token = token_creator(self.public_draft._id, self.user._id)
-        url = '/{}draft_registrations/{}/'.format(API_BASE, token)
-        res = self.app.post(self.public_url, self.public_payload, auth=self.basic_auth, expect_errors=True)
+        url = '/{}draft_registrations/freeze/{}/'.format(API_BASE, token)
+        res = self.app.post(url, self.public_payload, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 404)
 
     def test_invalid_token_create_registration(self):
@@ -154,6 +154,10 @@ class TestRegistrationCreate(ApiTestCase):
         assert_equal(res.status_code, 201)
         assert_equal(res.json['data']['attributes']['title'], self.private_project.title)
         assert_equal(res.json['data']['attributes']['properties']['registration'], True)
+
+        url = self.private_url + 'self.private_draft._id/'
+        res = self.app.get(url, self.private_payload, auth=self.basic_auth, expect_errors=True)
+        assert_equal(res.status_code, 404)
 
     def test_create_private_registration_logged_in_non_contributor(self):
         res = self.app.post(self.private_url, self.private_payload, auth=self.basic_auth_two, expect_errors=True)
