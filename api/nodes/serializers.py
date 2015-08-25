@@ -150,6 +150,8 @@ class DraftRegistrationSerializer(JSONAPISerializer):
     schema_version = ser.IntegerField(help_text='Registration schema version', write_only=True, required=False)
     datetime_initiated = ser.DateTimeField(read_only=True)
     datetime_updated = ser.DateTimeField(read_only=True)
+    is_draft_registration = ser.BooleanField(read_only=True)
+    registered_node = ser.CharField(read_only=True, source='registered_node._id')
 
     links = LinksField({
         'html': 'get_absolute_url',
