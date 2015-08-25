@@ -50,7 +50,7 @@ class DraftRegistrationList(generics.ListCreateAPIView, ODMFilterMixin):
         user = self.request.user
         if user.is_anonymous():
             raise NotAuthenticated()
-        return DraftRegistration.find(Q('initiator', 'eq', user))
+        return DraftRegistration.find(Q('initiator', 'eq', user) & Q('registered_node', 'eq', None))
 
     # overrides ListCreateAPIView
     def create(self, request, *args):
@@ -92,7 +92,9 @@ class DraftRegistrationDetail(generics.RetrieveUpdateDestroyAPIView, DraftRegist
     # overrides RetrieveUpdateDestroyAPIView
     def get_object(self):
         draft = self.get_draft()
-        return draft
+        if draft.registered_node is None:
+            return draft
+        raise exceptions.NotFound(_('Already a registration.'))
 
     # overrides RetrieveUpdateDestroyAPIView
     def perform_destroy(self, instance):
