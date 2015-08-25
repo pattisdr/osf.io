@@ -106,9 +106,10 @@ class RegistrationCreateSerializerWithToken(NodeSerializer):
                 #
                 # }
                 registration.archive_job.save()
+
         else:
             registration.set_privacy('public', Auth(user), log=False)
             for child in registration.get_descendants_recursive(lambda n: n.primary):
                 child.set_privacy('public', Auth(user), log=False)
-
+        # TODO return Node or return "initiated" status and url's
         return registration
