@@ -3234,7 +3234,7 @@ class DraftRegistration(AddonModelMixin, StoredObject):
 
     @property
     def url(self):
-        return '/{}/registrations/#drafts/{}'.format(self.branched_from._id, self._primary_key)
+        return '/{}/draft/{}/'.format(self.branched_from._id, self._primary_key)
 
     @property
     def absolute_url(self):
