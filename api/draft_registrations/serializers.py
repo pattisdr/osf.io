@@ -38,7 +38,7 @@ class DraftRegSerializer(DraftRegistrationSerializer):
         instance.save()
         return instance
     class Meta:
-        type_ = 'registrations'
+        type_ = 'draft_registrations'
 
 
 class RegistrationCreateSerializer(JSONAPISerializer):
@@ -46,7 +46,7 @@ class RegistrationCreateSerializer(JSONAPISerializer):
     warning_message = ser.CharField(read_only=True)
 
     class Meta:
-        type_ = 'registrations'
+        type_ = 'draft_registrations'
 
 
 class RegistrationCreateSerializerWithToken(NodeSerializer):
@@ -81,11 +81,7 @@ class RegistrationCreateSerializerWithToken(NodeSerializer):
         schema = draft.registration_schema
         data = draft.registration_metadata
         user = request.user
-        registration = node.register_node(
-            schema=schema,
-            auth=Auth(user),
-            data=data
-        )
+        registration = draft.register(auth=Auth(user))
         registration.is_deleted = False
         registration.registered_from = get_object_or_404(Node, node._id)
         registration.save()
