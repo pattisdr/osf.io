@@ -59,8 +59,6 @@ class DraftRegistrationList(generics.ListCreateAPIView, ODMFilterMixin):
         node = draft.branched_from
         if node.is_deleted:
             raise exceptions.NotFound(_('This resource has been deleted.'))
-        if node.is_registration:
-            raise exceptions.ValidationError(_('Node is a registration.'))
         if user._id in node.permissions:
             if 'write' in node.permissions[user._id]:
                 token = token_creator(draft._id, user._id)
