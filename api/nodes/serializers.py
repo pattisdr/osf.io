@@ -158,6 +158,7 @@ class DraftRegistrationSerializer(JSONAPISerializer):
 
     branched_from = HyperlinkedRelatedFieldWithMeta(view_name='nodes:node-detail', lookup_field='pk', lookup_url_kwarg='node_id', read_only=True, link_type='related')
     initiator = HyperlinkedRelatedFieldWithMeta(view_name='users:user-detail', lookup_field='pk', lookup_url_kwarg='user_id', read_only=True, link_type='related')
+
     def create(self, validated_data):
         """
         Create draft registration from node.
