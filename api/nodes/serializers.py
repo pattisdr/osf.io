@@ -9,8 +9,8 @@ from django.utils.translation import ugettext_lazy as _
 from modularodm import Q
 from website.project.views.drafts import get_schema_or_fail
 from website.project.metadata.schemas import OSF_META_SCHEMAS
-from website.models import Node, DraftRegistration
-from api.base.serializers import JSONAPISerializer, LinksField, Link, WaterbutlerLink, HyperlinkedIdentityFieldWithMeta, HyperlinkedRelatedFieldWithMeta
+from website.models import Node
+from api.base.serializers import JSONAPISerializer, LinksField, Link, WaterbutlerLink, HyperlinkedRelatedFieldWithMeta
 
 
 class NodeSerializer(JSONAPISerializer):

@@ -3246,6 +3246,3 @@ class DraftRegistration(AddonModelMixin, StoredObject):
     @property
     def pk(self):
         return self._id
-
-
-
