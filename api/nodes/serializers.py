@@ -142,7 +142,6 @@ class DraftRegistrationSerializer(JSONAPISerializer):
     schema_choices = [schema['name'] for schema in OSF_META_SCHEMAS]
 
     id = ser.CharField(read_only=True, source='_id')
-    branched_from = ser.CharField(read_only=True, source='branched_from._id', help_text='Source node')
     initiator = ser.CharField(read_only=True, source='initiator._id')
     registration_schema = ser.CharField(read_only=True, source='registration_schema.schema.title')
     schema_name = ser.ChoiceField(choices=schema_choices, required=True, write_only=True, help_text='Please select a registration form to initiate registration.')
@@ -157,8 +156,8 @@ class DraftRegistrationSerializer(JSONAPISerializer):
         'html': 'get_absolute_url',
     })
 
-    nodes = HyperlinkedRelatedFieldWithMeta(view_name='nodes:node-detail', lookup_field='pk', lookup_url_kwarg='node_id', read_only=True, source='branched_from', link_type='related')
-
+    branched_from = HyperlinkedRelatedFieldWithMeta(view_name='nodes:node-detail', lookup_field='pk', lookup_url_kwarg='node_id', read_only=True, link_type='related')
+    initiator = HyperlinkedRelatedFieldWithMeta(view_name='users:user-detail', lookup_field='pk', lookup_url_kwarg='user_id', read_only=True, link_type='related')
     def create(self, validated_data):
         """
         Create draft registration from node.
