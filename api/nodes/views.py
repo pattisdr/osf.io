@@ -4,9 +4,10 @@ from modularodm import Q
 from rest_framework import generics, permissions as drf_permissions
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
+from api.base.metadata import SchemaMetadata
 from framework.auth.core import Auth
 from api.users.serializers import ContributorSerializer
-from website.models import Node, Pointer, DraftRegistration
+from website.models import Node, Pointer
 from api.base.filters import ODMFilterMixin, ListFilterMixin
 from api.base.utils import get_object_or_404, waterbutler_url_for
 from .permissions import ContributorOrPublic, ReadOnlyIfRegistration, ContributorOrPublicForPointers
@@ -171,6 +172,7 @@ class NodeDraftRegistrationsList(generics.ListCreateAPIView, NodeMixin):
     """
     Draft registrations of the current node
     """
+    metadata_class = SchemaMetadata
 
     permission_classes = (
         ContributorOrPublic,
