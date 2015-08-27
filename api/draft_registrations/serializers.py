@@ -17,7 +17,7 @@ from api.nodes.serializers import NodeSerializer, DraftRegistrationSerializer
 
 class DraftRegSerializer(DraftRegistrationSerializer):
     def update(self, instance, validated_data):
-        """Update instance with the validated data. Requires
+        """Updates draft instance with the validated data. Requires
         the request to be in the serializer context.
         """
 
@@ -59,7 +59,12 @@ class RegistrationCreateSerializerWithToken(NodeSerializer):
     category = ser.CharField(read_only=True)
 
     def validate(self, data):
-        """ First POST request for creating registration. User given a new URL with a token to confirm they want to register. """
+        """
+        First POST request for creating a registration.
+
+        User given a new URL with a token to confirm they want to register.
+
+        """
         request = self.context['request']
         user = request.user
         if user.is_anonymous():
@@ -76,7 +81,10 @@ class RegistrationCreateSerializerWithToken(NodeSerializer):
         return data
 
     def create(self, validated_data):
-        """ Second POST request for creating registration using new URL with token."""
+        """
+        Second POST request for creating registration using new URL with token.
+        """
+
         request = self.context['request']
         draft = get_object_or_404(DraftRegistration, validated_data['draft_id'])
         user = request.user

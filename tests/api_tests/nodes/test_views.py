@@ -889,7 +889,7 @@ class TestNodeDraftRegistrationList(ApiTestCase):
         res = self.app.get(self.private_url, auth=self.basic_auth_two, expect_errors=True)
         assert_equal(res.status_code, 403)
 
-    def test_draft_list_omits_drafts_that_have_been_made_registrations(self):
+    def test_draft_list_omits_drafts_that_have_been_made_into_registrations(self):
         self.public_draft.registered_node = self.registration
         self.public_draft.save()
         res = self.app.get(self.public_url, auth=self.basic_auth)
