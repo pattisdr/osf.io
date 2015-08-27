@@ -979,11 +979,17 @@ class TestCreateDraftRegistration(ApiTestCase):
         res = self.app.post(self.private_url, self.payload, auth=self.basic_auth_two, expect_errors=True)
         assert_equal(res.status_code, 403)
 
-    # TODO Handle schema version does not exist
     def test_create_draft_schema_version_does_not_exist(self):
-        payload = {'schema_name': 'Open-Ended Registration', 'schema_version': 5}
+        payload = {'schema_name': 'Open-Ended Registration', 'schema_version': 100}
         res = self.app.post(self.public_url, payload, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 404)
+        assert_equal(res.json['errors'][0]['detail'], "No schema record matching that query could be found" )
+
+    def test_create_draft_schema_name_does_not_exist(self):
+        payload = {'schema_name': 'First Registration', 'schema_version': 5}
+        res = self.app.post(self.public_url, payload, auth=self.basic_auth, expect_errors=True)
+        assert_equal(res.status_code, 400)
+        assert_equal(res.json['errors'][0]['detail']['schema_name'][0], '"First Registration" is not a valid choice.')
 
 
 class TestNodeChildrenList(ApiTestCase):

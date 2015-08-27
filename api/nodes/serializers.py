@@ -7,6 +7,8 @@ from modularodm import Q
 from website.project.views.drafts import get_schema_or_fail
 from website.project.metadata.schemas import OSF_META_SCHEMAS
 from website.models import Node
+from framework.mongo.utils import get_or_http_error
+from framework.exceptions import HTTPError
 from api.base.serializers import JSONAPISerializer, LinksField, Link, WaterbutlerLink, HyperlinkedRelatedFieldWithMeta
 
 
@@ -164,6 +166,7 @@ class DraftRegistrationSerializer(JSONAPISerializer):
         request = self.context['request']
         node = self.context['view'].get_node()
         schema_name = validated_data.get('schema_name')
+        schema_version = int(validated_data.get('schema_version', 1))
 
         if node.is_deleted:
             raise exceptions.NotFound(_('This resource has been deleted.'))
@@ -172,14 +175,15 @@ class DraftRegistrationSerializer(JSONAPISerializer):
         if not schema_name:
             raise exceptions.ValidationError(_('Must specify a schema_name'))
 
-        schema_version = int(validated_data.get('schema_version', 1))
-        meta_schema = get_schema_or_fail(
+        try:
+            metaschema = get_schema_or_fail(
             Q('name', 'eq', schema_name) &
-            Q('schema_version', 'eq', schema_version)
-        )
-        questions = validated_data.get('registration_metadata', {})
-        user = request.user
-        draft = node.create_draft_registration(user, meta_schema, questions, save=True)
+            Q('schema_version', 'eq', schema_version))
+        except HTTPError:
+            raise exceptions.NotFound(_("No schema record matching that query could be found"))
+
+        schema_data = validated_data.get('registration_metadata', {})
+        draft = node.create_draft_registration(request.user, meta_schema, schema_data, save=True)
         return draft
 
     def get_absolute_url(self, obj):
