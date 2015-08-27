@@ -29,10 +29,18 @@ class DraftRegistrationMixin(object):
         self.check_object_permissions(self.request, obj)
         return obj
 
+    def get_user(self):
+        user = self.request.user
+        if user.is_anonymous():
+            raise NotAuthenticated
+        return user
 
-class DraftRegistrationList(generics.ListCreateAPIView, ODMFilterMixin):
+
+class DraftRegistrationList(generics.ListCreateAPIView, DraftRegistrationMixin, ODMFilterMixin):
     """
-    All draft registrations
+    Draft registrations list
+
+    Displays all incomplete draft registrations initiated by user.
     """
 
     permission_classes = (
@@ -47,14 +55,12 @@ class DraftRegistrationList(generics.ListCreateAPIView, ODMFilterMixin):
 
     # overrides ListAPIView
     def get_queryset(self):
-        user = self.request.user
-        if user.is_anonymous():
-            raise NotAuthenticated()
+        user = self.get_user()
         return DraftRegistration.find(Q('initiator', 'eq', user) & Q('registered_node', 'eq', None))
 
     # overrides ListCreateAPIView
     def create(self, request, *args):
-        user = request.user
+        user = self.get_user()
         draft = get_object_or_404(DraftRegistration, request.data['draft_id'])
         node = draft.branched_from
         if node.is_deleted:
@@ -93,7 +99,7 @@ class DraftRegistrationDetail(generics.RetrieveUpdateDestroyAPIView, DraftRegist
         draft = self.get_draft()
         if draft.registered_node is None:
             return draft
-        raise exceptions.NotFound(_('Already a registration.'))
+        raise exceptions.NotFound(_('Draft registration has already been completed.'))
 
     # overrides RetrieveUpdateDestroyAPIView
     def perform_destroy(self, instance):
