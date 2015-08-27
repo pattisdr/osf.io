@@ -1,3 +1,5 @@
+import datetime
+from dateutil.relativedelta import relativedelta
 from nose.tools import *  # flake8: noqa
 
 from tests.base import ApiTestCase, fake
@@ -25,6 +27,7 @@ class TestDraftRegistrationList(ApiTestCase):
 
         self.public_project = ProjectFactory(creator=self.user, is_public=True)
         self.public_draft = DraftRegistrationFactory(branched_from=self.public_project, initiator=self.user)
+        self.registration = RegistrationFactory(source=self.public_project, creator=self.user)
 
         self.private_project = ProjectFactory(creator=self.user, is_public=False)
         self.private_draft = DraftRegistrationFactory(branched_from=self.private_project, initiator=self.user)
@@ -33,6 +36,7 @@ class TestDraftRegistrationList(ApiTestCase):
 
     def test_return_draft_registration_list_logged_out(self):
         res = self.app.get(self.url, expect_errors=True)
+        # 403 until my changes are merged in
         assert_equal(res.status_code, 403)
 
     def test_return_draft_registration_list_logged_in_contributor(self):
@@ -44,6 +48,13 @@ class TestDraftRegistrationList(ApiTestCase):
         res = self.app.get(self.url, auth=self.basic_auth_two)
         assert_equal(len(res.json['data']), 0)
         assert_equal(res.status_code, 200)
+
+    def test_draft_list_omits_drafts_that_have_been_made_into_registrations(self):
+        self.public_draft.registered_node = self.registration
+        self.public_draft.save()
+        res = self.app.get(self.url, auth=self.basic_auth)
+        assert_equal(res.status_code, 200)
+        assert_equal(len(res.json['data']), 1)
 
 
 class TestRegistrationCreate(ApiTestCase):
@@ -65,12 +76,15 @@ class TestRegistrationCreate(ApiTestCase):
         self.public_project = ProjectFactory(creator=self.user, is_public=True)
         self.public_draft = DraftRegistrationFactory(initiator=self.user, branched_from=self.public_project)
         self.public_url = '/{}draft_registrations/'.format(API_BASE)
-        self.public_payload = {'draft_id': self.public_draft._id, 'registration_choice': 'immediate'}
+        self.public_payload_immediate = {'draft_id': self.public_draft._id, 'registration_choice': 'immediate'}
+        today = datetime.date.today()
+        end_date = today + relativedelta(years=1)
+        self.embargo_payload = {'draft_id': self.public_draft._id, 'registration_choice': 'embargo', 'embargo_end_date': end_date}
 
         self.private_project = ProjectFactory(creator=self.user, is_private=True)
         self.private_draft = DraftRegistrationFactory(initiator=self.user, branched_from=self.private_project)
         self.private_url = '/{}draft_registrations/'.format(API_BASE)
-        self.private_payload = {'draft_id': self.private_draft._id, 'registration_choice': 'immediate'}
+        self.private_payload_immediate = {'draft_id': self.private_draft._id, 'registration_choice': 'immediate'}
 
 
         self.registration = RegistrationFactory(project=self.public_project)
@@ -80,35 +94,45 @@ class TestRegistrationCreate(ApiTestCase):
         res = self.app.post(url, {'draft_id': self.public_project._id, 'registration_choice': 'immediate'}, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 404)
 
-    def test_create_registration_from_fake_node(self):
-        url = '/{}draft_registrations/'.format(API_BASE)
-        res = self.app.post(url, {'draft_id': '12345', 'registration_choice': 'immediate'}, auth=self.basic_auth, expect_errors=True)
-        assert_equal(res.status_code, 404)
-
     def test_create_registration_from_registration(self):
         url = '/{}draft_registrations/'.format(API_BASE)
         res = self.app.post(url, {'draft_id':  self.registration._id, 'registration_choice': 'immediate'}, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 404)
 
+    def test_create_registration_where_source_has_been_deleted(self):
+        project = ProjectFactory(creator=self.user, is_public=True)
+        draft = DraftRegistrationFactory(branched_from=project, initiator=self.user)
+        project.is_deleted = True
+        project.save()
+        url = '/{}draft_registrations/'.format(API_BASE)
+        res = self.app.post(url, {'draft_id': draft._id, 'registration_choice': 'immediate'}, auth=self.basic_auth, expect_errors=True)
+        assert_equal(res.status_code, 404)
+        assert_equal(res.json['errors'][0]['detail'], 'Source has been deleted.')
+
+        res = self.app.post(url, {'draft_id':  self.registration._id, 'registration_choice': 'immediate'}, auth=self.basic_auth, expect_errors=True)
+        assert_equal(res.status_code, 404)
+
     def test_create_public_registration_logged_out(self):
-        res = self.app.post(self.public_url, self.public_payload, expect_errors=True)
+        res = self.app.post(self.public_url, self.public_payload_immediate, expect_errors=True)
         assert_equal(res.status_code, 403)
 
     def test_create_public_registration_logged_in(self):
-        res = self.app.post(self.public_url, self.public_payload, auth=self.basic_auth, expect_errors=True)
+        res = self.app.post(self.public_url, self.public_payload_immediate, auth=self.basic_auth, expect_errors=True)
         token_url = res.json['links']['confirm_register']
         assert_equal(res.status_code, 202)
 
-        res = self.app.post(token_url, self.public_payload, auth=self.basic_auth, expect_errors = True)
+        res = self.app.post(token_url, self.public_payload_immediate, auth=self.basic_auth, expect_errors = True)
         assert_equal(res.status_code, 201)
         assert_equal(res.json['data']['attributes']['title'], self.public_project.title)
         assert_equal(res.json['data']['attributes']['properties']['registration'], True)
+        assert_equal(res.json['data']['attributes']['public'], True)
+
 
     def test_create_registration_from_deleted_draft(self):
         url = '/{}draft_registrations/{}/'.format(API_BASE, self.public_draft._id)
         res = self.app.delete(url, auth=self.basic_auth)
         assert_equal(res.status_code, 204)
-        res = self.app.post(self.public_url, self.public_payload, auth=self.basic_auth, expect_errors=True)
+        res = self.app.post(self.public_url, self.public_payload_immediate, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 404)
 
     def test_create_registration_with_token_from_deleted_draft(self):
@@ -117,51 +141,51 @@ class TestRegistrationCreate(ApiTestCase):
         assert_equal(res.status_code, 204)
         token = token_creator(self.public_draft._id, self.user._id)
         url = '/{}draft_registrations/freeze/{}/'.format(API_BASE, token)
-        res = self.app.post(url, self.public_payload, auth=self.basic_auth, expect_errors=True)
+        res = self.app.post(url, self.public_payload_immediate, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 404)
 
     def test_invalid_token_create_registration(self):
-        res = self.app.post(self.private_url, self.private_payload, auth=self.basic_auth, expect_errors=True)
+        res = self.app.post(self.private_url, self.private_payload_immediate, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 202)
         token_url = self.private_url + "freeze/12345/"
 
-        res = self.app.post(token_url, self.private_payload, auth=self.basic_auth, expect_errors = True)
+        res = self.app.post(token_url, self.private_payload_immediate, auth=self.basic_auth, expect_errors = True)
         assert_equal(res.status_code, 400)
         assert_equal(res.json['errors'][0]['detail']['non_field_errors'][0], "Incorrect token.")
 
     def test_create_private_registration_logged_out(self):
-        res = self.app.post(self.private_url, self.private_payload, expect_errors=True)
+        res = self.app.post(self.private_url, self.private_payload_immediate, expect_errors=True)
         assert_equal(res.status_code, 403)
 
     def test_create_public_registration_logged_out_with_token(self):
         token = token_creator(self.public_draft._id, self.user._id)
         url = '/{}draft_registrations/freeze/{}/'.format(API_BASE, token)
-        res = self.app.post(url, self.public_payload, expect_errors=True)
+        res = self.app.post(url, self.public_payload_immediate, expect_errors=True)
         assert_equal(res.status_code, 403)
 
     def test_create_private_registration_logged_out_with_token(self):
         token = token_creator(self.private_draft._id, self.user._id)
         url = '/{}draft_registrations/freeze/{}/'.format(API_BASE, token)
-        res = self.app.post(url, self.private_payload, expect_errors=True)
+        res = self.app.post(url, self.private_payload_immediate, expect_errors=True)
         assert_equal(res.status_code, 403)
 
     def test_create_private_registration_logged_in_contributor(self):
-        res = self.app.post(self.private_url, self.private_payload, auth=self.basic_auth, expect_errors=True)
+        res = self.app.post(self.private_url, self.private_payload_immediate, auth=self.basic_auth, expect_errors=True)
         token_url = res.json['links']['confirm_register']
         assert_equal(res.status_code, 202)
 
-        res = self.app.post(token_url, self.private_payload, auth=self.basic_auth, expect_errors = True)
+        res = self.app.post(token_url, self.private_payload_immediate, auth=self.basic_auth, expect_errors = True)
         assert_equal(res.status_code, 201)
         assert_equal(res.json['data']['attributes']['title'], self.private_project.title)
         assert_equal(res.json['data']['attributes']['properties']['registration'], True)
         assert_equal(res.json['data']['attributes']['public'], True)
 
         url = self.private_url + 'self.private_draft._id/'
-        res = self.app.get(url, self.private_payload, auth=self.basic_auth, expect_errors=True)
+        res = self.app.get(url, self.private_payload_immediate, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 404)
 
     def test_create_private_registration_logged_in_non_contributor(self):
-        res = self.app.post(self.private_url, self.private_payload, auth=self.basic_auth_two, expect_errors=True)
+        res = self.app.post(self.private_url, self.private_payload_immediate, auth=self.basic_auth_two, expect_errors=True)
         assert_equal(res.status_code, 403)
 
     def test_create_private_registration_logged_in_read_only_contributor(self):
@@ -177,6 +201,14 @@ class TestRegistrationCreate(ApiTestCase):
         res = self.app.post(url, {'draft_id': self.public_draft._id, 'registration_choice': 'embargo'}, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 400)
         assert_equal(res.json['errors'][0]['detail'], 'If embargo, must supply embargo end date.')
+
+    def test_adding_embargo_prevents_project_from_being_made_public(self):
+        token = token_creator(self.public_draft._id, self.user._id)
+        url = '/{}draft_registrations/freeze/{}/'.format(API_BASE, token)
+        res = self.app.post(url, self.embargo_payload, auth=self.basic_auth, expect_errors=True)
+        assert_equal(res.status_code, 201)
+        assert_equal(res.json['data']['attributes']['properties']['registration'], True)
+        assert_equal(res.json['data']['attributes']['public'], False)
 
 
 class TestDraftRegistrationUpdate(ApiTestCase):
