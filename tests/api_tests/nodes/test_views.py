@@ -931,11 +931,18 @@ class TestCreateDraftRegistration(ApiTestCase):
         self.public_project.save()
         res = self.app.post(self.public_url, self.payload, expect_errors=True, auth=self.basic_auth)
         assert_equal(res.status_code, 404)
+        assert_equal(res.json['errors'][0]['detail'], 'This resource has been deleted.')
 
     def test_create_registration_draft_of_registration(self):
         url = '/{}nodes/{}/draft_registrations/'.format(API_BASE, self.public_registration._id)
         res = self.app.post(url, self.payload, expect_errors=True, auth=self.basic_auth)
         assert_equal(res.status_code, 400)
+        assert_equal(res.json['errors'][0]['detail'], 'This resource is a registration.')
+
+    def test_create_draft_without_specifying_schema(self):
+        res = self.app.post(self.private_url, auth=self.basic_auth, expect_errors=True)
+        assert_equal(res.status_code, 400)
+        assert_equal(res.json['errors'][0]['detail'], {'schema_name': ['This field is required.']})
 
     def test_create_public_registration_draft_logged_out(self):
         res = self.app.post(self.public_url, self.payload, expect_errors=True)
