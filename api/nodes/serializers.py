@@ -9,6 +9,7 @@ from website.project.metadata.schemas import OSF_META_SCHEMAS
 from website.models import Node
 from framework.mongo.utils import get_or_http_error
 from framework.exceptions import HTTPError
+from api.base.exceptions import Gone
 from api.base.serializers import JSONAPISerializer, LinksField, Link, WaterbutlerLink, HyperlinkedRelatedFieldWithMeta
 
 
@@ -182,7 +183,7 @@ class DraftRegistrationSerializer(JSONAPISerializer):
         schema_version = int(validated_data.get('schema_version', 1))
 
         if node.is_deleted:
-            raise exceptions.NotFound(_('This resource has been deleted.'))
+            raise Gone(_('This resource has been deleted.'))
         if node.is_registration:
             raise exceptions.ValidationError(_('This resource is a registration.'))
         if not schema_name:

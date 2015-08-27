@@ -106,7 +106,7 @@ class TestRegistrationCreate(ApiTestCase):
         project.save()
         url = '/{}draft_registrations/'.format(API_BASE)
         res = self.app.post(url, {'draft_id': draft._id, 'registration_choice': 'immediate'}, auth=self.basic_auth, expect_errors=True)
-        assert_equal(res.status_code, 404)
+        assert_equal(res.status_code, 410)
         assert_equal(res.json['errors'][0]['detail'], 'Source has been deleted.')
 
         res = self.app.post(url, {'draft_id':  self.registration._id, 'registration_choice': 'immediate'}, auth=self.basic_auth, expect_errors=True)

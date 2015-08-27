@@ -10,6 +10,7 @@ from api.nodes.views import NodeMixin
 from api.base.filters import ODMFilterMixin
 from website.models import DraftRegistration
 from api.base.language import REGISTER_WARNING
+from api.base.exceptions import Gone
 from api.nodes.permissions import ContributorOrPublic
 from api.base.utils import get_object_or_error, token_creator, absolute_reverse
 from api.draft_registrations.serializers import DraftRegSerializer, RegistrationCreateSerializer, RegistrationCreateSerializerWithToken
@@ -64,7 +65,7 @@ class DraftRegistrationList(generics.ListCreateAPIView, DraftRegistrationMixin, 
         draft = get_object_or_error(DraftRegistration, request.data['draft_id'])
         node = draft.branched_from
         if node.is_deleted:
-            raise exceptions.NotFound(_('Source has been deleted.'))
+            raise Gone(_('Source has been deleted.'))
         if user._id in node.permissions:
             if 'write' in node.permissions[user._id]:
                 token = token_creator(draft._id, user._id)

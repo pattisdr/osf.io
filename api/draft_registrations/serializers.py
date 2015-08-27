@@ -10,6 +10,7 @@ from website import settings
 from website.project.model import Q
 from api.base.utils import token_creator
 from website.project import utils as project_utils
+from api.base.exceptions import Gone
 from api.base.serializers import JSONAPISerializer
 from website.project.model import DraftRegistration
 from website.project.views.drafts import get_schema_or_fail
@@ -79,7 +80,7 @@ class RegistrationCreateSerializerWithToken(NodeSerializer):
         draft = get_object_or_error(DraftRegistration, data['draft_id'])
         node = draft.branched_from
         if node.is_deleted:
-            raise NotFound(_('This resource has been deleted'))
+            raise Gone(_('This resource has been deleted'))
         given_token = view.kwargs['token']
         correct_token = token_creator(draft._id, user._id)
         if correct_token != given_token:
