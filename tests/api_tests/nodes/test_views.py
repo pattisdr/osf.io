@@ -860,15 +860,15 @@ class TestNodeDraftRegistrationList(ApiTestCase):
 
     def test_return_public_drafts_logged_out(self):
         res = self.app.get(self.public_url, expect_errors=True)
-        source = res.json['data'][0]['attributes']['branched_from']
+        source = res.json['data'][0]['relationships']['branched_from']['links']['related']
+        assert_equal(urlparse.urlparse(source).path, '/{}nodes/{}/'.format(API_BASE, self.public_project._id))
         assert_equal(res.status_code, 200)
-        assert_equal(source, self.public_project._id)
 
     def test_return_public_drafts_logged_in(self):
         res = self.app.get(self.public_url, auth=self.basic_auth ,expect_errors = True)
-        source = res.json['data'][0]['attributes']['branched_from']
+        source = res.json['data'][0]['relationships']['branched_from']['links']['related']
+        assert_equal(urlparse.urlparse(source).path, '/{}nodes/{}/'.format(API_BASE, self.public_project._id))
         assert_equal(res.status_code, 200)
-        assert_equal(source, self.public_project._id)
         assert_not_equal(res.json['data'][0]['attributes']['registration_schema'], None)
         assert_not_equal(res.json['data'][0]['attributes']['datetime_initiated'], None)
 
@@ -879,7 +879,8 @@ class TestNodeDraftRegistrationList(ApiTestCase):
     def test_return_private_drafts_logged_in_contributor(self):
         res = self.app.get(self.private_url, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 200)
-        assert_equal((res.json['data'][0]['attributes']['initiator']), self.user._id)
+        initiator = res.json['data'][0]['relationships']['initiator']['links']['related']
+        assert_equal(urlparse.urlparse(initiator).path, '/{}users/{}/'.format(API_BASE, self.user._id))
         assert_not_equal(res.json['data'][0]['attributes']['registration_schema'], None)
         assert_not_equal(res.json['data'][0]['attributes']['datetime_initiated'], None)
 
@@ -936,9 +937,9 @@ class TestCreateDraftRegistration(ApiTestCase):
     def test_create_public_registration_draft_logged_in(self):
         res = self.app.post(self.public_url, self.payload, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 201)
-        source = res.json['data']['attributes']['branched_from']
+        source = res.json['data']['relationships']['branched_from']['links']['related']
         schema = res.json['data']['attributes']['registration_schema']
-        assert_equal(source, self.public_project._id)
+        assert_equal(urlparse.urlparse(source).path, '/{}nodes/{}/'.format(API_BASE, self.public_project._id))
         assert_equal(schema, self.payload['schema_name'])
         assert_not_equal(res.json['data']['attributes']['registration_schema'], None)
 
@@ -949,9 +950,9 @@ class TestCreateDraftRegistration(ApiTestCase):
     def test_create_private_registration_draft_logged_in_contributor(self):
         res = self.app.post(self.private_url, self.payload, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 201)
-        source = res.json['data']['attributes']['branched_from']
+        source = res.json['data']['relationships']['branched_from']['links']['related']
         schema = res.json['data']['attributes']['registration_schema']
-        assert_equal(source, self.private_project._id)
+        assert_equal(urlparse.urlparse(source).path, '/{}nodes/{}/'.format(API_BASE, self.private_project._id))
         assert_equal(schema, self.payload['schema_name'])
         assert_not_equal(res.json['data']['attributes']['registration_schema'], None)
 
