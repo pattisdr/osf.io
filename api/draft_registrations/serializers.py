@@ -21,25 +21,21 @@ class DraftRegSerializer(DraftRegistrationSerializer):
         the request to be in the serializer context.
         """
 
-        schema_data = validated_data.get('registration_metadata', {})
+        schema_data = validated_data.get('registration_metadata')
         schema_name = validated_data.get('schema_name')
-        schema_version = int(validated_data.get('schema_version', 1))
+        schema_version = validated_data.get('schema_version', 1)
         if schema_name:
             meta_schema = get_schema_or_fail(
                 Q('name', 'eq', schema_name) &
-                Q('schema_version', 'eq', schema_version)
+                Q('schema_version', 'eq', int(schema_version))
             )
-
-            existing_schema = instance.registration_schema
-            if existing_schema:
-                if (existing_schema.name, existing_schema.schema_version) != (meta_schema.name, meta_schema.schema_version):
-                    instance.registration_schema = meta_schema
-            else:
-                instance.registration_schema = meta_schema
-
-        instance.registration_metadata = schema_data
+            instance.registration_schema = meta_schema
+        if schema_data:
+            instance.registration_metadata = schema_data
         instance.save()
         return instance
+
+
     class Meta:
         type_ = 'draft_registrations'
 
