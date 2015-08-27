@@ -241,10 +241,8 @@ class TestDraftRegistrationUpdate(ApiTestCase):
             'schema_version': self.schema_version,
         }, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 200)
-        source = res.json['data']['attributes']['branched_from']
         metadata = res.json['data']['attributes']['registration_metadata']
         registration_schema = res.json['data']['attributes']['registration_schema']
-        assert_equal(source, self.public_project._id)
         assert_equal(metadata, self.registration_metadata)
         assert_not_equal(registration_schema, None)
         assert_equal(registration_schema, self.schema_name)
@@ -271,10 +269,8 @@ class TestDraftRegistrationUpdate(ApiTestCase):
             'schema_version': self.schema_version,
         }, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 200)
-        source = res.json['data']['attributes']['branched_from']
         metadata = res.json['data']['attributes']['registration_metadata']
         registration_schema = res.json['data']['attributes']['registration_schema']
-        assert_equal(source, self.private_project._id)
         assert_equal(metadata, self.registration_metadata)
         assert_not_equal(registration_schema, None)
         assert_equal(registration_schema, self.schema_name)
