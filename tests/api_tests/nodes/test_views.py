@@ -930,8 +930,8 @@ class TestCreateDraftRegistration(ApiTestCase):
         self.public_project.is_deleted = True
         self.public_project.save()
         res = self.app.post(self.public_url, self.payload, expect_errors=True, auth=self.basic_auth)
-        assert_equal(res.status_code, 404)
-        assert_equal(res.json['errors'][0]['detail'], 'This resource has been deleted.')
+        assert_equal(res.status_code, 410)
+        assert_equal(res.json['errors'][0]['detail'], 'The requested node is no longer available.')
 
     def test_create_registration_draft_of_registration(self):
         url = '/{}nodes/{}/draft_registrations/'.format(API_BASE, self.public_registration._id)
@@ -1226,37 +1226,37 @@ class TestNodeTags(ApiTestCase):
     def test_public_project_starts_with_no_tags(self):
         res = self.app.get(self.public_url)
         assert_equal(res.status_code, 200)
-        assert_equal(len(res.json['data']['tags']), 0)
+        assert_equal(len(res.json['data']['attributes']['tags']), 0)
 
     def test_contributor_can_add_tag_to_public_project(self):
         res = self.app.patch_json(self.public_url, self.one_new_tag_json, auth=self.user.auth)
         assert_equal(res.status_code, 200)
         # Ensure data is correct from the PATCH response
-        assert_equal(len(res.json['data']['tags']), 1)
-        assert_equal(res.json['data']['tags'][0], 'new-tag')
+        assert_equal(len(res.json['data']['attributes']['tags']), 1)
+        assert_equal(res.json['data']['attributes']['tags'][0], 'new-tag')
         # Ensure data is correct in the database
         self.public_project.reload()
         assert_equal(len(self.public_project.tags), 1)
         assert_equal(self.public_project.tags[0]._id, 'new-tag')
         # Ensure data is correct when GETting the resource again
         reload_res = self.app.get(self.public_url)
-        assert_equal(len(reload_res.json['data']['tags']), 1)
-        assert_equal(reload_res.json['data']['tags'][0], 'new-tag')
+        assert_equal(len(reload_res.json['data']['attributes']['tags']), 1)
+        assert_equal(reload_res.json['data']['attributes']['tags'][0], 'new-tag')
 
     def test_contributor_can_add_tag_to_private_project(self):
         res = self.app.patch_json(self.private_url, self.one_new_tag_json, auth=self.user.auth)
         assert_equal(res.status_code, 200)
         # Ensure data is correct from the PATCH response
-        assert_equal(len(res.json['data']['tags']), 1)
-        assert_equal(res.json['data']['tags'][0], 'new-tag')
+        assert_equal(len(res.json['data']['attributes']['tags']), 1)
+        assert_equal(res.json['data']['attributes']['tags'][0], 'new-tag')
         # Ensure data is correct in the database
         self.private_project.reload()
         assert_equal(len(self.private_project.tags), 1)
         assert_equal(self.private_project.tags[0]._id, 'new-tag')
         # Ensure data is correct when GETting the resource again
         reload_res = self.app.get(self.private_url, auth=self.user.auth)
-        assert_equal(len(reload_res.json['data']['tags']), 1)
-        assert_equal(reload_res.json['data']['tags'][0], 'new-tag')
+        assert_equal(len(reload_res.json['data']['attributes']['tags']), 1)
+        assert_equal(reload_res.json['data']['attributes']['tags'][0], 'new-tag')
 
     def test_non_authenticated_user_cannot_add_tag_to_public_project(self):
         res = self.app.patch_json(self.public_url, self.one_new_tag_json, expect_errors=True, auth=None)
@@ -1304,17 +1304,17 @@ class TestNodeTags(ApiTestCase):
         res = self.app.patch_json(self.private_url, self.one_new_tag_json, auth=self.user.auth)
         assert_equal(res.status_code, 200)
         # Ensure adding tag data is correct from the PATCH response
-        assert_equal(len(res.json['data']['tags']), 1)
-        assert_equal(res.json['data']['tags'][0], 'new-tag')
+        assert_equal(len(res.json['data']['attributes']['tags']), 1)
+        assert_equal(res.json['data']['attributes']['tags'][0], 'new-tag')
         # Ensure removing and adding tag data is correct from the PATCH response
         res = self.app.patch_json(self.private_url, {'tags': ['newer-tag']}, auth=self.user.auth)
         assert_equal(res.status_code, 200)
-        assert_equal(len(res.json['data']['tags']), 1)
-        assert_equal(res.json['data']['tags'][0], 'newer-tag')
+        assert_equal(len(res.json['data']['attributes']['tags']), 1)
+        assert_equal(res.json['data']['attributes']['tags'][0], 'newer-tag')
         # Ensure removing tag data is correct from the PATCH response
         res = self.app.patch_json(self.private_url, {'tags': []}, auth=self.user.auth)
         assert_equal(res.status_code, 200)
-        assert_equal(len(res.json['data']['tags']), 0)
+        assert_equal(len(res.json['data']['attributes']['tags']), 0)
 
 class TestCreateNodePointer(ApiTestCase):
     def setUp(self):
