@@ -870,42 +870,6 @@ def make_url_map(app):
             project_views.register.node_registration_retraction_get,
             OsfWebRenderer('project/retract_registration.mako', trust=False)
         ),
-        Rule(
-            [
-                '/project/<pid>/retraction/approve/<token>/',
-                '/project/<pid>/node/<nid>/retraction/approve/<token>/',
-            ],
-            'get',
-            project_views.register.node_registration_retraction_approve,
-            OsfWebRenderer('error.mako', trust=False)
-        ),
-        Rule(
-            [
-                '/project/<pid>/retraction/disapprove/<token>/',
-                '/project/<pid>/node/<nid>/retraction/disapprove/<token>/',
-            ],
-            'get',
-            project_views.register.node_registration_retraction_disapprove,
-            OsfWebRenderer('error.mako', trust=False)
-        ),
-        Rule(
-            [
-                '/project/<pid>/embargo/approve/<token>/',
-                '/project/<pid>/node/<nid>/embargo/approve/<token>/',
-            ],
-            'get',
-            project_views.register.node_registration_embargo_approve,
-            OsfWebRenderer('error.mako', trust=False)
-        ),
-        Rule(
-            [
-                '/project/<pid>/embargo/disapprove/<token>/',
-                '/project/<pid>/node/<nid>/embargo/disapprove/<token>/',
-            ],
-            'get',
-            project_views.register.node_registration_embargo_disapprove,
-            OsfWebRenderer('error.mako', trust=False)
-        ),
 
         Rule(
             '/ids/<category>/<path:value>/',
@@ -1372,8 +1336,6 @@ def make_url_map(app):
             '/project/<pid>/node/<nid>/permissions/beforepublic/',
         ], 'get', project_views.node.project_before_set_public, json_renderer),
 
-        ### Wiki ###
-
         ### Watching ###
         Rule([
             '/project/<pid>/watch/',
@@ -1393,6 +1355,7 @@ def make_url_map(app):
         Rule([
             '/watched/logs/'
         ], 'get', website_views.watched_logs_get, json_renderer),
+
         ### Accounts ###
         Rule([
             '/user/merge/'

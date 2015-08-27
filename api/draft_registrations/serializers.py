@@ -10,10 +10,10 @@ from website import settings
 from website.project.model import Q
 from api.base.utils import token_creator
 from website.project import utils as project_utils
-from api.base.utils import get_object_or_404
 from api.base.serializers import JSONAPISerializer
 from website.project.model import DraftRegistration
 from website.project.views.drafts import get_schema_or_fail
+from api.base.utils import get_object_or_error
 from api.nodes.serializers import NodeSerializer, DraftRegistrationSerializer
 
 
@@ -76,7 +76,7 @@ class RegistrationCreateSerializerWithToken(NodeSerializer):
         if user.is_anonymous():
             raise PermissionDenied
         view = self.context['view']
-        draft = get_object_or_404(DraftRegistration, data['draft_id'])
+        draft = get_object_or_error(DraftRegistration, data['draft_id'])
         node = draft.branched_from
         if node.is_deleted:
             raise NotFound(_('This resource has been deleted'))
@@ -92,7 +92,7 @@ class RegistrationCreateSerializerWithToken(NodeSerializer):
         """
 
         request = self.context['request']
-        draft = get_object_or_404(DraftRegistration, validated_data['draft_id'])
+        draft = get_object_or_error(DraftRegistration, validated_data['draft_id'])
         node = draft.branched_from
         user = request.user
         registration = draft.register(auth=Auth(user))

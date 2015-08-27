@@ -11,7 +11,7 @@ from api.base.filters import ODMFilterMixin
 from website.models import DraftRegistration
 from api.base.language import REGISTER_WARNING
 from api.nodes.permissions import ContributorOrPublic
-from api.base.utils import get_object_or_404, token_creator, absolute_reverse
+from api.base.utils import get_object_or_error, token_creator, absolute_reverse
 from api.draft_registrations.serializers import DraftRegSerializer, RegistrationCreateSerializer, RegistrationCreateSerializerWithToken
 
 
@@ -24,7 +24,7 @@ class DraftRegistrationMixin(object):
     draft_lookup_url_kwarg = 'draft_id'
 
     def get_draft(self):
-        obj = get_object_or_404(DraftRegistration, self.kwargs[self.draft_lookup_url_kwarg])
+        obj = get_object_or_error(DraftRegistration, self.kwargs[self.draft_lookup_url_kwarg])
         # May raise a permission denied
         self.check_object_permissions(self.request, obj)
         return obj
@@ -61,7 +61,7 @@ class DraftRegistrationList(generics.ListCreateAPIView, DraftRegistrationMixin, 
     # overrides ListCreateAPIView
     def create(self, request, *args):
         user = self.get_user()
-        draft = get_object_or_404(DraftRegistration, request.data['draft_id'])
+        draft = get_object_or_error(DraftRegistration, request.data['draft_id'])
         node = draft.branched_from
         if node.is_deleted:
             raise exceptions.NotFound(_('Source has been deleted.'))

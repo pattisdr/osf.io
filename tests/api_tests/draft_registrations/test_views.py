@@ -142,6 +142,7 @@ class TestRegistrationCreate(ApiTestCase):
         token = token_creator(self.public_draft._id, self.user._id)
         url = '/{}draft_registrations/freeze/{}/'.format(API_BASE, token)
         res = self.app.post(url, self.public_payload_immediate, auth=self.basic_auth, expect_errors=True)
+        print res
         assert_equal(res.status_code, 404)
 
     def test_invalid_token_create_registration(self):
