@@ -170,7 +170,10 @@ class NodeRegistrationsList(generics.ListAPIView, NodeMixin):
 
 class NodeDraftRegistrationsList(generics.ListCreateAPIView, NodeMixin):
     """
-    Draft registrations of the current node
+    Draft registrations of the current node.
+
+    This view lists all of the existing draft registrations created for the current node.
+
     """
     metadata_class = SchemaMetadata
 
