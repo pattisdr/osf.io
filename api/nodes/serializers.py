@@ -176,7 +176,7 @@ class DraftRegistrationSerializer(JSONAPISerializer):
             raise exceptions.ValidationError(_('Must specify a schema_name'))
 
         try:
-            metaschema = get_schema_or_fail(
+            meta_schema = get_schema_or_fail(
             Q('name', 'eq', schema_name) &
             Q('schema_version', 'eq', schema_version))
         except HTTPError:

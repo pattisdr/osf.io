@@ -202,6 +202,13 @@ class TestRegistrationCreate(ApiTestCase):
         assert_equal(res.status_code, 400)
         assert_equal(res.json['errors'][0]['detail'], 'If embargo, must supply embargo end date.')
 
+    def test_invalid_embargo(self):
+        token = token_creator(self.public_draft._id, self.user._id)
+        url = '/{}draft_registrations/freeze/{}/'.format(API_BASE, token)
+        res = self.app.post(url, {'draft_id': self.public_draft._id, 'registration_choice': 'embargo', 'embargo_end_date': 0}, auth=self.basic_auth, expect_errors=True)
+        assert_equal(res.status_code, 400)
+        assert_equal(res.json['errors'][0]['detail']['embargo_end_date'][0], 'Date has wrong format. Use one of these formats instead: YYYY[-MM[-DD]].')
+
     def test_adding_embargo_prevents_project_from_being_made_public(self):
         token = token_creator(self.public_draft._id, self.user._id)
         url = '/{}draft_registrations/freeze/{}/'.format(API_BASE, token)
@@ -210,6 +217,82 @@ class TestRegistrationCreate(ApiTestCase):
         assert_equal(res.json['data']['attributes']['properties']['registration'], True)
         assert_equal(res.json['data']['attributes']['public'], False)
 
+
+class TestDraftRegistrationDetail(ApiTestCase):
+
+    def setUp(self):
+        super(TestDraftRegistrationDetail, self).setUp()
+        ensure_schemas()
+        self.user = UserFactory.build()
+        password = fake.password()
+        self.password = password
+        self.user.set_password(password)
+        self.user.save()
+        self.basic_auth = (self.user.username, password)
+
+        self.user_two = UserFactory.build()
+        self.user_two.set_password(password)
+        self.user_two.save()
+        self.basic_auth_two = (self.user_two.username, password)
+
+        self.private_project = ProjectFactory(creator=self.user, is_private=True)
+        self.private_draft = DraftRegistrationFactory(initiator=self.user, branched_from=self.private_project)
+        self.private_url = '/{}draft_registrations/{}/'.format(API_BASE, self.private_draft._id)
+
+        self.public_project = ProjectFactory(creator=self.user, is_public=True)
+        self.public_draft = DraftRegistrationFactory(initiator=self.user, branched_from=self.public_project)
+        self.public_url = '/{}draft_registrations/{}/'.format(API_BASE, self.public_draft._id)
+
+
+    def test_get_public_draft_logged_out(self):
+        res = self.app.get(self.public_url)
+        assert_equal(res.status_code, 200)
+        assert_equal(res.json['data']['attributes']['is_draft_registration'], True)
+        assert_equal(res.json['data']['attributes']['registration_schema'], 'Open-Ended Registration')
+
+    def test_get_public_draft_logged_in(self):
+        res = self.app.get(self.public_url, auth=self.basic_auth)
+        assert_equal(res.status_code, 200)
+        assert_equal(res.json['data']['attributes']['is_draft_registration'], True)
+        assert_equal(res.json['data']['attributes']['registration_schema'], 'Open-Ended Registration')
+
+    def test_get_private_draft_logged_out(self):
+        res = self.app.get(self.private_url, expect_errors=True)
+        # 403 until my PR goes in
+        assert_equal(res.status_code, 403)
+
+    def test_get_private_draft_logged_in_contributor(self):
+        res = self.app.get(self.private_url, auth=self.basic_auth)
+        assert_equal(res.status_code, 200)
+        assert_equal(res.json['data']['attributes']['is_draft_registration'], True)
+        assert_equal(res.json['data']['attributes']['registration_schema'], 'Open-Ended Registration')
+
+    def test_get_private_draft_logged_in_non_contributor(self):
+        res = self.app.get(self.private_url, auth=self.basic_auth_two, expect_errors=True)
+        assert_equal(res.status_code, 403)
+
+    def test_get_private_draft_logged_in_read_only_contributor(self):
+        self.private_project.add_contributor(self.user_two, permissions=['read'])
+        self.private_project.save()
+        draft = DraftRegistrationFactory(branched_from=self.private_project, initiator=self.user)
+        url = '/{}draft_registrations/{}/'.format(API_BASE, draft._id)
+
+        res = self.app.get(url, auth=self.basic_auth_two)
+        assert_equal(res.status_code, 200)
+        assert_equal(res.json['data']['attributes']['is_draft_registration'], True)
+        assert_equal(res.json['data']['attributes']['registration_schema'], 'Open-Ended Registration')
+
+    def test_draft_does_not_exist(self):
+        url = '/{}draft_registrations/{}/'.format(API_BASE, 12345)
+        res = self.app.get(url, auth=self.basic_auth, expect_errors=True)
+        assert_equal(res.status_code, 404)
+
+    def test_draft_has_been_turned_into_registration(self):
+        registration = RegistrationFactory(source=self.public_project, creator=self.user)
+        self.public_draft.registered_node = registration
+        self.public_draft.save()
+        res = self.app.get(self.public_url, auth=self.basic_auth, expect_errors=True)
+        assert_equal(res.status_code, 404)
 
 class TestDraftRegistrationUpdate(ApiTestCase):
 
@@ -315,10 +398,12 @@ class TestDraftRegistrationUpdate(ApiTestCase):
         }, auth=self.basic_auth_two, expect_errors=True)
         assert_equal(res.status_code, 403)
 
-    def test_partial_update_private_registration_draft_logged_in_read_only_contributor(self):
+    def test__update_private_registration_draft_logged_in_read_only_contributor(self):
+        self.private_project.add_contributor(self.user_two, permissions=['read'])
         self.private_project.save()
-        draft = DraftRegistrationFactory(initiator=self.user, branched_from=self.private_project)
+        draft = DraftRegistrationFactory(branched_from=self.private_project, initiator=self.user)
         url = '/{}draft_registrations/{}/'.format(API_BASE, draft._id)
+        self.private_project.save()
         res = self.app.put(url, {
             'schema_name': self.schema_name,
             'registration_metadata': self.registration_metadata,
@@ -370,13 +455,17 @@ class TestDraftRegistrationPartialUpdate(ApiTestCase):
         }, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 404)
 
-    # TODO Handle schema version does not exist
     def test_partial_update_schema_version_does_not_exist(self):
-        res = self.app.patch(self.public_url, {
-            'schema_name': self.schema_name,
-            'schema_version': 5
-        }, auth=self.basic_auth, expect_errors=True)
+        payload = {'schema_name': 'Open-Ended Registration', 'schema_version': 100}
+        res = self.app.patch(self.public_url, payload, auth=self.basic_auth, expect_errors=True)
         assert_equal(res.status_code, 404)
+        assert_equal(res.json['errors'][0]['detail'], "No schema record matching that query could be found" )
+
+    def test_partial_update_draft_schema_name_does_not_exist(self):
+        payload = {'schema_name': 'First Registration', 'schema_version': 5}
+        res = self.app.patch(self.public_url, payload, auth=self.basic_auth, expect_errors=True)
+        assert_equal(res.status_code, 400)
+        assert_equal(res.json['errors'][0]['detail']['schema_name'][0], '"First Registration" is not a valid choice.')
 
     def test_partial_update_registration_schema_public_draft_registration_logged_in(self):
         res = self.app.patch(self.public_url, {
@@ -434,8 +523,9 @@ class TestDraftRegistrationPartialUpdate(ApiTestCase):
         assert_equal(res.status_code, 403)
 
     def test_partial_update_private_registration_draft_logged_in_read_only_contributor(self):
+        self.private_project.add_contributor(self.user_two, permissions=['read'])
         self.private_project.save()
-        draft = DraftRegistrationFactory(initiator=self.user, branched_from=self.private_project)
+        draft = DraftRegistrationFactory(branched_from=self.private_project, initiator=self.user)
         url = '/{}draft_registrations/{}/'.format(API_BASE, draft._id)
         res = self.app.patch(url, {
             'registration_metadata': self.registration_metadata,
