@@ -3,11 +3,13 @@ from rest_framework import serializers as ser
 from dateutil.parser import parse as parse_date
 from django.utils.translation import ugettext_lazy as _
 
+from framework.exceptions import HTTPError
 from rest_framework.exceptions import PermissionDenied, NotFound, ValidationError
 
 from website import settings
 from website.project.model import Q
 from api.base.utils import token_creator
+from website.project import utils as project_utils
 from api.base.utils import get_object_or_404
 from api.base.serializers import JSONAPISerializer
 from website.project.model import DraftRegistration
@@ -25,11 +27,15 @@ class DraftRegSerializer(DraftRegistrationSerializer):
         schema_name = validated_data.get('schema_name')
         schema_version = validated_data.get('schema_version', 1)
         if schema_name:
-            meta_schema = get_schema_or_fail(
-                Q('name', 'eq', schema_name) &
-                Q('schema_version', 'eq', int(schema_version))
-            )
-            instance.registration_schema = meta_schema
+            try:
+                meta_schema = get_schema_or_fail(
+                    Q('name', 'eq', schema_name) &
+                    Q('schema_version', 'eq', int(schema_version))
+                )
+                instance.registration_schema = meta_schema
+            except HTTPError:
+                raise NotFound(_("No schema record matching that query could be found"))
+
         if schema_data:
             instance.registration_metadata = schema_data
         instance.save()
@@ -87,26 +93,27 @@ class RegistrationCreateSerializerWithToken(NodeSerializer):
 
         request = self.context['request']
         draft = get_object_or_404(DraftRegistration, validated_data['draft_id'])
+        node = draft.branched_from
         user = request.user
         registration = draft.register(auth=Auth(user))
 
         if validated_data.get('registration_choice', 'immediate') == 'embargo':
             embargo_end_date = validated_data.get('embargo_end_date')
             if embargo_end_date is None:
-                raise ValidationError('If embargo, must supply embargo end date.')
+                raise ValidationError(_('If embargo, must supply embargo end date.'))
             embargo_end_date = parse_date(embargo_end_date, ignoretz=True)
             try:
                 registration.embargo_registration(user, embargo_end_date)
                 registration.save()
             except ValueError as err:
-                raise ValidationError({'message_long': err.message})
-            if settings.ENABLE_ARCHIVER:
-                # registration.archive_job.meta = {
-                #     contrib._id: project_utils.get_embargo_urls(registration, contrib)
-                #     for contrib in node.active_contributors()
-                #
-                # }
-                registration.archive_job.save()
+                raise ValidationError(err.message)
+            # if settings.ENABLE_ARCHIVER:
+            #     registration.archive_job.meta = {
+            #         contrib._id: project_utils.get_embargo_urls(registration, contrib)
+            #         for contrib in node.active_contributors()
+            #
+            #     }
+            #     registration.archive_job.save()
 
         else:
             registration.set_privacy('public', Auth(user), log=False)
