@@ -7,7 +7,6 @@ import pymongo
 from modularodm.query import QueryBase
 from modularodm.exceptions import ValidationValueError, NoResultsFound, MultipleResultsFound
 
-from rest_framework.exceptions import NotFound
 from framework.exceptions import HTTPError
 
 # MongoDB forbids field names that begin with "$" or contain ".". These

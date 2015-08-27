@@ -19,10 +19,10 @@ from website.project.decorators import (
     http_error_if_disk_saving_mode
 )
 from website import language
+from website.project.utils import serialize_node
 from website.project import utils as project_utils
 from website.project.model import MetaSchema, DraftRegistration
 from website.project.metadata.utils import serialize_meta_schema, serialize_draft_registration
-from website.project.utils import serialize_node
 
 get_schema_or_fail = lambda query: get_or_http_error(MetaSchema, query)
 autoload_draft = functools.partial(autoload, DraftRegistration, 'draft_id', 'draft')

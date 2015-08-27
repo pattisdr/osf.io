@@ -1,20 +1,20 @@
-from framework.auth.core import Auth
 from rest_framework import serializers as ser
 from dateutil.parser import parse as parse_date
 from django.utils.translation import ugettext_lazy as _
 
-from framework.exceptions import HTTPError
 from rest_framework.exceptions import PermissionDenied, NotFound, ValidationError
 
 from website import settings
 from website.project.model import Q
-from api.base.utils import token_creator
-from website.project import utils as project_utils
+from framework.auth.core import Auth
 from api.base.exceptions import Gone
+from api.base.utils import token_creator
+from framework.exceptions import HTTPError
+from api.base.utils import get_object_or_error
 from api.base.serializers import JSONAPISerializer
 from website.project.model import DraftRegistration
+from website.project import utils as project_utils
 from website.project.views.drafts import get_schema_or_fail
-from api.base.utils import get_object_or_error
 from api.nodes.serializers import NodeSerializer, DraftRegistrationSerializer
 
 

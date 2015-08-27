@@ -5,9 +5,9 @@ from nose.tools import *  # flake8: noqa
 
 from website.models import Node
 from framework.auth.core import Auth
+from website.settings import API_DOMAIN
 from website.util.sanitize import strip_html
 from api.base.settings.defaults import API_BASE
-from website.settings import API_DOMAIN
 
 from tests.base import ApiTestCase, fake
 from website.project.model import ensure_schemas

@@ -1,15 +1,14 @@
-from framework.auth.core import Auth
 from rest_framework import exceptions
 from rest_framework import serializers as ser
 from django.utils.translation import ugettext_lazy as _
 
 from modularodm import Q
+from website.models import Node
+from api.base.exceptions import Gone
+from framework.auth.core import Auth
+from framework.exceptions import HTTPError
 from website.project.views.drafts import get_schema_or_fail
 from website.project.metadata.schemas import OSF_META_SCHEMAS
-from website.models import Node
-from framework.mongo.utils import get_or_http_error
-from framework.exceptions import HTTPError
-from api.base.exceptions import Gone
 from api.base.serializers import JSONAPISerializer, LinksField, Link, WaterbutlerLink, HyperlinkedRelatedFieldWithMeta
 
 
@@ -191,8 +190,9 @@ class DraftRegistrationSerializer(JSONAPISerializer):
 
         try:
             meta_schema = get_schema_or_fail(
-            Q('name', 'eq', schema_name) &
-            Q('schema_version', 'eq', schema_version))
+                Q('name', 'eq', schema_name) &
+                Q('schema_version', 'eq', schema_version)
+            )
         except HTTPError:
             raise exceptions.NotFound(_("No schema record matching that query could be found"))
 
