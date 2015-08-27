@@ -35,7 +35,6 @@ class DraftRegSerializer(DraftRegistrationSerializer):
         instance.save()
         return instance
 
-
     class Meta:
         type_ = 'draft_registrations'
 

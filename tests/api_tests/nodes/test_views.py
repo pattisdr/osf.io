@@ -855,6 +855,7 @@ class TestNodeDraftRegistrationList(ApiTestCase):
 
         self.public_project = ProjectFactory(is_public=True, creator=self.user)
         self.public_draft = DraftRegistrationFactory(branched_from=self.public_project, initiator=self.user)
+        self.registration = RegistrationFactory(source=self.public_project, creator=self.user)
         self.public_project.save()
         self.public_url = '/{}nodes/{}/draft_registrations/'.format(API_BASE, self.public_project._id)
 
@@ -888,6 +889,12 @@ class TestNodeDraftRegistrationList(ApiTestCase):
         res = self.app.get(self.private_url, auth=self.basic_auth_two, expect_errors=True)
         assert_equal(res.status_code, 403)
 
+    def test_draft_list_omits_drafts_that_have_been_made_registrations(self):
+        self.public_draft.registered_node = self.registration
+        self.public_draft.save()
+        res = self.app.get(self.public_url, auth=self.basic_auth)
+        assert_equal(res.status_code, 200)
+        assert_equal(len(res.json['data']), 0)
 
 class TestCreateDraftRegistration(ApiTestCase):
     def setUp(self):

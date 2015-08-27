@@ -1,8 +1,5 @@
-import httplib as http
-
 from framework.auth.core import Auth
 from rest_framework import exceptions
-from framework.exceptions import HTTPError
 from rest_framework import serializers as ser
 from django.utils.translation import ugettext_lazy as _
 

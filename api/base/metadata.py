@@ -11,5 +11,4 @@ class SchemaMetadata(SimpleMetadata):
         schema_choices = {schema['name'] + ' v' + str(schema['version']): schema for schema in OSF_META_SCHEMAS}
         metadata['registration_schema_choices'] = schema_choices
 
-
         return metadata
