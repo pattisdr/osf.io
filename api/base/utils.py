@@ -47,6 +47,7 @@ def get_object_or_error(model_cls, query_or_pk, display_name=None):
     except NoResultsFound:
         raise NotFound
 
+
 def waterbutler_url_for(request_type, provider, path, node_id, token, obj_args=None, **query):
     """Reverse URL lookup for WaterButler routes
     :param str request_type: data or metadata
@@ -75,8 +76,8 @@ def waterbutler_url_for(request_type, provider, path, node_id, token, obj_args=N
     return url.url
 
 
-def token_creator(node_id, user_id):
+def token_creator(project_id, user_id):
     token = hashlib.md5()
-    token.update(node_id)
+    token.update(project_id)
     token.update(user_id)
     return token.hexdigest()
