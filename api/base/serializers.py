@@ -35,10 +35,16 @@ def _url_val(val, obj, serializer, **kwargs):
     else:
         return val
 
+
 class HyperlinkedRelatedFieldWithMeta(ser.HyperlinkedRelatedField):
     """
     HyperlinkedRelated field that returns a nested dict with url,
     optional meta information, and link_type.
+
+    Example:
+
+        branched_from = HyperlinkedRelatedFieldWithMeta(view_name='nodes:node-detail', lookup_field='pk',
+                                                    lookup_url_kwarg='node_id', read_only=True, link_type='related')
     """
     def __init__(self, view_name=None, **kwargs):
         self.meta = kwargs.pop('meta', None)
@@ -48,6 +54,7 @@ class HyperlinkedRelatedFieldWithMeta(ser.HyperlinkedRelatedField):
     def to_representation(self, value):
         """
         Returns nested dictionary in format {'links': {'self.link_type': ... }
+
         If no meta information, self.link_type is equal to a string containing link's URL.  Otherwise,
         the link is represented as a links object with 'href' and 'meta' members.
         """
@@ -62,6 +69,7 @@ class HyperlinkedRelatedFieldWithMeta(ser.HyperlinkedRelatedField):
             self.meta = meta
 
             return {'links': {self.link_type: {'href': url, 'meta': self.meta}}}
+
 
 class HyperlinkedIdentityFieldWithMeta(ser.HyperlinkedIdentityField):
     """
@@ -99,6 +107,7 @@ class HyperlinkedIdentityFieldWithMeta(ser.HyperlinkedIdentityField):
     def to_representation(self, value):
         """
         Returns nested dictionary in format {'links': {'self.link_type': ... }
+
         If no meta information, self.link_type is equal to a string containing link's URL.  Otherwise,
         the link is represented as a links object with 'href' and 'meta' members.
         """
