@@ -179,7 +179,7 @@ class TestRegistrationCreate(ApiTestCase):
         assert_equal(res.status_code, 201)
         assert_equal(res.json['data']['attributes']['title'], self.private_project.title)
         assert_equal(res.json['data']['attributes']['properties']['registration'], True)
-        assert_equal(res.json['data']['attributes']['public'], True)
+        assert_equal(res.json['data']['attributes']['public'], False)
 
         url = self.private_url + 'self.private_draft._id/'
         res = self.app.get(url, self.private_payload_immediate, auth=self.basic_auth, expect_errors=True)

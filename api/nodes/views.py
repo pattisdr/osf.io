@@ -1,9 +1,9 @@
 import requests
 
+from modularodm import Q
 from rest_framework import generics, permissions as drf_permissions
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
-from modularodm import Q
 from framework.auth.core import Auth
 from website.models import Node, Pointer
 from api.base.metadata import SchemaMetadata
