@@ -61,6 +61,12 @@ class DraftRegistrationList(generics.ListCreateAPIView, DraftRegistrationMixin, 
 
     # overrides ListCreateAPIView
     def create(self, request, *args):
+        """
+        First POST request for creating a registration.
+
+        User given a new URL with a token to confirm they want to register.
+
+        """
         user = self.get_user()
         draft = get_object_or_error(DraftRegistration, request.data['draft_id'])
         node = draft.branched_from

@@ -67,12 +67,6 @@ class RegistrationCreateSerializerWithToken(NodeSerializer):
     category = ser.CharField(read_only=True)
 
     def validate(self, data):
-        """
-        First POST request for creating a registration.
-
-        User given a new URL with a token to confirm they want to register.
-
-        """
         request = self.context['request']
         user = request.user
         if user.is_anonymous():
