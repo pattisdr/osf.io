@@ -58,7 +58,8 @@ class RegistrationCreateSerializerWithToken(NodeSerializer):
     registration_choices = ['immediate', 'embargo']
 
     draft_id = ser.CharField(write_only=True)
-    registration_choice = ser.ChoiceField(write_only=True, choices=registration_choices)
+    registration_choice = ser.ChoiceField(write_only=True, choices=registration_choices, help_text='Choose whether '
+                        'to make your registration public immediately or embargo it for up to four years.')
     embargo_end_date = ser.DateField(write_only=True, required=False)
     id = ser.CharField(read_only=True, source='_id')
     title = ser.CharField(read_only=True)
