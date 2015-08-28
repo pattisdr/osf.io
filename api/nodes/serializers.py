@@ -156,7 +156,8 @@ class DraftRegistrationSerializer(JSONAPISerializer):
     id = ser.CharField(read_only=True, source='_id')
     initiator = ser.CharField(read_only=True, source='initiator._id')
     registration_schema = ser.CharField(read_only=True, source='registration_schema.schema.title')
-    schema_name = ser.ChoiceField(choices=schema_choices, required=True, write_only=True, help_text='Please select a registration form to initiate registration.')
+    schema_name = ser.ChoiceField(choices=schema_choices, required=True, write_only=True, help_text='Please select '
+                                                                    'a registration form to initiate registration.')
     registration_metadata = ser.CharField(required=False, help_text='Responses to supplemental registration questions')
     schema_version = ser.IntegerField(help_text='Registration schema version', write_only=True, required=False)
     datetime_initiated = ser.DateTimeField(read_only=True)
@@ -168,8 +169,10 @@ class DraftRegistrationSerializer(JSONAPISerializer):
         'html': 'get_absolute_url',
     })
 
-    branched_from = HyperlinkedRelatedFieldWithMeta(view_name='nodes:node-detail', lookup_field='pk', lookup_url_kwarg='node_id', read_only=True, link_type='related')
-    initiator = HyperlinkedRelatedFieldWithMeta(view_name='users:user-detail', lookup_field='pk', lookup_url_kwarg='user_id', read_only=True, link_type='related')
+    branched_from = HyperlinkedRelatedFieldWithMeta(view_name='nodes:node-detail', lookup_field='pk',
+                                                    lookup_url_kwarg='node_id', read_only=True, link_type='related')
+    initiator = HyperlinkedRelatedFieldWithMeta(view_name='users:user-detail', lookup_field='pk',
+                                                lookup_url_kwarg='user_id', read_only=True, link_type='related')
 
     def create(self, validated_data):
         """
