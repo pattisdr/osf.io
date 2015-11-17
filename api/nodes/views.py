@@ -297,6 +297,8 @@ class NodeList(JSONAPIBaseView, bulk_views.BulkUpdateJSONAPIView, bulk_views.Bul
     # overrides BulkDestroyJSONAPIView
     def allow_bulk_destroy_resources(self, user, resource_list):
         """User must have admin permissions to delete nodes."""
+        if self.request.query_params.get('skip_uneditable', False):
+            return True
         for node in resource_list:
             if not node.has_permission(user, ADMIN):
                 return False
