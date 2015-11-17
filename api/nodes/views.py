@@ -254,10 +254,15 @@ class NodeList(JSONAPIBaseView, bulk_views.BulkUpdateJSONAPIView, bulk_views.Bul
             auth = get_user_auth(self.request)
 
             nodes = Node.find(query)
+            has_permission = []
             for node in nodes:
-                if not node.can_edit(auth):
-                    raise PermissionDenied
-            return nodes
+                if node.can_edit(auth):
+                    has_permission.append(node)
+
+                # if not node.can_edit(auth):
+                #     raise PermissionDenied
+            query = Q('_id', 'in', [node._id for node in has_permission])
+            return Node.find(query)
         else:
             query = self.get_query_from_request()
             return Node.find(query)
