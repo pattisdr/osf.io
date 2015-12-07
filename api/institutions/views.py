@@ -12,6 +12,7 @@ from api.base import permissions as base_permissions
 from api.base.filters import ODMFilterMixin
 from api.base.views import JSONAPIBaseView
 from api.base.utils import get_object_or_error
+from api.nodes.views import NodeMixin
 from api.nodes.serializers import NodeSerializer, NodeDetailSerializer
 from api.nodes.permissions import ContributorOrPublic
 from api.users.serializers import UserSerializer, UserDetailSerializer
@@ -19,7 +20,7 @@ from api.users.serializers import UserSerializer, UserDetailSerializer
 from .serializers import InstitutionSerializer, InstitutionDetailSerializer
 
 
-class InstitutionList(JSONAPIBaseView, generics.ListAPIView):
+class InstitutionList(JSONAPIBaseView, generics.ListCreateAPIView):
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
         base_permissions.TokenHasScope,
@@ -93,7 +94,7 @@ class InstitutionNodeList(JSONAPIBaseView, ODMFilterMixin, generics.ListAPIView)
         query = self.get_query_from_request()
         return Node.find(query)
 
-class InstitutionNodeDetail(JSONAPIBaseView, generics.RetrieveAPIView):
+class InstitutionNodeDetail(JSONAPIBaseView, generics.RetrieveAPIView, NodeMixin):
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
         base_permissions.TokenHasScope,
@@ -109,11 +110,7 @@ class InstitutionNodeDetail(JSONAPIBaseView, generics.RetrieveAPIView):
     view_name = 'institution-node-detail'
 
     def get_object(self):
-        node = get_object_or_error(
-            Node,
-            self.kwargs['node_id'],
-            display_name='node'
-        )
+        node = self.get_node()
         if node.is_registration:
             raise ValidationError('This is a registration.')
         return node
