@@ -1,5 +1,6 @@
 from rest_framework import serializers as ser
 
+from framework.auth.core import Institution
 from api.base.serializers import JSONAPISerializer, RelationshipField, LinksField
 
 class InstitutionSerializer(JSONAPISerializer):
@@ -18,6 +19,11 @@ class InstitutionSerializer(JSONAPISerializer):
         related_view='institutions:institution-users',
         related_view_kwargs={'institution_id': '<pk>'}
     )
+
+    def create(self, validated_data):
+        institution = Institution(**validated_data)
+        institution.save()
+        return institution
 
     def get_api_url(self, obj):
         return obj.get_api_url()
