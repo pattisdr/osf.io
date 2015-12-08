@@ -1,6 +1,6 @@
 from rest_framework import generics
 from rest_framework import permissions as drf_permissions
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import NotFound
 
 from modularodm import Q
 
@@ -110,9 +110,10 @@ class InstitutionNodeDetail(JSONAPIBaseView, generics.RetrieveAPIView, NodeMixin
     view_name = 'institution-node-detail'
 
     def get_object(self):
+        inst = Institution.load(self.kwargs['institution_id'])
         node = self.get_node()
-        if node.is_registration:
-            raise ValidationError('This is a registration.')
+        if node.primary_institution != inst:
+            raise NotFound
         return node
 
 class InstitutionUserList(JSONAPIBaseView, ODMFilterMixin, generics.ListAPIView):
@@ -157,4 +158,7 @@ class InstitutionUserDetail(JSONAPIBaseView, generics.RetrieveAPIView):
             self.kwargs['user_id'],
             display_name='user'
         )
+        inst = Institution.load(self.kwargs['institution_id'])
+        if inst not in user.affiliated_institutions:
+            raise NotFound
         return user

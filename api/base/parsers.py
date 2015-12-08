@@ -12,6 +12,7 @@ NO_DATA_ERROR = 'Request must include /data.'
 NO_TYPE_ERROR = 'Request must include /type.'
 NO_ID_ERROR = 'Request must include /data/id.'
 
+
 class JSONAPIParser(JSONParser):
     """
     Parses JSON-serialized data. Overrides media_type.
@@ -60,7 +61,6 @@ class JSONAPIParser(JSONParser):
                 raise JSONAPIException(source={'pointer': '/data/relationships'}, detail=NO_RELATIONSHIPS_ERROR)
         else:
             if "attributes" not in resource_object and request_method != 'DELETE':
-                import ipdb; ipdb.set_trace()
                 raise JSONAPIException(source={'pointer': '/data/attributes'}, detail=NO_ATTRIBUTES_ERROR)
 
         object_id = resource_object.get('id')
