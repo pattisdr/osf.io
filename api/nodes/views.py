@@ -1,10 +1,10 @@
 import requests
 
 from modularodm import Q
-from rest_framework.parsers import JSONParser
 from rest_framework import generics, permissions as drf_permissions
 from rest_framework.exceptions import PermissionDenied, ValidationError, NotFound
 from rest_framework.status import is_server_error
+from rest_framework.parsers import JSONParser
 
 from framework.auth.oauth_scopes import CoreScopes
 
@@ -12,6 +12,7 @@ from api.base import generic_bulk_views as bulk_views
 from api.base import permissions as base_permissions
 from api.base.filters import ODMFilterMixin, ListFilterMixin
 from api.base.views import JSONAPIBaseView
+from api.base.parsers import JSONAPIRelationshipParser
 from api.base.utils import get_object_or_error, is_bulk_request, get_user_auth
 from api.files.serializers import FileSerializer
 from api.comments.serializers import CommentSerializer
@@ -1761,7 +1762,7 @@ class NodeInstitutionRelationship(JSONAPIBaseView, generics.UpdateAPIView, NodeM
     required_read_scopes = [CoreScopes.NODE_BASE_READ, CoreScopes.INSTITUTION_READ]
     required_write_scopes = [CoreScopes.NODE_BASE_WRITE]
     serializer_class = NodeInstitutionRelationshipSerializer
-    parser_classes = (JSONParser, )
+    parser_classes = (JSONAPIRelationshipParser, JSONParser, )
 
     view_category = 'nodes'
     view_name = 'node-relationships-institution'
