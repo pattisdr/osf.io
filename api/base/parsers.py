@@ -121,5 +121,21 @@ class JSONAPIParserForRegularJSON(JSONAPIParser):
     """
     media_type = 'application/json'
 
+
 class JSONAPIRelationshipParser(JSONParser):
     media_type = 'application/vnd.api+json'
+
+    def parse(self, stream, media_type=None, parser_context=None):
+        """
+        Parses the incoming bytestream as JSON and returns the resulting data.
+        """
+        result = super(JSONAPIRelationshipParser, self).parse(stream, media_type=media_type, parser_context=parser_context)
+
+        if not isinstance(result, dict):
+            raise ParseError()
+        data = result.get('data', {})
+
+        if data:
+            return data
+        else:
+            raise JSONAPIException(source={'pointer': '/data'}, detail=NO_DATA_ERROR)

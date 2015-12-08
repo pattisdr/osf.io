@@ -382,18 +382,24 @@ class NodeProviderSerializer(JSONAPISerializer):
 
 class NodeInstitutionRelationshipSerializer(JSONAPIRelationshipSerializer):
 
+    id = ser.CharField(required=True, source='_id')
+    type = TypeField()
+
     class Meta:
         type_ = 'institution'
 
     def relationship(self, obj):
         return obj.primary_institution
 
+    def validate(self, data):
+        pass
+
     def update(self, instance, validated_data):
         node = instance
         user = self.context['request'].user
-        data = self.context['request'].data['data']
+        data = self.context['request'].data
         if data:
-            assert data['type'] == 'institution', 'Not right endpoint for this type, expected \'institution\' '
+            # assert data['type'] == 'institution', 'Not right endpoint for this type, expected \'institution\' '
             inst = Institution.load(data.get('id'))
             if not inst:
                 raise exceptions.NotFound
