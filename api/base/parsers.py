@@ -126,9 +126,6 @@ class JSONAPIRelationshipParser(JSONParser):
     media_type = 'application/vnd.api+json'
 
     def parse(self, stream, media_type=None, parser_context=None):
-        """
-        Parses the incoming bytestream as JSON and returns the resulting data.
-        """
         result = super(JSONAPIRelationshipParser, self).parse(stream, media_type=media_type, parser_context=parser_context)
 
         if not isinstance(result, dict):
@@ -136,6 +133,16 @@ class JSONAPIRelationshipParser(JSONParser):
         data = result.get('data', {})
 
         if data:
+            object_id = data.get('id')
+            object_type = data.get('type')
+
+            if object_id is None:
+                raise JSONAPIException(source={'pointer': '/data/id'}, detail=NO_ID_ERROR)
+
+            if object_type is None:
+                raise JSONAPIException(source={'pointer': '/data/type'}, detail=NO_TYPE_ERROR)
+
             return data
+
         else:
-            raise JSONAPIException(source={'pointer': '/data'}, detail=NO_DATA_ERROR)
+            return {'_id': None, 'type': None}

@@ -118,7 +118,9 @@ class NodeSerializer(JSONAPISerializer):
 
     primary_institution = RelationshipField(
         related_view='nodes:node-institution-detail',
-        related_view_kwargs={'node_id': '<pk>'}
+        related_view_kwargs={'node_id': '<pk>'},
+        self_view='nodes:node-relationships-institution',
+        self_view_kwargs={'node_id': '<pk>'}
     )
 
     logs = RelationshipField(
@@ -382,8 +384,8 @@ class NodeProviderSerializer(JSONAPISerializer):
 
 class NodeInstitutionRelationshipSerializer(JSONAPIRelationshipSerializer):
 
-    id = ser.CharField(required=True, source='_id')
-    type = TypeField()
+    id = ser.CharField(required=False, allow_null=True, source='_id')
+    type = TypeField(required=False, allow_null=True)
 
     class Meta:
         type_ = 'institution'
@@ -391,16 +393,12 @@ class NodeInstitutionRelationshipSerializer(JSONAPIRelationshipSerializer):
     def relationship(self, obj):
         return obj.primary_institution
 
-    def validate(self, data):
-        pass
-
     def update(self, instance, validated_data):
         node = instance
         user = self.context['request'].user
-        data = self.context['request'].data
-        if data:
+        if validated_data.get('_id'):
             # assert data['type'] == 'institution', 'Not right endpoint for this type, expected \'institution\' '
-            inst = Institution.load(data.get('id'))
+            inst = Institution.load(validated_data.get('_id'))
             if not inst:
                 raise exceptions.NotFound
             if not inst.auth(user):

@@ -50,6 +50,7 @@ class TestInstitutionNodeList(ApiTestCase):
 
         assert_equal(res.status_code, 200)
         ids = [each['id'] for each in res.json['data']]
+        assert_equal(len(ids), 3)
 
         assert_in(self.node1._id, ids)
         assert_in(self.node2._id, ids)
