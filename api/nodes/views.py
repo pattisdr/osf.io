@@ -1753,7 +1753,7 @@ class NodeInstitutionDetail(JSONAPIBaseView, generics.RetrieveAPIView, NodeMixin
         return node.primary_institution
 
 
-class NodeInstitutionRelationship(JSONAPIBaseView, generics.UpdateAPIView, NodeMixin):
+class NodeInstitutionRelationship(JSONAPIBaseView, generics.RetrieveUpdateAPIView, NodeMixin):
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
         base_permissions.TokenHasScope,
