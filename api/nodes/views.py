@@ -257,7 +257,7 @@ class NodeList(JSONAPIBaseView, bulk_views.BulkUpdateJSONAPIView, bulk_views.Bul
 
             # If skip_uneditable=True in query_params, skip nodes for which the user
             # does not have EDIT permissions.
-            if self.request.query_params.get('skip_uneditable', False):
+            if self.request.query_params.get('skip_uneditable', False) == 'True':
                 has_permission = []
                 for node in nodes:
                     if node.can_edit(auth):
@@ -297,7 +297,7 @@ class NodeList(JSONAPIBaseView, bulk_views.BulkUpdateJSONAPIView, bulk_views.Bul
     # overrides BulkDestroyJSONAPIView
     def allow_bulk_destroy_resources(self, user, resource_list):
         """User must have admin permissions to delete nodes."""
-        if self.request.query_params.get('skip_uneditable', False):
+        if self.request.query_params.get('skip_uneditable', 'False') == 'True':
             return True
         for node in resource_list:
             if not node.has_permission(user, ADMIN):
