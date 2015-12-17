@@ -223,9 +223,7 @@
     background-color: Silver;
 }
 #wmd-button-bar {
-    float:left;
     margin: auto;
-    margin-bottom: 10px;
     -webkit-box-flex: 0 0 auto;
     -webkit-flex: 0 0 auto;
     -ms-flex: 0 0 auto;
@@ -249,7 +247,6 @@
     background-color: Silver;
     display: inline-block;
     list-style: none;
-    float:left;
 }
 .wmd-button {
     width: 20px;
@@ -259,7 +256,6 @@
     display: inline-block;
     list-style: none;
     cursor: pointer;
-    float: left;
 }
 .wmd-button > span {
     background-image: url(/static/public/vendor/pagedown/wmd-buttons.png);
@@ -268,7 +264,6 @@
     width: 20px;
     height: 20px;
     display: inline-block;
-    float: left;
 }
 .wmd-spacer1 {
     left: 50px;
@@ -281,7 +276,6 @@
 }
 .wmd-prompt-background {
     background-color: Black;
-    float: left;
 }
 .wmd-prompt-dialog {
     border: 1px solid #999999;
@@ -291,7 +285,7 @@
     margin-left:5px;
     list-style: none;
     display: inline-block;
-    float: left;
+
 }
 .wiki-single-heading {
     border: 1px solid #ddd;
