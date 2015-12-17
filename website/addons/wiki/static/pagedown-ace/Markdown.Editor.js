@@ -1667,14 +1667,14 @@ var addDragNDrop = require('../dragNDrop');
                 li.appendChild(cb);
                 li.appendChild(sp);
                 buttonRow.appendChild(li);
-            }
+            };
             var makeSpacer = function (num) {
                 var spacer = document.createElement("li");
                 spacer.className = "wmd-spacer wmd-spacer" + num;
                 spacer.id = "wmd-spacer" + num + postfix;
                 buttonRow.appendChild(spacer);
                 xPosition += 25;
-            }
+            };
 
             buttons.bold = makeButton("wmd-bold-button", getStringAndKey("bold"), "0px", bindCommand("doBold"));
             buttons.italic = makeButton("wmd-italic-button", getStringAndKey("italic"), "-20px", bindCommand("doItalic"));
@@ -1703,7 +1703,7 @@ var addDragNDrop = require('../dragNDrop');
             buttons.redo = makeButton("wmd-redo-button", getStringAndKey("redo"), "-220px", null);
             buttons.redo.execute = function (manager) { inputBox.session.getUndoManager().redo(); };
             makeSpacer(4);
-            makeCheckBox("auto", "autocom", "-240px", "Autocomplete");
+            makeCheckBox("wmd-autocom-toggle", "autocom", "-240px", "Autocomplete");
 
             if (helpOptions) {
                 var helpButton = document.createElement("li");
