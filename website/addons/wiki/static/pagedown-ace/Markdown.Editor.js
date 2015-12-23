@@ -1666,7 +1666,7 @@ var addDragNDrop = require('../dragNDrop');
                 cb.id = cb_id;
                 cb.type = "checkbox";
                 cb.checked = "";
-                var sp = document.createElement("span");
+                var sp = document.createElement("small");
                 sp.innerHTML = " " + text.trim();
                 label.appendChild(cb);
                 label.appendChild(sp);
