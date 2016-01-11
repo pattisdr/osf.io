@@ -125,16 +125,31 @@
 .fb-infobar {
     background-color: #fafafa;
     height: 535px;
-    padding: 10px;
+    width: 25%;
     float: left;
-    width: 30%;
     overflow-y: auto;
     border-left: 1px solid #eee;
-}
 
+}
 .fb-info-multi {
     padding-top: 10px;
     border-bottom: 1px solid #eee;
+}
+.fb-info-remove {
+    background: #FFF;
+    text-align: right;
+    font-size: 13px;
+}
+
+.fb-info-toggle {
+    display: block;
+    height: 535px;
+    width: 3%;
+    float: left;
+    background: #f5f5f5;
+    text-align: center;
+    padding-top: 15px;
+    color: #666;
 }
 
 /* TODO: Make responsive */
@@ -175,6 +190,13 @@
     background: #FFF;
     margin-bottom: 3px;
     border-bottom: 1px solid #eee;
+}
+.fb-log-avatar img {
+    width: 16px;
+    height: 16px;
+}
+.fb-log-avatar {
+    display: inline-block;
 }
 
 #poFilter {
