@@ -18,7 +18,7 @@ from api.base.views import JSONAPIBaseView
 
 class LogMixin(object):
     """
-    Mixin with convenience method
+    Mixin with convenience method get_log
     """
 
     def get_log(self):
@@ -30,7 +30,7 @@ class LogMixin(object):
         return log
 
 
-class LogNodeList(JSONAPIBaseView, generics.ListAPIView, LogMixin, ODMFilterMixin):
+class LogNodeList(JSONAPIBaseView, generics.ListAPIView, ODMFilterMixin):
     """List of nodes that a given log is associated with. *Read-only*.
 
     Paginated list of nodes that the user contributes to.  Each resource contains the full representation of the node,
