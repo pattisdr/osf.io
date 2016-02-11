@@ -25,7 +25,7 @@ def sort_multiple(fields):
     fields = list(fields)
     def sort_fn(a, b):
         while fields:
-            field = fields.pop(0)
+            field = fields[0]
             a_field = getattr(a, field)
             b_field = getattr(b, field)
             if a_field > b_field:
