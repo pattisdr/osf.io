@@ -57,7 +57,11 @@ class ODMOrderingFilter(OrderingFilter):
         ordering = self.get_ordering(request, queryset, view)
         if ordering:
             if not isinstance(queryset, modularodm_queryset.BaseQuerySet) and isinstance(ordering, (list, tuple)):
-                sorted_list = sorted(queryset, cmp=sort_multiple(ordering))
+                if ordering[0][0] == '-':
+                    sorted_list = sorted(queryset, cmp=sort_reverse_multiple(ordering))
+                else:
+                    sorted_list = sorted(queryset, cmp=sort_multiple(ordering))
+
                 return sorted_list
             return queryset.sort(*ordering)
         return queryset
