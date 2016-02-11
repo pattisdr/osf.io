@@ -35,6 +35,20 @@ def sort_multiple(fields):
         return 0
     return sort_fn
 
+def sort_reverse_multiple(fields):
+    fields = list(fields)
+    def sort_fn(a, b):
+        while fields:
+            field = fields[0][1:]
+            a_field = getattr(a, field)
+            b_field = getattr(b, field)
+            if a_field < b_field:
+                return 1
+            elif a_field > b_field:
+                return -1
+        return 0
+    return sort_fn
+
 class ODMOrderingFilter(OrderingFilter):
     """Adaptation of rest_framework.filters.OrderingFilter to work with modular-odm."""
 
