@@ -77,7 +77,7 @@
                     <div id="projectSettings" class="panel-body">
                         <div class="form-group">
                             <label>Category:</label>
-                            <select data-bind="attr.disabled: disabled,
+                            <select id='categoryUpdate' data-bind="attr.disabled: disabled,
                                                          options: categoryOptions,
                                                          optionsValue: 'value',
                                                          optionsText: 'label',
@@ -88,7 +88,7 @@
                         </div>
                         <div class="form-group">
                             <label for="title">Title:</label>
-                            <input class="form-control" type="text" maxlength="200" placeholder="Required" data-bind="value: title,
+                            <input class="form-control" id="titleUpdate" type="text" maxlength="200" placeholder="Required" data-bind="value: title,
                                                                                                       valueUpdate: 'afterkeydown'">
                             <span class="text-danger" data-bind="validationMessage: title"></span>
                         </div>
@@ -96,7 +96,7 @@
                             <label for="description">Description:</label>
                             <textarea placeholder="Optional" data-bind="value: description,
                                              valueUpdate: 'afterkeydown'",
-                            class="form-control resize-vertical"></textarea>
+                            class="form-control resize-vertical" id="descriptionUpdate"></textarea>
                         </div>
                            <button data-bind="click: cancelAll"
                             class="btn btn-default">Cancel</button>

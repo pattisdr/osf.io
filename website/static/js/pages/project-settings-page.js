@@ -222,13 +222,28 @@ $(document).ready(function() {
     /* Before closing the page, Check whether the newly checked addon are updated or not */
     $(window).on('beforeunload',function() {
       //new checked items but not updated
-      var checked = uncheckedOnLoad.filter('#selectAddonsForm input:checked');
-      //new unchecked items but not updated
-      var unchecked = checkedOnLoad.filter('#selectAddonsForm input:not(:checked)');
+        var checked = uncheckedOnLoad.filter('#selectAddonsForm input:checked');
+        //new unchecked items but not updated
+        var unchecked = checkedOnLoad.filter('#selectAddonsForm input:not(:checked)');
 
-      if(unchecked.length > 0 || checked.length > 0) {
-        return 'The changes on addon setting are not submitted!';
-      }
+        if(unchecked.length > 0 || checked.length > 0) {
+            return 'The changes on addon setting are not submitted!';
+        }
+
+        console.log(projectSettingsVM);
+
+        var titleForm = $('#titleUpdate')[0].value;
+        var descriptionForm = $('#descriptionUpdate')[0].value;
+        var categoryForm = $('#categoryUpdate')[0].value;
+
+
+        if (titleForm !== projectSettingsVM.titlePlaceholder || descriptionForm !== projectSettingsVM.descriptionPlaceholder ||
+            categoryForm !== projectSettingsVM.categoryPlaceholder) {
+            return 'There are unsaved changes to your project settings.'
+        }
+
+
+
     });
 
     // Show capabilities modal on selecting an addon; unselect if user
