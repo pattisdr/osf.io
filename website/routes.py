@@ -157,6 +157,12 @@ def robots():
         mimetype='text/plain'
     )
 
+def ember_app():
+    """Serve the contents of the ember application"""
+    # Be sure to build the ember app first, and adjust asset paths in index.html:
+    #  ember build --output-path <STATIC_FOLER>/ember --watch
+    return send_from_directory(settings.EMBER_FOLDER, 'index.html')
+
 
 def goodbye():
     # Redirect to dashboard if logged in
@@ -217,6 +223,19 @@ def make_url_map(app):
     process_rules(app, [
         Rule('/favicon.ico', 'get', favicon, json_renderer),
         Rule('/robots.txt', 'get', robots, json_renderer),
+    ])
+
+    # Routes that serve up the Ember application
+    process_rules(app, [
+        Rule(
+            [
+                '/cookielogin/',
+                '/nodes/'
+            ],
+            'get',
+            ember_app,
+            json_renderer
+        ),
     ])
 
     ### Base ###
