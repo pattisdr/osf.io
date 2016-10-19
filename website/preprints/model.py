@@ -110,7 +110,6 @@ class PreprintService(GuidStoredObject):
         # there is no preprint file yet! This is the first time!
         if not self.node.preprint_file:
             self.node.preprint_file = preprint_file
-            self.node.add_log(action=NodeLog.PREPRINT_INITIATED, params={}, auth=auth, save=False)
         elif preprint_file != self.node.preprint_file:
             # if there was one, check if it's a new file
             self.node.preprint_file = preprint_file
@@ -142,6 +141,7 @@ class PreprintService(GuidStoredObject):
             if not self.subjects:
                 raise ValueError('Preprint must have at least one subject to be published.')
             self.date_published = datetime.datetime.utcnow()
+            self.node.add_log(action=NodeLog.PREPRINT_INITIATED, params={}, auth=auth, save=False)
 
             if not self.node.is_public:
                 self.node.set_privacy(
