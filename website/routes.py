@@ -45,6 +45,7 @@ from website.discovery import views as discovery_views
 from website.conferences import views as conference_views
 from website.preprints import views as preprint_views
 from website.registries import views as registries_views
+from website.retraction_watch import views as retraction_watch_views
 from website.institutions import views as institution_views
 from website.notifications import views as notification_views
 
@@ -383,6 +384,13 @@ def make_url_map(app):
             'get',
             registries_views.registries_landing_page,
             OsfWebRenderer('public/pages/registries_landing.mako', trust=False),
+        ),
+
+        Rule(
+            '/retraction-watch/',
+            'get',
+            retraction_watch_views.retraction_watch_landing_page,
+            notemplate,
         ),
 
         Rule(
