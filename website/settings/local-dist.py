@@ -22,6 +22,11 @@ EXTERNAL_EMBER_APPS = {
         'server': 'http://localhost:4200',
         'path': '../ember-preprints/dist/'
     },
+    'retraction-watch': {
+        'url': '/retraction-watch/',
+        'server': 'http://localhost:4200',
+        'path': '../retraction-watch/dist/'
+    },
     # 'meetings': {
     #     'url': '/meetings/',
     #     'server': 'http://localhost:4201',
