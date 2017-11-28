@@ -13,7 +13,7 @@ Mako==1.0.0
 Markdown==2.4.1
 Pygments==1.6
 WTForms==1.0.4
-beautifulsoup4==4.3.2
+beautifulsoup4==4.6.0
 celery==3.1.25
 httplib2==0.9
 hurry.filesize==0.9
@@ -25,8 +25,8 @@ bcrypt==3.1.3
 python-dateutil==2.5.0
 python-gnupg==0.3.6
 pytz==2014.9
-bleach==1.4.1
-html5lib==0.999
+bleach==2.1.1
+html5lib==0.999999999
 blinker==1.3
 furl==0.4.92
 elasticsearch==1.3.0
@@ -54,8 +54,8 @@ sendgrid==1.5.13
 # https://github.com/jaraco/keyring/blob/9.1/setup.py
 keyring==9.1
 
-requests==2.5.3
-urllib3==1.10.4
+requests==2.18.4
+urllib3==1.22
 oauthlib==1.1.2
 requests-oauthlib==0.5.0
 raven==5.32.0
