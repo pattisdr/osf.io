@@ -92,17 +92,18 @@ def _get_wiki_versions(node, name, anonymous=False):
 def _get_wiki_pages_current(node):
     return [
         {
-            'name': sorted_page.page_name,
-            'url': node.web_url_for('project_wiki_view', wname=sorted_page.page_name, _guid=True),
-            'wiki_id': sorted_page._primary_key,
-            'wiki_content': _wiki_page_content(sorted_page.page_name, node=node)
+            'name': page.page_name,
+            'url': node.web_url_for('project_wiki_view', wname=page.page_name, _guid=True),
+            'wiki_id': page._primary_key,
+            'wiki_content': _wiki_page_content(page.page_name, node=node)
         }
-        for sorted_page in [
-            node.get_wiki_page(sorted_key)
-            for sorted_key in sorted(node.wiki_pages_current)
-        ]
-        # TODO: remove after forward slash migration
-        if sorted_page is not None
+        for page in node.wikis.all()
+        # # for sorted_page in [
+        # #     node.get_wiki_page(sorted_key)
+        # #     for sorted_key in sorted(node.wiki_pages_current)
+        # # ]
+        # # TODO: remove after forward slash migration
+        # if sorted_page is not None
     ]
 
 
@@ -228,7 +229,7 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
         wiki_name = 'home'
 
     if wiki_page:
-        version = wiki_page.version
+        version = wiki_page.identifier
         is_current = wiki_page.is_current
         content = wiki_page.html(node)
         rendered_before_update = wiki_page.rendered_before_update
@@ -263,7 +264,7 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
 
     ret = {
         'wiki_id': wiki_page._primary_key if wiki_page else None,
-        'wiki_name': wiki_page.page_name if wiki_page else wiki_name,
+        'wiki_name': wiki_page.wiki_page.page_name if wiki_page else wiki_name,
         'wiki_content': content,
         'rendered_before_update': rendered_before_update,
         'page': wiki_page,
@@ -309,7 +310,7 @@ def project_wiki_edit_post(auth, wname, **kwargs):
     if wiki_page:
         # Only update node wiki if content has changed
         if form_wiki_content != wiki_page.content:
-            node.update_node_wiki(wiki_page.page_name, form_wiki_content, auth)
+            node.update_node_wiki(wiki_page.wiki_page.page_name, form_wiki_content, auth)
             ret = {'status': 'success'}
         else:
             ret = {'status': 'unmodified'}
