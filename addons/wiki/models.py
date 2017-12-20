@@ -88,29 +88,22 @@ class WikiPage(GuidMixin, BaseModel):
     user = models.ForeignKey('osf.OSFUser', null=True, blank=True, on_delete=models.CASCADE)
     node = models.ForeignKey('osf.AbstractNode', null=True, blank=True, on_delete=models.CASCADE, related_name='wikis')
 
-    def create_version(self, creator, location, metadata=None):
+    @property
+    def current_version_number(self):
+        if self.versions:
+            return self.versions.count()
+        return 0
+
+    def create_version(self, user, content):
         latest_version = self.get_version()
-        version = FileVersion(identifier=self.versions.count() + 1, creator=creator, location=location)
-
-        if latest_version and latest_version.is_duplicate(version):
-            return latest_version
-
-        if metadata:
-            version.update_metadata(metadata)
-
-        version._find_matching_archive(save=False)
-
+        version = WikiVersion(user=user, wiki_page=self, content=content, identifier=current_version_number + 1)
         version.save()
-        self.versions.add(version)
-        self.save()
-
         return version
-
 
     def get_version(self, version=None, required=False):
         if version is None:
             if self.versions.exists():
-                return self.versions.first()
+                return self.versions.last()
             return None
 
         try:
