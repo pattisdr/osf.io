@@ -82,6 +82,10 @@ class WikiVersion(ObjectIDMixin, BaseModel):
     content = models.TextField(default='', blank=True)
     identifier = models.CharField(max_length=100, blank=False, null=False)
 
+    @property
+    def _primary_key(self):
+        return self._id
+
 class WikiPage(GuidMixin, BaseModel):
     page_name = models.CharField(max_length=200, validators=[validate_page_name, ])
     date = NonNaiveDateTimeField(auto_now_add=True)
@@ -96,7 +100,7 @@ class WikiPage(GuidMixin, BaseModel):
 
     def create_version(self, user, content):
         latest_version = self.get_version()
-        version = WikiVersion(user=user, wiki_page=self, content=content, identifier=current_version_number + 1)
+        version = WikiVersion(user=user, wiki_page=self, content=content, identifier=self.current_version_number + 1)
         version.save()
         return version
 

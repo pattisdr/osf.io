@@ -29,6 +29,7 @@ from framework.exceptions import PermissionsError
 from framework.sentry import log_exception
 from reviews.workflow import States
 from addons.wiki.utils import to_mongo_key
+from addons.wiki.models import WikiPage
 from osf.exceptions import ValidationValueError
 from osf.models.contributor import (Contributor, RecentlyAddedContributor,
                                     get_contributor_permissions)
@@ -2668,6 +2669,12 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         """Check if node meets requirements to make publicly editable."""
         return self.get_descendants_recursive()
 
+    def wiki_page_exists(self, name):
+        try:
+            return self.wikis.get(page_name=name)
+        except WikiPage.DoesNotExist:
+            return False
+
     def get_wiki_page(self, name=None, version=None, id=None):
         WikiVersion = apps.get_model('addons_wiki.WikiVersion')
         WikiPage = apps.get_model('addons_wiki.WikiPage')
@@ -2743,10 +2750,10 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
                 'node': self._primary_key,
                 'page': wiki_page.page_name,
                 'page_id': new_version._primary_key,
-                'version': new_version.version,
+                'version': new_version.identifier,
             },
             auth=auth,
-            log_date=new_version.date_created,
+            log_date=new_version.created,
             save=False,
         )
         self.save()
