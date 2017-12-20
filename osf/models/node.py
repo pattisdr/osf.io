@@ -29,7 +29,6 @@ from framework.exceptions import PermissionsError
 from framework.sentry import log_exception
 from reviews.workflow import States
 from addons.wiki.utils import to_mongo_key
-from addons.wiki.models import WikiPage
 from osf.exceptions import ValidationValueError
 from osf.models.contributor import (Contributor, RecentlyAddedContributor,
                                     get_contributor_permissions)
@@ -2670,6 +2669,7 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         return self.get_descendants_recursive()
 
     def wiki_page_exists(self, name):
+        WikiPage = apps.get_model('addons_wiki.WikiPage')
         try:
             return self.wikis.get(page_name=name)
         except WikiPage.DoesNotExist:
@@ -2689,7 +2689,7 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
             num_versions = wiki_page.versions.count()
 
             if version and (isinstance(version, int) or version.isdigit()):
-                version = version - 1
+                version = int(version) - 1
             elif version == 'previous':
                 id = num_versions - 2 if num_versions >= 1 else num_versions -1
             elif version == 'current' or version is None:
@@ -2698,8 +2698,8 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
                 return None
 
             try:
-                wiki_page.versions.get(identifier=version)
-            except (KeyError, IndexError):
+                return wiki_page.get_version(version=version)
+            except (KeyError, IndexError, WikiVersion.DoesNotExist):
                 return None
         return WikiVersion.load(id)
 
@@ -2720,7 +2720,7 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         try:
             wiki_page = self.wikis.get(page_name=name)
             current = wiki_page.get_version()
-            if Comment.objects.filter(root_target=current.guids.all()[0]).exists():
+            if Comment.objects.filter(root_target=wiki_page.guids.all()[0]).exists():
                 has_comments = True
         except WikiPage.DoesNotExist:
             wiki_page = WikiPage(
@@ -2731,17 +2731,18 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
             wiki_page.save()
         new_version = wiki_page.create_version(user=auth.user, content=content)
 
-        if has_comments:
-            Comment.objects.filter(root_target=current.guids.all()[0]).update(root_target=Guid.load(new_version._id))
-            Comment.objects.filter(target=current.guids.all()[0]).update(target=Guid.load(new_version._id))
-
-        if current:
-            for contrib in self.contributors:
-                if contrib.comments_viewed_timestamp.get(current._id, None):
-                    timestamp = contrib.comments_viewed_timestamp[current._id]
-                    contrib.comments_viewed_timestamp[new_version._id] = timestamp
-                    del contrib.comments_viewed_timestamp[current._id]
-                    contrib.save()
+        # TODO Need to fix these comments at some point - should the target of the comment be the WikiPage or the WikiVersion?
+        # if has_comments:
+        #     Comment.objects.filter(root_target=current.guids.all()[0]).update(root_target=Guid.load(new_version._id))
+        #     Comment.objects.filter(target=current.guids.all()[0]).update(target=Guid.load(new_version._id))
+        #
+        # if current:
+        #     for contrib in self.contributors:
+        #         if contrib.comments_viewed_timestamp.get(current._id, None):
+        #             timestamp = contrib.comments_viewed_timestamp[current._id]
+        #             contrib.comments_viewed_timestamp[new_version._id] = timestamp
+        #             del contrib.comments_viewed_timestamp[current._id]
+        #             contrib.save()
 
         self.add_log(
             action=NodeLog.WIKI_UPDATED,
