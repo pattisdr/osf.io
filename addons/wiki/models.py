@@ -80,12 +80,13 @@ class WikiVersion(ObjectIDMixin, BaseModel):
     user = models.ForeignKey('osf.OSFUser', null=True, blank=True, on_delete=models.CASCADE)
     wiki_page = models.ForeignKey('WikiPage', null=True, blank=True, on_delete=models.CASCADE, related_name='versions')
     content = models.TextField(default='', blank=True)
+    identifier = models.CharField(max_length=100, blank=False, null=False)
 
 class WikiPage(GuidMixin, BaseModel):
     page_name = models.CharField(max_length=200, validators=[validate_page_name, ])
     date = NonNaiveDateTimeField(auto_now_add=True)
     user = models.ForeignKey('osf.OSFUser', null=True, blank=True, on_delete=models.CASCADE)
-    node = models.ForeignKey('osf.AbstractNode', null=True, blank=True, on_delete=models.CASCADE)
+    node = models.ForeignKey('osf.AbstractNode', null=True, blank=True, on_delete=models.CASCADE, related_name='wikis')
 
     def create_version(self, creator, location, metadata=None):
         latest_version = self.get_version()
