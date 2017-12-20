@@ -90,7 +90,7 @@ class WikiPage(GuidMixin, BaseModel):
 
     @property
     def current_version_number(self):
-        if self.versions:
+        if self.versions.exists():
             return self.versions.count()
         return 0
 
@@ -105,7 +105,6 @@ class WikiPage(GuidMixin, BaseModel):
             if self.versions.exists():
                 return self.versions.last()
             return None
-
         try:
             return self.versions.get(identifier=version)
         except WikiVersion.DoesNotExist:
