@@ -2826,22 +2826,23 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         key = to_mongo_key(name)
         page = self.get_wiki_page(key)
 
-        del self.wiki_pages_current[key]
         if key != 'home':
-            del self.wiki_pages_versions[key]
+            page_pk = page._primary_key
+            page.get_versions().delete()
+            page.delete()
 
-        self.add_log(
-            action=NodeLog.WIKI_DELETED,
-            params={
-                'project': self.parent_id,
-                'node': self._primary_key,
-                'page': page.page_name,
-                'page_id': page._primary_key,
-            },
-            auth=auth,
-            save=False,
-        )
-        self.save()
+            self.add_log(
+                action=NodeLog.WIKI_DELETED,
+                params={
+                    'project': self.parent_id,
+                    'node': self._primary_key,
+                    'page': key,
+                    'page_id': page_pk,
+                },
+                auth=auth,
+                save=False,
+            )
+            self.save()
 
     def add_addon(self, name, auth, log=True):
         ret = super(AbstractNode, self).add_addon(name, auth)
