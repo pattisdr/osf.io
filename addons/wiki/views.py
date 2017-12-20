@@ -73,21 +73,19 @@ def _get_wiki_versions(node, name, anonymous=False):
 
     # Skip if wiki_page doesn't exist; happens on new projects before
     # default "home" page is created
-    if key not in node.wiki_pages_versions:
+    wiki_page = node.wiki_page_exists(name)
+    if wiki_page:
+        versions = wiki_page.versions.all()
+    else:
         return []
-
-    versions = [
-        NodeWikiPage.load(version_wiki_id)
-        for version_wiki_id in node.wiki_pages_versions[key]
-    ]
 
     return [
         {
-            'version': version.version,
+            'version': version.identifier,
             'user_fullname': privacy_info_handle(version.user.fullname, anonymous, name=True),
-            'date': '{} UTC'.format(version.date.replace(microsecond=0).isoformat().replace('T', ' ')),
+            'date': '{} UTC'.format(version.modified.replace(microsecond=0).isoformat().replace('T', ' ')),
         }
-        for version in reversed(versions)
+        for version in versions
     ]
 
 
