@@ -108,6 +108,27 @@ class WikiVersion(OptionalGuidMixin, ObjectIDMixin, BaseModel):
     def rendered_before_update(self):
         return self.modified < WIKI_CHANGE_DATE
 
+    def get_draft(self, node):
+        """
+        Return most recently edited version of wiki, whether that is the
+        last saved version or the most recent sharejs draft.
+        """
+
+        db = wiki_utils.share_db()
+        sharejs_uuid = wiki_utils.get_sharejs_uuid(node, self.wiki_page.page_name)
+
+        doc_item = db['docs'].find_one({'_id': sharejs_uuid})
+        if doc_item:
+            sharejs_version = doc_item['_v']
+            sharejs_timestamp = doc_item['_m']['mtime']
+            sharejs_timestamp /= 1000  # Convert to appropriate units
+            sharejs_date = datetime.datetime.utcfromtimestamp(sharejs_timestamp).replace(tzinfo=pytz.utc)
+
+            if sharejs_version > 1 and sharejs_date > self.date:
+                return doc_item['_data']
+
+        return self.content
+
 
 class WikiPage(GuidMixin, BaseModel):
     page_name = models.CharField(max_length=200, validators=[validate_page_name, ])
@@ -139,6 +160,8 @@ class WikiPage(GuidMixin, BaseModel):
                 raise exceptions.VersionNotFoundError(version)
             return None
 
+    def get_versions(self):
+        return self.versions.all()
 
     @property
     def deep_url(self):
@@ -189,26 +212,7 @@ class WikiPage(GuidMixin, BaseModel):
 
         return sanitize(self.html(node), tags=[], strip=True)
 
-    def get_draft(self, node):
-        """
-        Return most recently edited version of wiki, whether that is the
-        last saved version or the most recent sharejs draft.
-        """
 
-        db = wiki_utils.share_db()
-        sharejs_uuid = wiki_utils.get_sharejs_uuid(node, self.page_name)
-
-        doc_item = db['docs'].find_one({'_id': sharejs_uuid})
-        if doc_item:
-            sharejs_version = doc_item['_v']
-            sharejs_timestamp = doc_item['_m']['mtime']
-            sharejs_timestamp /= 1000  # Convert to appropriate units
-            sharejs_date = datetime.datetime.utcfromtimestamp(sharejs_timestamp).replace(tzinfo=pytz.utc)
-
-            if sharejs_version > 1 and sharejs_date > self.date:
-                return doc_item['_data']
-
-        return self.content
 
     def update_active_sharejs(self, node):
         """
