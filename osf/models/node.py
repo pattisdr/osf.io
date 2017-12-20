@@ -2670,10 +2670,15 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
 
     def get_wiki_page(self, name=None, version=None, id=None):
         WikiVersion = apps.get_model('addons_wiki.WikiVersion')
+        WikiPage = apps.get_model('addons_wiki.WikiPage')
         if name:
             name = (name or '').strip()
             key = to_mongo_key(name)
-            wiki_page = self.wikis.get(page_name=name)
+            try:
+                wiki_page = self.wikis.get(page_name=name)
+            except WikiPage.DoesNotExist:
+                return None
+
             num_versions = wiki_page.versions.count()
 
             if version and (isinstance(version, int) or version.isdigit()):
