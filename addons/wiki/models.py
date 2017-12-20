@@ -11,7 +11,7 @@ from django.db import models
 from framework.forms.utils import sanitize
 from markdown.extensions import codehilite, fenced_code, wikilinks
 from osf.models import AbstractNode, NodeLog
-from osf.models.base import BaseModel, GuidMixin, ObjectIDMixin
+from osf.models.base import BaseModel, GuidMixin, ObjectIDMixin, OptionalGuidMixin
 from osf.utils.fields import NonNaiveDateTimeField
 from website import settings
 from addons.wiki import utils as wiki_utils
@@ -76,7 +76,7 @@ def render_content(content, node):
 def build_wiki_url(node, label, base, end):
     return '/{pid}/wiki/{wname}/'.format(pid=node._id, wname=label)
 
-class WikiVersion(ObjectIDMixin, BaseModel):
+class WikiVersion(OptionalGuidMixin, ObjectIDMixin, BaseModel):
     user = models.ForeignKey('osf.OSFUser', null=True, blank=True, on_delete=models.CASCADE)
     wiki_page = models.ForeignKey('WikiPage', null=True, blank=True, on_delete=models.CASCADE, related_name='versions')
     content = models.TextField(default='', blank=True)
@@ -85,6 +85,29 @@ class WikiVersion(ObjectIDMixin, BaseModel):
     @property
     def _primary_key(self):
         return self._id
+
+    @property
+    def is_current(self):
+        return self.identifier == self.wiki_page.current_version_number
+
+    def html(self, node):
+        """The cleaned HTML of the page"""
+        sanitized_content = render_content(self.content, node=node)
+        try:
+            from bleach import linkify
+
+            return linkify(
+                sanitized_content,
+                [nofollow, ],
+            )
+        except TypeError:
+            logger.warning('Returning unlinkified content.')
+            return sanitized_content
+
+    @property
+    def rendered_before_update(self):
+        return self.modified < WIKI_CHANGE_DATE
+
 
 class WikiPage(GuidMixin, BaseModel):
     page_name = models.CharField(max_length=200, validators=[validate_page_name, ])
@@ -116,13 +139,6 @@ class WikiPage(GuidMixin, BaseModel):
                 raise exceptions.VersionNotFoundError(version)
             return None
 
-    @property
-    def is_current(self):
-        key = wiki_utils.to_mongo_key(self.page_name)
-        if key in self.node.wiki_pages_current:
-            return self.node.wiki_pages_current[key] == self._id
-        else:
-            return False
 
     @property
     def deep_url(self):
@@ -167,20 +183,6 @@ class WikiPage(GuidMixin, BaseModel):
     # used by django and DRF
     def get_absolute_url(self):
         return self.absolute_api_v2_url
-
-    def html(self, node):
-        """The cleaned HTML of the page"""
-        sanitized_content = render_content(self.content, node=node)
-        try:
-            from bleach import linkify
-
-            return linkify(
-                sanitized_content,
-                [nofollow, ],
-            )
-        except TypeError:
-            logger.warning('Returning unlinkified content.')
-            return sanitized_content
 
     def raw_text(self, node):
         """ The raw text of the page, suitable for using in a test search"""
