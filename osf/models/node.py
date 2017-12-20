@@ -2669,22 +2669,27 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         return self.get_descendants_recursive()
 
     def get_wiki_page(self, name=None, version=None, id=None):
-        NodeWikiPage = apps.get_model('addons_wiki.NodeWikiPage')
+        WikiVersion = apps.get_model('addons_wiki.WikiVersion')
         if name:
             name = (name or '').strip()
             key = to_mongo_key(name)
+            wiki_page = self.wikis.get(page_name=name)
+            num_versions = wiki_page.versions.count()
+
+            if version and (isinstance(version, int) or version.isdigit()):
+                version = version - 1
+            elif version == 'previous':
+                id = num_versions - 2 if num_versions >= 1 else num_versions -1
+            elif version == 'current' or version is None:
+                version = num_versions - 1
+            else:
+                return None
+
             try:
-                if version and (isinstance(version, int) or version.isdigit()):
-                    id = self.wiki_pages_versions[key][int(version) - 1]
-                elif version == 'previous':
-                    id = self.wiki_pages_versions[key][-2]
-                elif version == 'current' or version is None:
-                    id = self.wiki_pages_current[key]
-                else:
-                    return None
+                wiki_page.versions.get(identifier=version)
             except (KeyError, IndexError):
                 return None
-        return NodeWikiPage.load(id)
+        return WikiVersion.load(id)
 
     def update_node_wiki(self, name, content, auth):
         """Update the node's wiki page with new content.
