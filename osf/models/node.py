@@ -2668,32 +2668,31 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         """Check if node meets requirements to make publicly editable."""
         return self.get_descendants_recursive()
 
-    def wiki_page_exists(self, name):
+    def get_wiki_page(self, name):
         WikiPage = apps.get_model('addons_wiki.WikiPage')
         try:
             return self.wikis.get(page_name=name)
         except WikiPage.DoesNotExist:
-            return False
+            return None
 
-    def get_wiki_page(self, name=None, version=None, id=None):
+    def get_wiki_version(self, name=None, version=None, id=None):
         WikiVersion = apps.get_model('addons_wiki.WikiVersion')
         WikiPage = apps.get_model('addons_wiki.WikiPage')
         if name:
             name = (name or '').strip()
             key = to_mongo_key(name)
-            try:
-                wiki_page = self.wikis.get(page_name=name)
-            except WikiPage.DoesNotExist:
+            wiki_page = self.get_wiki_page(name)
+            if not wiki_page:
                 return None
 
             num_versions = wiki_page.versions.count()
 
             if version and (isinstance(version, int) or version.isdigit()):
-                version = int(version) - 1
+                version = int(version)
             elif version == 'previous':
-                id = num_versions - 2 if num_versions >= 1 else num_versions -1
+                id = num_versions - 1 if num_versions >= 2 else num_versions
             elif version == 'current' or version is None:
-                version = num_versions - 1
+                version = num_versions
             else:
                 return None
 
@@ -2761,7 +2760,8 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
 
     # TODO: Move to wiki add-on
     def rename_node_wiki(self, name, new_name, auth):
-        """Rename the node's wiki page with new name.
+        """
+        Rename the node's wiki page with new name.
 
         :param name: A string, the page's name, e.g. ``"My Page"``.
         :param new_name: A string, the new page's name, e.g. ``"My Renamed Page"``.
