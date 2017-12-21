@@ -17,6 +17,7 @@ from website import settings
 from addons.wiki import utils as wiki_utils
 from website.exceptions import NodeStateError
 from website.util import api_v2_url
+from website.files.exceptions import VersionNotFoundError
 
 from .exceptions import (
     NameEmptyError,
@@ -90,6 +91,33 @@ class WikiPage(GuidMixin, BaseModel):
     date = NonNaiveDateTimeField(auto_now_add=True)
     user = models.ForeignKey('osf.OSFUser', null=True, blank=True, on_delete=models.CASCADE)
     node = models.ForeignKey('osf.AbstractNode', null=True, blank=True, on_delete=models.CASCADE, related_name='wikis')
+
+    @property
+    def current_version_number(self):
+        if self.versions.exists():
+            return self.versions.count()
+        return 0
+
+    def create_version(self, user, content):
+        latest_version = self.get_version()
+        version = WikiVersion(user=user, wiki_page=self, content=content, identifier=self.current_version_number + 1)
+        version.save()
+        return version
+
+    def get_version(self, version=None, required=False):
+        if version is None:
+            if self.versions.exists():
+                return self.versions.last()
+            return None
+        try:
+            return self.versions.get(identifier=version)
+        except WikiVersion.DoesNotExist:
+            if required:
+                raise VersionNotFoundError(version)
+            return None
+
+    def get_versions(self):
+        return self.versions.all()
 
 
 class NodeWikiPage(GuidMixin, BaseModel):
