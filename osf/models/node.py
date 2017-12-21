@@ -2796,13 +2796,14 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         old_name = page.page_name
         page.rename(new_name)
 
+
         # TODO: merge historical records like update (prevents log breaks)
         # transfer the old page versions/current keys to the new name.
         if key != new_key:
-            self.wiki_pages_versions[new_key] = self.wiki_pages_versions[key]
-            del self.wiki_pages_versions[key]
-            self.wiki_pages_current[new_key] = self.wiki_pages_current[key]
-            del self.wiki_pages_current[key]
+            # self.wiki_pages_versions[new_key] = self.wiki_pages_versions[key]
+            # del self.wiki_pages_versions[key]
+            # self.wiki_pages_current[new_key] = self.wiki_pages_current[key]
+            # del self.wiki_pages_current[key]
             if key in self.wiki_private_uuids:
                 self.wiki_private_uuids[new_key] = self.wiki_private_uuids[key]
                 del self.wiki_private_uuids[key]
@@ -2815,7 +2816,7 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
                 'page': page.page_name,
                 'page_id': page._primary_key,
                 'old_page': old_name,
-                'version': page.version,
+                'version': page.current_version_number,
             },
             auth=auth,
             save=True,
@@ -2823,10 +2824,10 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
 
     def delete_node_wiki(self, name, auth):
         name = (name or '').strip()
-        key = to_mongo_key(name)
-        page = self.get_wiki_page(key)
+        # key = to_mongo_key(name)
+        page = self.get_wiki_page(name)
 
-        if key != 'home':
+        if name != 'home':
             page_pk = page._primary_key
             page.get_versions().delete()
             page.delete()
@@ -2836,7 +2837,7 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
                 params={
                     'project': self.parent_id,
                     'node': self._primary_key,
-                    'page': key,
+                    'page': name,
                     'page_id': page_pk,
                 },
                 auth=auth,
