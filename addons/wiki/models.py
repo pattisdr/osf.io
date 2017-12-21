@@ -11,7 +11,7 @@ from django.db import models
 from framework.forms.utils import sanitize
 from markdown.extensions import codehilite, fenced_code, wikilinks
 from osf.models import AbstractNode, NodeLog
-from osf.models.base import BaseModel, GuidMixin
+from osf.models.base import BaseModel, GuidMixin, ObjectIDMixin, OptionalGuidMixin
 from osf.utils.fields import NonNaiveDateTimeField
 from website import settings
 from addons.wiki import utils as wiki_utils
@@ -75,6 +75,21 @@ def render_content(content, node):
 
 def build_wiki_url(node, label, base, end):
     return '/{pid}/wiki/{wname}/'.format(pid=node._id, wname=label)
+
+
+class WikiVersion(OptionalGuidMixin, ObjectIDMixin, BaseModel):
+    user = models.ForeignKey('osf.OSFUser', null=True, blank=True, on_delete=models.CASCADE)
+    wiki_page = models.ForeignKey('WikiPage', null=True, blank=True, on_delete=models.CASCADE, related_name='versions')
+    content = models.TextField(default='', blank=True)
+    identifier = models.CharField(max_length=100, blank=False, null=False)
+    date = NonNaiveDateTimeField(auto_now_add=True)
+
+
+class WikiPage(GuidMixin, BaseModel):
+    page_name = models.CharField(max_length=200, validators=[validate_page_name, ])
+    date = NonNaiveDateTimeField(auto_now_add=True)
+    user = models.ForeignKey('osf.OSFUser', null=True, blank=True, on_delete=models.CASCADE)
+    node = models.ForeignKey('osf.AbstractNode', null=True, blank=True, on_delete=models.CASCADE, related_name='wikis')
 
 
 class NodeWikiPage(GuidMixin, BaseModel):
