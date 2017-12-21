@@ -85,6 +85,14 @@ class WikiVersion(OptionalGuidMixin, ObjectIDMixin, BaseModel):
     identifier = models.CharField(max_length=100, blank=False, null=False)
     date = NonNaiveDateTimeField(auto_now_add=True)
 
+    @property
+    def _primary_key(self):
+        return self._id
+
+    @property
+    def is_current(self):
+        return self.identifier == self.wiki_page.current_version_number
+
     def html(self, node):
         """The cleaned HTML of the page"""
         sanitized_content = render_content(self.content, node=node)
@@ -102,6 +110,27 @@ class WikiVersion(OptionalGuidMixin, ObjectIDMixin, BaseModel):
     @property
     def rendered_before_update(self):
         return self.date < WIKI_CHANGE_DATE
+
+    def get_draft(self, node):
+        """
+        Return most recently edited version of wiki, whether that is the
+        last saved version or the most recent sharejs draft.
+        """
+
+        db = wiki_utils.share_db()
+        sharejs_uuid = wiki_utils.get_sharejs_uuid(node, self.wiki_page.page_name)
+
+        doc_item = db['docs'].find_one({'_id': sharejs_uuid})
+        if doc_item:
+            sharejs_version = doc_item['_v']
+            sharejs_timestamp = doc_item['_m']['mtime']
+            sharejs_timestamp /= 1000  # Convert to appropriate units
+            sharejs_date = datetime.datetime.utcfromtimestamp(sharejs_timestamp).replace(tzinfo=pytz.utc)
+
+            if sharejs_version > 1 and sharejs_date > self.date:
+                return doc_item['_data']
+
+        return self.content
 
 
 class WikiPage(GuidMixin, BaseModel):

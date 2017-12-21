@@ -69,42 +69,33 @@ WIKI_INVALID_VERSION_ERROR = HTTPError(http.BAD_REQUEST, data=dict(
 
 
 def _get_wiki_versions(node, name, anonymous=False):
-    key = to_mongo_key(name)
-
     # Skip if wiki_page doesn't exist; happens on new projects before
     # default "home" page is created
-    if key not in node.wiki_pages_versions:
+    wiki_page = node.get_wiki_page(name)
+    if wiki_page:
+        versions = wiki_page.get_versions()
+    else:
         return []
-
-    versions = [
-        NodeWikiPage.load(version_wiki_id)
-        for version_wiki_id in node.wiki_pages_versions[key]
-    ]
 
     return [
         {
-            'version': version.version,
+            'version': version.identifier,
             'user_fullname': privacy_info_handle(version.user.fullname, anonymous, name=True),
             'date': '{} UTC'.format(version.date.replace(microsecond=0).isoformat().replace('T', ' ')),
         }
-        for version in reversed(versions)
+        for version in versions
     ]
-
 
 def _get_wiki_pages_current(node):
     return [
         {
-            'name': sorted_page.page_name,
-            'url': node.web_url_for('project_wiki_view', wname=sorted_page.page_name, _guid=True),
-            'wiki_id': sorted_page._primary_key,
-            'wiki_content': _wiki_page_content(sorted_page.page_name, node=node)
+            'name': page.page_name,
+            'url': node.web_url_for('project_wiki_view', wname=page.page_name, _guid=True),
+            'wiki_id': page.get_version()._primary_key,
+            'wiki_content': _wiki_page_content(page.page_name, node=node)
         }
-        for sorted_page in [
-            node.get_wiki_page(sorted_key)
-            for sorted_key in sorted(node.wiki_pages_current)
-        ]
         # TODO: remove after forward slash migration
-        if sorted_page is not None
+         for page in node.wikis.all()
     ]
 
 
@@ -139,20 +130,20 @@ def _get_wiki_web_urls(node, key, version=1, additional_urls=None):
 @must_have_addon('wiki', 'node')
 def wiki_page_draft(wname, **kwargs):
     node = kwargs['node'] or kwargs['project']
-    wiki_page = node.get_wiki_page(wname)
+    wiki_version = node.get_wiki_version(wname)
 
     return {
-        'wiki_content': wiki_page.content if wiki_page else None,
-        'wiki_draft': (wiki_page.get_draft(node) if wiki_page
+        'wiki_content': wiki_version.content if wiki_version else None,
+        'wiki_draft': (wiki_version.get_draft(node) if wiki_version
                        else wiki_utils.get_sharejs_content(node, wname)),
     }
 
 def _wiki_page_content(wname, wver=None, **kwargs):
     node = kwargs['node'] or kwargs['project']
-    wiki_page = node.get_wiki_page(wname, version=wver)
-    rendered_before_update = wiki_page.rendered_before_update if wiki_page else False
+    wiki_version = node.get_wiki_version(wname, version=wver)
+    rendered_before_update = wiki_version.rendered_before_update if wiki_version else False
     return {
-        'wiki_content': wiki_page.content if wiki_page else '',
+        'wiki_content': wiki_version.content if wiki_version else '',
         'rendered_before_update': rendered_before_update
     }
 
@@ -189,6 +180,7 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
     wiki_name = (wname or '').strip()
     wiki_key = to_mongo_key(wiki_name)
     wiki_page = node.get_wiki_page(wiki_name)
+    wiki_version = node.get_wiki_version(wiki_name)
     wiki_settings = node.get_addon('wiki')
     can_edit = (
         auth.logged_in and not
@@ -229,11 +221,11 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
     if wiki_name.lower() == 'home':
         wiki_name = 'home'
 
-    if wiki_page:
-        version = wiki_page.version
-        is_current = wiki_page.is_current
-        content = wiki_page.html(node)
-        rendered_before_update = wiki_page.rendered_before_update
+    if wiki_version:
+        version = wiki_version.identifier
+        is_current = wiki_version.is_current
+        content = wiki_version.html(node)
+        rendered_before_update = wiki_version.rendered_before_update
     else:
         version = 'NA'
         is_current = False
@@ -245,7 +237,7 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
             wiki_utils.generate_private_uuid(node, wiki_name)
         sharejs_uuid = wiki_utils.get_sharejs_uuid(node, wiki_name)
     else:
-        if wiki_key not in node.wiki_pages_current and wiki_key != 'home':
+        if not wiki_page and wiki_key != 'home':
             raise WIKI_PAGE_NOT_FOUND_ERROR
         if 'edit' in request.args:
             if wiki_settings.is_publicly_editable:
@@ -264,7 +256,7 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
     }
 
     ret = {
-        'wiki_id': wiki_page._primary_key if wiki_page else None,
+        'wiki_id': wiki_version._primary_key if wiki_version else None,
         'wiki_name': wiki_page.page_name if wiki_page else wiki_name,
         'wiki_content': content,
         'rendered_before_update': rendered_before_update,
