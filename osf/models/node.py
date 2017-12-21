@@ -2668,23 +2668,35 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         """Check if node meets requirements to make publicly editable."""
         return self.get_descendants_recursive()
 
-    def get_wiki_page(self, name=None, version=None, id=None):
-        NodeWikiPage = apps.get_model('addons_wiki.NodeWikiPage')
+    def get_wiki_page(self, name):
+        WikiPage = apps.get_model('addons_wiki.WikiPage')
+        try:
+            return self.wikis.get(page_name=name)
+        except WikiPage.DoesNotExist:
+            return None
+
+    def get_wiki_version(self, name=None, version=None, id=None):
+        WikiVersion = apps.get_model('addons_wiki.WikiVersion')
         if name:
             name = (name or '').strip()
-            key = to_mongo_key(name)
-            try:
-                if version and (isinstance(version, int) or version.isdigit()):
-                    id = self.wiki_pages_versions[key][int(version) - 1]
-                elif version == 'previous':
-                    id = self.wiki_pages_versions[key][-2]
-                elif version == 'current' or version is None:
-                    id = self.wiki_pages_current[key]
-                else:
-                    return None
-            except (KeyError, IndexError):
+            wiki_page = self.get_wiki_page(name)
+            if not wiki_page:
                 return None
-        return NodeWikiPage.load(id)
+
+            if version and (isinstance(version, int) or version.isdigit()):
+                version = int(version)
+            elif version == 'previous':
+                version = wiki_page.current_version_number - 1
+            elif version == 'current' or version is None:
+                version = wiki_page.current_version_number
+            else:
+                return None
+
+            try:
+                return wiki_page.get_version(version=version)
+            except WikiVersion.DoesNotExist:
+                return None
+        return WikiVersion.load(id)
 
     def update_node_wiki(self, name, content, auth):
         """Update the node's wiki page with new content.
