@@ -85,6 +85,24 @@ class WikiVersion(OptionalGuidMixin, ObjectIDMixin, BaseModel):
     identifier = models.CharField(max_length=100, blank=False, null=False)
     date = NonNaiveDateTimeField(auto_now_add=True)
 
+    def html(self, node):
+        """The cleaned HTML of the page"""
+        sanitized_content = render_content(self.content, node=node)
+        try:
+            from bleach import linkify
+
+            return linkify(
+                sanitized_content,
+                [nofollow, ],
+            )
+        except TypeError:
+            logger.warning('Returning unlinkified content.')
+            return sanitized_content
+
+    @property
+    def rendered_before_update(self):
+        return self.date < WIKI_CHANGE_DATE
+
 
 class WikiPage(GuidMixin, BaseModel):
     page_name = models.CharField(max_length=200, validators=[validate_page_name, ])
