@@ -292,7 +292,7 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
 def project_wiki_edit_post(auth, wname, **kwargs):
     node = kwargs['node'] or kwargs['project']
     wiki_name = wname.strip()
-    wiki_page = node.get_wiki_page(wiki_name)
+    wiki_version = node.get_wiki_version(wiki_name)
     redirect_url = node.web_url_for('project_wiki_view', wname=wiki_name, _guid=True)
     form_wiki_content = request.form['content']
 
@@ -300,10 +300,10 @@ def project_wiki_edit_post(auth, wname, **kwargs):
     if wiki_name.lower() == 'home':
         wiki_name = 'home'
 
-    if wiki_page:
+    if wiki_version:
         # Only update node wiki if content has changed
-        if form_wiki_content != wiki_page.content:
-            node.update_node_wiki(wiki_page.page_name, form_wiki_content, auth)
+        if form_wiki_content != wiki_version.content:
+            node.update_node_wiki(wiki_version.wiki_page.page_name, form_wiki_content, auth)
             ret = {'status': 'success'}
         else:
             ret = {'status': 'unmodified'}

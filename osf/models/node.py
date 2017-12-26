@@ -2705,64 +2705,51 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         :param content: A string, the posted content.
         :param auth: All the auth information including user, API key.
         """
-        NodeWikiPage = apps.get_model('addons_wiki.NodeWikiPage')
+        WikiPage = apps.get_model('addons_wiki.WikiPage')
         Comment = apps.get_model('osf.Comment')
 
         name = (name or '').strip()
-        key = to_mongo_key(name)
         has_comments = False
         current = None
 
-        if key not in self.wiki_pages_current:
-            if key in self.wiki_pages_versions:
-                version = len(self.wiki_pages_versions[key]) + 1
-            else:
-                version = 1
-        else:
-            current = NodeWikiPage.load(self.wiki_pages_current[key])
-            version = current.version + 1
-            current.save()
-            if Comment.objects.filter(root_target=current.guids.all()[0]).exists():
-                has_comments = True
+        try:
+            wiki_page = self.wikis.get(page_name=name)
+            current = wiki_page.get_version()
+            # if Comment.objects.filter(root_target=current.guids.all()[0]).exists():
+            #     has_comments = True
+        except WikiPage.DoesNotExist:
+            wiki_page = WikiPage(
+                page_name=name,
+                user=auth.user,
+                node=self
+            )
+            wiki_page.save()
 
-        new_page = NodeWikiPage(
-            page_name=name,
-            version=version,
-            user=auth.user,
-            node=self,
-            content=content
-        )
-        new_page.save()
+        new_version = wiki_page.create_version(user=auth.user, content=content)
 
         if has_comments:
-            Comment.objects.filter(root_target=current.guids.all()[0]).update(root_target=Guid.load(new_page._id))
-            Comment.objects.filter(target=current.guids.all()[0]).update(target=Guid.load(new_page._id))
+            Comment.objects.filter(root_target=current.guids.all()[0]).update(root_target=Guid.load(new_version._id))
+            Comment.objects.filter(target=current.guids.all()[0]).update(target=Guid.load(new_version._id))
 
         if current:
             for contrib in self.contributors:
                 if contrib.comments_viewed_timestamp.get(current._id, None):
                     timestamp = contrib.comments_viewed_timestamp[current._id]
-                    contrib.comments_viewed_timestamp[new_page._id] = timestamp
+                    contrib.comments_viewed_timestamp[new_version._id] = timestamp
                     del contrib.comments_viewed_timestamp[current._id]
                     contrib.save()
-
-        # check if the wiki page already exists in versions (existed once and is now deleted)
-        if key not in self.wiki_pages_versions:
-            self.wiki_pages_versions[key] = []
-        self.wiki_pages_versions[key].append(new_page._primary_key)
-        self.wiki_pages_current[key] = new_page._primary_key
 
         self.add_log(
             action=NodeLog.WIKI_UPDATED,
             params={
                 'project': self.parent_id,
                 'node': self._primary_key,
-                'page': new_page.page_name,
-                'page_id': new_page._primary_key,
-                'version': new_page.version,
+                'page': wiki_page.page_name,
+                'page_id': new_version._primary_key,
+                'version': new_version.identifier,
             },
             auth=auth,
-            log_date=new_page.date,
+            log_date=wiki_page.date,
             save=False,
         )
         self.save()
