@@ -2780,7 +2780,7 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
             raise PageCannotRenameError('Cannot rename wiki home page')
         if not page:
             raise PageNotFoundError('Wiki page not found')
-        if (new_key in self.wiki_pages_current and key != new_key) or new_key == 'home':
+        if self.get_wiki_page(new_name) or new_key == 'home':
             raise PageConflictError(
                 'Page already exists with name {0}'.format(
                     new_name,
@@ -2794,10 +2794,6 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         # TODO: merge historical records like update (prevents log breaks)
         # transfer the old page versions/current keys to the new name.
         if key != new_key:
-            self.wiki_pages_versions[new_key] = self.wiki_pages_versions[key]
-            del self.wiki_pages_versions[key]
-            self.wiki_pages_current[new_key] = self.wiki_pages_current[key]
-            del self.wiki_pages_current[key]
             if key in self.wiki_private_uuids:
                 self.wiki_private_uuids[new_key] = self.wiki_private_uuids[key]
                 del self.wiki_private_uuids[key]
@@ -2810,7 +2806,7 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
                 'page': page.page_name,
                 'page_id': page._primary_key,
                 'old_page': old_name,
-                'version': page.version,
+                'version': page.current_version_number,
             },
             auth=auth,
             save=True,

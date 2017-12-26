@@ -166,6 +166,11 @@ class WikiPage(GuidMixin, BaseModel):
     def get_versions(self):
         return self.versions.all()
 
+    def rename(self, new_name, save=True):
+        self.page_name = new_name
+        if save:
+            self.save()
+
 
 class NodeWikiPage(GuidMixin, BaseModel):
     page_name = models.CharField(max_length=200, validators=[validate_page_name, ])
