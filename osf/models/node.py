@@ -2816,7 +2816,8 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         name = (name or '').strip()
         page = self.get_wiki_page(name)
         page_pk = page._primary_key
-        page.delete()
+        page.is_deleted = True
+        page.save()
 
         self.add_log(
             action=NodeLog.WIKI_DELETED,
