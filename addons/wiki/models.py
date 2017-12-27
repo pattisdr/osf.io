@@ -78,12 +78,13 @@ def build_wiki_url(node, label, base, end):
     return '/{pid}/wiki/{wname}/'.format(pid=node._id, wname=label)
 
 
-class WikiVersion(OptionalGuidMixin, ObjectIDMixin, BaseModel):
+class WikiVersion(GuidMixin, BaseModel):
     user = models.ForeignKey('osf.OSFUser', null=True, blank=True, on_delete=models.CASCADE)
     wiki_page = models.ForeignKey('WikiPage', null=True, blank=True, on_delete=models.CASCADE, related_name='versions')
     content = models.TextField(default='', blank=True)
     identifier = models.CharField(max_length=100, blank=False, null=False)
     date = NonNaiveDateTimeField(auto_now_add=True)
+    is_deleted = models.BooleanField(default=False, db_index=True)
 
     @property
     def _primary_key(self):
@@ -132,12 +133,44 @@ class WikiVersion(OptionalGuidMixin, ObjectIDMixin, BaseModel):
 
         return self.content
 
+    # For Comment API compatibility
+    @property
+    def target_type(self):
+        """The object "type" used in the OSF v2 API."""
+        return 'wiki'
+
+    @property
+    def root_target_page(self):
+        """The comment page type associated with NodeWikiPages."""
+        return 'wiki'
+
+    @property
+    def absolute_api_v2_url(self):
+        path = '/wikis/{}/'.format(self._id)
+        return api_v2_url(path)
+
+    # used by django and DRF
+    def get_absolute_url(self):
+        return self.absolute_api_v2_url
+
+    @property
+    def page_name(self):
+        return self.wiki_page.page_name
+
+    def belongs_to_node(self, node_id):
+        """Check whether the wiki is attached to the specified node."""
+        return self.wiki_page.node._id == node_id
+
+    def get_extra_log_params(self, comment):
+        return {'wiki': {'name': self.page_name, 'url': comment.get_comment_page_url()}}
+
 
 class WikiPage(GuidMixin, BaseModel):
     page_name = models.CharField(max_length=200, validators=[validate_page_name, ])
     date = NonNaiveDateTimeField(auto_now_add=True)
     user = models.ForeignKey('osf.OSFUser', null=True, blank=True, on_delete=models.CASCADE)
     node = models.ForeignKey('osf.AbstractNode', null=True, blank=True, on_delete=models.CASCADE, related_name='wikis')
+    is_deleted = models.BooleanField(default=False, db_index=True)
 
     @property
     def current_version_number(self):
