@@ -92,7 +92,7 @@ class WikiVersion(GuidMixin, BaseModel):
 
     @property
     def is_current(self):
-        return self.identifier == self.wiki_page.current_version_number
+        return not self.wiki_page.is_deleted and int(self.identifier) == self.wiki_page.current_version_number
 
     def html(self, node):
         """The cleaned HTML of the page"""
@@ -178,6 +178,10 @@ class WikiPage(GuidMixin, BaseModel):
             return self.versions.count()
         return 0
 
+    @property
+    def url(self):
+        return u'{}wiki/{}/'.format(self.node.url, self.page_name)
+
     def create_version(self, user, content):
         latest_version = self.get_version()
         version = WikiVersion(user=user, wiki_page=self, content=content, identifier=self.current_version_number + 1)
@@ -212,14 +216,6 @@ class NodeWikiPage(GuidMixin, BaseModel):
     content = models.TextField(default='', blank=True)
     user = models.ForeignKey('osf.OSFUser', null=True, blank=True, on_delete=models.CASCADE)
     node = models.ForeignKey('osf.AbstractNode', null=True, blank=True, on_delete=models.CASCADE)
-
-    @property
-    def is_current(self):
-        key = wiki_utils.to_mongo_key(self.page_name)
-        if key in self.node.wiki_pages_current:
-            return self.node.wiki_pages_current[key] == self._id
-        else:
-            return False
 
     @property
     def deep_url(self):

@@ -2348,12 +2348,13 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         for field in spam_fields:
             if field == 'wiki_pages_current':
                 newest_wiki_page = None
-                for wiki_page_id in self.wiki_pages_current.values():
+                for wiki_page in self.wikis().all():
                     wiki_page = NodeWikiPage.load(wiki_page_id)
+                    wiki_version = wiki_page.versions.last()
                     if not newest_wiki_page:
-                        newest_wiki_page = wiki_page
-                    elif wiki_page.date > newest_wiki_page.date:
-                        newest_wiki_page = wiki_page
+                        newest_wiki_page = wiki_version
+                    elif wiki_version.date > newest_wiki_page.date:
+                        newest_wiki_page = wiki_version
                 if newest_wiki_page:
                     content.append(newest_wiki_page.raw_text(self).encode('utf-8'))
             else:
