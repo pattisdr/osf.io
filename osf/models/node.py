@@ -2814,20 +2814,17 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
 
     def delete_node_wiki(self, name, auth):
         name = (name or '').strip()
-        key = to_mongo_key(name)
-        page = self.get_wiki_page(key)
-
-        del self.wiki_pages_current[key]
-        if key != 'home':
-            del self.wiki_pages_versions[key]
+        page = self.get_wiki_page(name)
+        page_pk = page._primary_key
+        page.delete()
 
         self.add_log(
             action=NodeLog.WIKI_DELETED,
             params={
                 'project': self.parent_id,
                 'node': self._primary_key,
-                'page': page.page_name,
-                'page_id': page._primary_key,
+                'page': name,
+                'page_id': page_pk,
             },
             auth=auth,
             save=False,
