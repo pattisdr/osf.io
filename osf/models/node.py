@@ -2715,8 +2715,8 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         try:
             wiki_page = self.wikis.get(page_name=name)
             current = wiki_page.get_version()
-            # if Comment.objects.filter(root_target=current.guids.all()[0]).exists():
-            #     has_comments = True
+            if Comment.objects.filter(root_target=current.guids.all()[0]).exists():
+                has_comments = True
         except WikiPage.DoesNotExist:
             wiki_page = WikiPage(
                 page_name=name,
