@@ -2727,6 +2727,9 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
             wiki_page.save()
 
         new_version = wiki_page.create_version(user=auth.user, content=content)
+        if wiki_page.is_deleted:
+            wiki_page.is_deleted = False
+            wiki_page.save()
 
         if has_comments:
             Comment.objects.filter(root_target=current.guids.all()[0]).update(root_target=Guid.load(new_version._id))
@@ -2819,6 +2822,9 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         page_pk = page._primary_key
         page.is_deleted = True
         page.save()
+        for version in page.versions.all():
+            version.is_deleted = True
+            version.save()
 
         self.add_log(
             action=NodeLog.WIKI_DELETED,

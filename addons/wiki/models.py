@@ -179,7 +179,7 @@ class WikiPage(GuidMixin, BaseModel):
     @property
     def current_version_number(self):
         if self.versions.exists():
-            return self.versions.count()
+            return self.versions.filter(is_deleted=False).count()
         return 0
 
     @property
@@ -187,8 +187,8 @@ class WikiPage(GuidMixin, BaseModel):
         return u'{}wiki/{}/'.format(self.node.url, self.page_name)
 
     def create_version(self, user, content):
-        latest_version = self.get_version()
-        version = WikiVersion(user=user, wiki_page=self, content=content, identifier=self.current_version_number + 1)
+        current_version = 0 if self.is_deleted else self.current_version_number
+        version = WikiVersion(user=user, wiki_page=self, content=content, identifier=current_version + 1)
         version.save()
         return version
 

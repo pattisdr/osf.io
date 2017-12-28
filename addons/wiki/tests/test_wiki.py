@@ -500,22 +500,25 @@ class TestWikiDelete(OsfTestCase):
         self.auth = creator.auth
         self.project.update_node_wiki('Elephants', 'Hello Elephants', self.consolidate_auth)
         self.project.update_node_wiki('Lions', 'Hello Lions', self.consolidate_auth)
-        self.elephant_wiki = self.project.get_wiki_page('Elephants')
-        self.lion_wiki = self.project.get_wiki_page('Lions')
+        self.elephant_wiki = self.project.get_wiki_version('Elephants')
+        self.lion_wiki = self.project.get_wiki_version('Lions')
 
     @mock.patch('addons.wiki.utils.broadcast_to_sharejs')
     def test_project_wiki_delete(self, mock_shrejs):
-        assert_in('elephants', self.project.wiki_pages_current)
+        page = self.elephant_wiki.wiki_page
+        assert_in('elephants', [wiki.wiki_key for wiki in self.project.wikis.all()])
+        assert_false(self.elephant_wiki.wiki_page.is_deleted)
         url = self.project.api_url_for(
             'project_wiki_delete',
-            wname='elephants'
+            wname='Elephants'
         )
         self.app.delete(
             url,
             auth=self.auth
         )
         self.project.reload()
-        assert_not_in('elephants', self.project.wiki_pages_current)
+        page.reload()
+        assert_true(page.is_deleted)
 
     @mock.patch('addons.wiki.utils.broadcast_to_sharejs')
     def test_project_wiki_delete_w_valid_special_characters(self, mock_sharejs):
@@ -523,8 +526,9 @@ class TestWikiDelete(OsfTestCase):
         # with assert_raises(NameInvalidError):
         #     self.project.update_node_wiki(SPECIAL_CHARACTERS_ALL, 'Hello Special Characters', self.consolidate_auth)
         self.project.update_node_wiki(SPECIAL_CHARACTERS_ALLOWED, 'Hello Special Characters', self.consolidate_auth)
-        self.special_characters_wiki = self.project.get_wiki_page(SPECIAL_CHARACTERS_ALLOWED)
-        assert_in(to_mongo_key(SPECIAL_CHARACTERS_ALLOWED), self.project.wiki_pages_current)
+        self.special_characters_wiki = self.project.get_wiki_version(SPECIAL_CHARACTERS_ALLOWED)
+        wiki_page = self.special_characters_wiki.wiki_page
+        assert_in(to_mongo_key(SPECIAL_CHARACTERS_ALLOWED), [wiki.wiki_key for wiki in self.project.wikis.all()])
         url = self.project.api_url_for(
             'project_wiki_delete',
             wname=SPECIAL_CHARACTERS_ALLOWED
@@ -534,24 +538,31 @@ class TestWikiDelete(OsfTestCase):
             auth=self.auth
         )
         self.project.reload()
-        assert_not_in(to_mongo_key(SPECIAL_CHARACTERS_ALLOWED), self.project.wiki_pages_current)
+        wiki_page.reload()
+        assert_true(wiki_page.is_deleted)
 
     @mock.patch('addons.wiki.utils.broadcast_to_sharejs')
     def test_wiki_versions_do_not_reappear_after_delete(self, mock_sharejs):
         # Creates a wiki page
         self.project.update_node_wiki('Hippos', 'Hello hippos', self.consolidate_auth)
         # Edits it two times
-        assert_equal(len(self.project.wiki_pages_versions['hippos']), 1)
+        wiki_page = self.project.get_wiki_page('Hippos')
+        assert_false(wiki_page.is_deleted)
+        assert_equal(wiki_page.current_version_number, 1)
         self.project.update_node_wiki('Hippos', 'Hello hippopotamus', self.consolidate_auth)
-        assert_equal(len(self.project.wiki_pages_versions['hippos']), 2)
+        wiki_page.reload()
+        assert_equal(wiki_page.current_version_number, 2)
         # Deletes the wiki page
         self.project.delete_node_wiki('Hippos', self.consolidate_auth)
-        assert_true('hippos' not in self.project.wiki_pages_versions)
+        wiki_page.reload()
+        assert_true(wiki_page.is_deleted)
         # Creates new wiki with same name
         self.project.update_node_wiki('Hippos', 'Hello again hippos', self.consolidate_auth)
-        assert_equal(len(self.project.wiki_pages_versions['hippos']), 1)
+        wiki_page.reload()
+        assert_equal(wiki_page.current_version_number, 1)
         self.project.update_node_wiki('Hippos', 'Hello again hippopotamus', self.consolidate_auth)
-        assert_equal(len(self.project.wiki_pages_versions['hippos']), 2)
+        wiki_page.reload()
+        assert_equal(wiki_page.current_version_number, 2)
 
 class TestWikiRename(OsfTestCase):
 
