@@ -236,7 +236,7 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
             wiki_utils.generate_private_uuid(node, wiki_name)
         sharejs_uuid = wiki_utils.get_sharejs_uuid(node, wiki_name)
     else:
-        if not wiki_page and wiki_key != 'home':
+        if (not wiki_page or wiki_page.is_deleted) and wiki_key != 'home':
             raise WIKI_PAGE_NOT_FOUND_ERROR
         if 'edit' in request.args:
             if wiki_settings.is_publicly_editable:
@@ -366,9 +366,9 @@ def project_wiki_home(**kwargs):
 @must_have_addon('wiki', 'node')
 def project_wiki_id_page(auth, wid, **kwargs):
     node = kwargs['node'] or kwargs['project']
-    wiki_page = node.get_wiki_page(id=wid)
-    if wiki_page:
-        return redirect(node.web_url_for('project_wiki_view', wname=wiki_page.page_name, _guid=True))
+    wiki_version = node.get_wiki_version(id=wid)
+    if wiki_version:
+        return redirect(node.web_url_for('project_wiki_view', wname=wiki_version.page_name, _guid=True))
     else:
         raise WIKI_PAGE_NOT_FOUND_ERROR
 
@@ -438,7 +438,7 @@ def project_wiki_validate_name(wname, auth, node, **kwargs):
     wiki_name = wname.strip()
     wiki_key = to_mongo_key(wiki_name)
 
-    if wiki_key in node.wiki_pages_current or wiki_key == 'home':
+    if wiki_key in [wiki.wiki_key for wiki in node.wikis.all()] or wiki_key == 'home':
         raise HTTPError(http.CONFLICT, data=dict(
             message_short='Wiki page name conflict.',
             message_long='A wiki page with that name already exists.'

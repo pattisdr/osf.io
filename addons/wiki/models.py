@@ -173,6 +173,10 @@ class WikiPage(GuidMixin, BaseModel):
     is_deleted = models.BooleanField(default=False, db_index=True)
 
     @property
+    def wiki_key(self):
+        return wiki_utils.to_mongo_key(self.page_name)
+
+    @property
     def current_version_number(self):
         if self.versions.exists():
             return self.versions.count()

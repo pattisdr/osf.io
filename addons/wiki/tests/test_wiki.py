@@ -22,7 +22,7 @@ from website.exceptions import NodeStateError
 from addons.wiki import settings
 from addons.wiki import views
 from addons.wiki.exceptions import InvalidVersionError
-from addons.wiki.models import NodeWikiPage, render_content
+from addons.wiki.models import WikiPage, WikiVersion, render_content
 from addons.wiki.utils import (
     get_sharejs_uuid, generate_private_uuid, share_db, delete_share_doc,
     migrate_uuid, format_wiki_version, serialize_wiki_settings, serialize_wiki_widget
@@ -131,7 +131,7 @@ class TestWikiViews(OsfTestCase):
         res = self.app.get(url, auth=self.user.auth)
         assert_equal(res.status_code, 200)
 
-    @mock.patch('addons.wiki.models.NodeWikiPage.rendered_before_update', new_callable=mock.PropertyMock)
+    @mock.patch('addons.wiki.models.WikiVersion.rendered_before_update', new_callable=mock.PropertyMock)
     def test_wiki_content_rendered_before_update(self, mock_rendered_before_update):
         content = 'Some content'
         self.project.update_node_wiki('somerandomid', content, Auth(self.user))
@@ -163,26 +163,26 @@ class TestWikiViews(OsfTestCase):
         assert_equal(res.status_code, 200)
         self.project.reload()
         # page was updated with new content
-        new_wiki = self.project.get_wiki_page('home')
+        new_wiki = self.project.get_wiki_version('home')
         assert_equal(new_wiki.content, 'new content')
 
     def test_project_wiki_edit_post_with_new_wname_and_no_content(self):
         # note: forward slashes not allowed in page_name
         page_name = fake.catch_phrase().replace('/', ' ')
 
-        old_wiki_page_count = NodeWikiPage.objects.all().count()
+        old_wiki_page_count = WikiVersion.objects.all().count()
         url = self.project.web_url_for('project_wiki_edit_post', wname=page_name)
         # User submits to edit form with no content
         res = self.app.post(url, {'content': ''}, auth=self.user.auth).follow()
         assert_equal(res.status_code, 200)
 
-        new_wiki_page_count = NodeWikiPage.objects.all().count()
+        new_wiki_page_count = WikiVersion.objects.all().count()
         # A new wiki page was created in the db
         assert_equal(new_wiki_page_count, old_wiki_page_count + 1)
 
         # Node now has the new wiki page associated with it
         self.project.reload()
-        new_page = self.project.get_wiki_page(page_name)
+        new_page = self.project.get_wiki_version(page_name)
         assert_is_not_none(new_page)
 
     def test_project_wiki_edit_post_with_new_wname_and_content(self):
@@ -190,19 +190,19 @@ class TestWikiViews(OsfTestCase):
         page_name = fake.catch_phrase().replace('/', ' ')
         page_content = fake.bs()
 
-        old_wiki_page_count = NodeWikiPage.objects.all().count()
+        old_wiki_page_count = WikiVersion.objects.all().count()
         url = self.project.web_url_for('project_wiki_edit_post', wname=page_name)
         # User submits to edit form with no content
         res = self.app.post(url, {'content': page_content}, auth=self.user.auth).follow()
         assert_equal(res.status_code, 200)
 
-        new_wiki_page_count = NodeWikiPage.objects.all().count()
+        new_wiki_page_count = WikiVersion.objects.all().count()
         # A new wiki page was created in the db
         assert_equal(new_wiki_page_count, old_wiki_page_count + 1)
 
         # Node now has the new wiki page associated with it
         self.project.reload()
-        new_page = self.project.get_wiki_page(page_name)
+        new_page = self.project.get_wiki_version(page_name)
         assert_is_not_none(new_page)
         # content was set
         assert_equal(new_page.content, page_content)
@@ -215,7 +215,7 @@ class TestWikiViews(OsfTestCase):
         res = self.app.post(url, {'content': 'new content'}, auth=self.user.auth).follow()
         assert_equal(res.status_code, 200)
         self.project.reload()
-        wiki = self.project.get_wiki_page(new_wname)
+        wiki = self.project.get_wiki_version(new_wname)
         assert_equal(wiki.page_name, new_wname)
 
         # updating content should return correct url as well.
@@ -229,7 +229,7 @@ class TestWikiViews(OsfTestCase):
         res = self.app.post(url, {'content': new_wiki_content}, auth=self.user.auth).follow()
         assert_equal(res.status_code, 200)
         self.project.reload()
-        wiki = self.project.get_wiki_page(new_wname)
+        wiki = self.project.get_wiki_version(new_wname)
         assert_equal(wiki.page_name, new_wname)
         assert_equal(wiki.content, new_wiki_content)
         assert_equal(res.status_code, 200)
@@ -295,7 +295,7 @@ class TestWikiViews(OsfTestCase):
         url = self.project.api_url_for('project_wiki_validate_name', wname='newpage', auth=self.consolidate_auth)
         self.app.get(url, auth=self.user.auth)
         self.project.reload()
-        assert_in('newpage', self.project.wiki_pages_current)
+        assert_in('newpage', [wiki.page_name for wiki in self.project.wikis.all()])
 
     def test_wiki_validate_name_collision_doesnt_clear(self):
         self.project.update_node_wiki('oldpage', 'some text', self.consolidate_auth)
@@ -317,9 +317,9 @@ class TestWikiViews(OsfTestCase):
         assert_equal(res.status_code, 200)
         assert_not_in('capslock', self.project.wiki_pages_current)
         self.project.update_node_wiki('CaPsLoCk', 'hello', self.consolidate_auth)
-        assert_in('capslock', self.project.wiki_pages_current)
+        assert_equal('capslock', self.project.wikis.all()[0].wiki_key)
 
-    def test_project_wiki_validate_name_diplay_correct_capitalization(self):
+    def test_project_wiki_validate_name_display_correct_capitalization(self):
         url = self.project.api_url_for('project_wiki_validate_name', wname='CaPsLoCk')
         res = self.app.get(url, auth=self.user.auth)
         assert_equal(res.status_code, 200)
@@ -330,7 +330,6 @@ class TestWikiViews(OsfTestCase):
         res = self.app.get(url, auth=self.user.auth)
         assert_equal(res.status_code, 200)
         self.project.update_node_wiki('CaPsLoCk', 'hello', self.consolidate_auth)
-        assert_in('capslock', self.project.wiki_pages_current)
         url = self.project.api_url_for('project_wiki_validate_name', wname='capslock')
         res = self.app.get(url, auth=self.user.auth, expect_errors=True)
         assert_equal(res.status_code, 409)
@@ -372,7 +371,7 @@ class TestWikiViews(OsfTestCase):
     def test_wiki_id_url_get_returns_302_and_resolves(self):
         name = 'page by id'
         self.project.update_node_wiki(name, 'some content', Auth(self.project.creator))
-        page = self.project.get_wiki_page(name)
+        page = self.project.get_wiki_version(name)
         page_url = self.project.web_url_for('project_wiki_view', wname=page.page_name, _guid=True)
         url = self.project.web_url_for('project_wiki_id_page', wid=page._primary_key, _guid=True)
         res = self.app.get(url)
@@ -421,7 +420,7 @@ class TestWikiViews(OsfTestCase):
         res = serialize_wiki_widget(project)
         assert_true(res['more'])
 
-    @mock.patch('addons.wiki.models.NodeWikiPage.rendered_before_update', new_callable=mock.PropertyMock)
+    @mock.patch('addons.wiki.models.WikiVersion.rendered_before_update', new_callable=mock.PropertyMock)
     def test_wiki_widget_rendered_before_update(self, mock_rendered_before_update):
         # New pages use js renderer
         mock_rendered_before_update.return_value = False
