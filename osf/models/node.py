@@ -2672,7 +2672,9 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
     def get_wiki_page(self, name):
         WikiPage = apps.get_model('addons_wiki.WikiPage')
         try:
-            return self.wikis.get(page_name=name)
+            name = (name or '').strip()
+            key = to_mongo_key(name)
+            return self.wikis.get(wiki_key=key)
         except WikiPage.DoesNotExist:
             return None
 
@@ -2779,12 +2781,13 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         new_name = (new_name or '').strip()
         new_key = to_mongo_key(new_name)
         page = self.get_wiki_page(name)
+        exisiting_wiki_page = self.get_wiki_page(new_name)
 
         if key == 'home':
             raise PageCannotRenameError('Cannot rename wiki home page')
         if not page:
             raise PageNotFoundError('Wiki page not found')
-        if self.get_wiki_page(new_name) or new_key == 'home':
+        if (exisiting_wiki_page and not exisiting_wiki_page.is_deleted and key != new_key) or new_key == 'home':
             raise PageConflictError(
                 'Page already exists with name {0}'.format(
                     new_name,

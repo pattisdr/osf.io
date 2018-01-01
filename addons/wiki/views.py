@@ -472,7 +472,7 @@ def project_wiki_grid_data(auth, node, **kwargs):
 
 
 def format_home_wiki_page(node):
-    home_wiki = node.get_wiki_page('home')
+    home_wiki = node.get_wiki_version('home')
     home_wiki_page = {
         'page': {
             'url': node.web_url_for('project_wiki_home'),

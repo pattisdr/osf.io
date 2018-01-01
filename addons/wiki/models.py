@@ -171,10 +171,11 @@ class WikiPage(GuidMixin, BaseModel):
     user = models.ForeignKey('osf.OSFUser', null=True, blank=True, on_delete=models.CASCADE)
     node = models.ForeignKey('osf.AbstractNode', null=True, blank=True, on_delete=models.CASCADE, related_name='wikis')
     is_deleted = models.BooleanField(default=False, db_index=True)
+    wiki_key = models.CharField(max_length=200, null=True)
 
-    @property
-    def wiki_key(self):
-        return wiki_utils.to_mongo_key(self.page_name)
+    def save(self, *args, **kwargs):
+        self.wiki_key = wiki_utils.to_mongo_key(self.page_name)
+        return super(WikiPage, self).save(*args, **kwargs)
 
     @property
     def current_version_number(self):

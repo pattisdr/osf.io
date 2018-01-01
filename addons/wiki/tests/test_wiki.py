@@ -283,7 +283,7 @@ class TestWikiViews(OsfTestCase):
         assert_equal(res.status_code, 200)
 
         self.project.reload()
-        wiki = self.project.get_wiki_page('cupcake')
+        wiki = self.project.get_wiki_version('cupcake')
         assert_is_not_none(wiki)
 
     def test_wiki_validate_name(self):
@@ -579,7 +579,7 @@ class TestWikiRename(OsfTestCase):
         self.page_name = 'page2'
         self.project.update_node_wiki(self.page_name, 'content', self.consolidate_auth)
         self.project.save()
-        self.page = self.project.get_wiki_page(self.page_name)
+        self.page = self.project.get_wiki_version(self.page_name)
 
         self.wiki = self.project.get_wiki_page('home')
         self.url = self.project.api_url_for(
@@ -596,14 +596,14 @@ class TestWikiRename(OsfTestCase):
         )
         self.project.reload()
 
-        old_wiki = self.project.get_wiki_page(self.page_name)
+        old_wiki = self.project.get_wiki_version(self.page_name)
         assert_false(old_wiki)
 
-        new_wiki = self.project.get_wiki_page(new_name)
+        new_wiki = self.project.get_wiki_version(new_name)
         assert_true(new_wiki)
         assert_equal(new_wiki._primary_key, self.page._primary_key)
         assert_equal(new_wiki.content, self.page.content)
-        assert_equal(new_wiki.version, self.page.version)
+        assert_equal(new_wiki.identifier, self.page.identifier)
 
     def test_rename_wiki_page_invalid(self, new_name=u'invalid/name'):
         res = self.app.put_json(
@@ -641,7 +641,7 @@ class TestWikiRename(OsfTestCase):
         # A fresh project where the 'home' wiki page has no content
         project = ProjectFactory(creator=user)
         project.update_node_wiki('Hello', 'hello world', Auth(user=user))
-        url = project.api_url_for('project_wiki_rename', wname=to_mongo_key('Hello'))
+        url = project.api_url_for('project_wiki_rename', wname='Hello')
         res = self.app.put_json(url, {'value': 'home'}, auth=user.auth, expect_errors=True)
         assert_equal(res.status_code, 409)
 
@@ -1307,8 +1307,8 @@ class TestWikiMenu(OsfTestCase):
     def test_format_project_wiki_pages_contributor(self):
         self.project.update_node_wiki('home', 'content here', self.consolidate_auth)
         self.project.update_node_wiki('zoo', 'koala', self.consolidate_auth)
-        home_page = self.project.get_wiki_page(name='home')
-        zoo_page = self.project.get_wiki_page(name='zoo')
+        home_page = self.project.get_wiki_version(name='home')
+        zoo_page = self.project.get_wiki_version(name='zoo')
         data = views.format_project_wiki_pages(self.project, self.consolidate_auth)
         expected = [
             {
@@ -1331,7 +1331,7 @@ class TestWikiMenu(OsfTestCase):
     def test_format_project_wiki_pages_no_content_non_contributor(self):
         self.project.update_node_wiki('home', 'content here', self.consolidate_auth)
         self.project.update_node_wiki('zoo', '', self.consolidate_auth)
-        home_page = self.project.get_wiki_page(name='home')
+        home_page = self.project.get_wiki_version(name='home')
         data = views.format_project_wiki_pages(self.project, auth=Auth(self.non_contributor))
         expected = [
             {
@@ -1347,7 +1347,7 @@ class TestWikiMenu(OsfTestCase):
     def test_format_component_wiki_pages_contributor(self):
         self.component.update_node_wiki('home', 'home content', self.consolidate_auth)
         self.component.update_node_wiki('zoo', 'koala', self.consolidate_auth)
-        zoo_page = self.component.get_wiki_page(name='zoo')
+        zoo_page = self.component.get_wiki_version(name='zoo')
         expected = [
             {
                 'page': {
