@@ -2781,13 +2781,13 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         new_name = (new_name or '').strip()
         new_key = to_mongo_key(new_name)
         page = self.get_wiki_page(name)
-        exisiting_wiki_page = self.get_wiki_page(new_name)
+        existing_wiki_page = self.get_wiki_page(new_name)
 
         if key == 'home':
             raise PageCannotRenameError('Cannot rename wiki home page')
         if not page:
             raise PageNotFoundError('Wiki page not found')
-        if (exisiting_wiki_page and not exisiting_wiki_page.is_deleted and key != new_key) or new_key == 'home':
+        if (existing_wiki_page and not existing_wiki_page.is_deleted and key != new_key) or new_key == 'home':
             raise PageConflictError(
                 'Page already exists with name {0}'.format(
                     new_name,
@@ -2796,6 +2796,10 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
 
         # rename the page first in case we hit a validation exception.
         old_name = page.page_name
+        # If renaming a wiki to same name as deleted wiki, modify page_name of deleted wiki
+        if existing_wiki_page and existing_wiki_page.is_deleted:
+            existing_wiki_page.page_name = existing_wiki_page.page_name + '_deleted'
+            existing_wiki_page.save()
         page.rename(new_name)
 
         # TODO: merge historical records like update (prevents log breaks)
