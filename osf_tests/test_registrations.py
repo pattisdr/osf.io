@@ -13,7 +13,7 @@ from website.util.permissions import READ, WRITE, ADMIN
 from . import factories
 from .utils import assert_datetime_equal, mock_archive
 from .factories import get_default_metaschema
-from addons.wiki.tests.factories import NodeWikiFactory
+from addons.wiki.tests.factories import WikiFactory, WikiPage
 
 pytestmark = pytest.mark.django_db
 
@@ -280,8 +280,17 @@ class TestRegisterNode:
     @mock.patch('website.project.signals.after_create_registration')
     def test_registration_clones_project_wiki_pages(self, mock_signal, project, user):
         project = factories.ProjectFactory(creator=user, is_public=True)
-        wiki = NodeWikiFactory(node=project)
-        current_wiki = NodeWikiFactory(node=project, version=2)
+        wiki_page = WikiFactory(
+            user=user,
+            node=project,
+        )
+        wiki = WikiVersionFactory(
+            wiki_page=wiki_page,
+        )
+        current_wiki = WikiVersionFactory(
+            wiki_page=wiki_page,
+            version = 2
+        )
         registration = project.register_node(get_default_metaschema(), Auth(user), '', None)
         assert registration.wiki_private_uuids == {}
 
@@ -304,7 +313,7 @@ class TestRegisterNodeContributors:
     @pytest.fixture()
     def project_two(self, user, auth):
         return factories.ProjectFactory(creator=user)
-    
+
     @pytest.fixture()
     def component(self, user, auth, project_two):
         return factories.NodeFactory(

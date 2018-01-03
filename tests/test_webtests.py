@@ -31,7 +31,7 @@ from osf_tests.factories import (
     UnconfirmedUserFactory,
     UnregUserFactory,
 )
-from addons.wiki.tests.factories import NodeWikiFactory
+from addons.wiki.tests.factories import WikiFactory, WikiVersionFactory
 from website import settings, language
 from addons.osfstorage.models import OsfStorageFile
 from website.util import web_url_for, api_url_for, permissions
@@ -224,7 +224,14 @@ class TestAUser(OsfTestCase):
         project = ProjectFactory(creator=self.user)
         wiki_page = 'home'
         wiki_content = 'Kittens'
-        NodeWikiFactory(user=self.user, node=project, content=wiki_content, page_name=wiki_page)
+        wiki_page = WikiFactory(
+            user=user,
+            node=project,
+        )
+        wiki = WikiVersionFactory(
+            wiki_page=wiki_page,
+            content=wiki_content
+        )
         res = self.app.get('/{0}/wiki/{1}/'.format(
             project._primary_key,
             wiki_page,
@@ -514,7 +521,13 @@ class TestShortUrls(OsfTestCase):
         # improvements to factories from @rliebz
         self.component.set_privacy('public', auth=self.consolidate_auth)
         self.component.set_privacy('private', auth=self.consolidate_auth)
-        self.wiki = NodeWikiFactory(user=self.user, node=self.component)
+        wiki_page = WikiFactory(
+            user=self.user,
+            node=self.component,
+        )
+        self.wiki = WikiVersionFactory(
+            wiki_page=wiki_page,
+        )
 
     def _url_to_body(self, url):
         return self.app.get(

@@ -56,7 +56,7 @@ from osf_tests.factories import (
     TagFactory,
 )
 from .factories import get_default_metaschema
-from addons.wiki.tests.factories import NodeWikiFactory
+from addons.wiki.tests.factories import WikiVersionFactory, WikiFactory
 from .utils import capture_signals, assert_datetime_equal, mock_archive, MockShareResponse
 
 pytestmark = pytest.mark.django_db
@@ -2844,9 +2844,15 @@ class TestForkNode:
     def test_forking_clones_project_wiki_pages(self, user, auth):
         project = ProjectFactory(creator=user, is_public=True)
         # TODO: Unmock when StoredFileNode is implemented
-        with mock.patch('osf.models.AbstractNode.update_search'):
-            wiki = NodeWikiFactory(node=project)
-            current_wiki = NodeWikiFactory(node=project, version=2)
+        with mock.patch('osf.models.AbstractNode.update_search')
+            wiki_page = WikiFactory(
+                user=user,
+                node=project,
+            )
+            wiki = WikiVersionFactory(
+                wiki_page=wiki_page,
+            )
+            current_wiki = WikiVersionFactory(wiki_page=wiki_page, version=2)
         fork = project.fork_node(auth)
         assert fork.wiki_private_uuids == {}
 
@@ -3683,7 +3689,7 @@ class TestTemplateNode:
         registration = RegistrationFactory(project=project, is_deleted=True)
         new = registration.use_as_template(auth=auth)
         assert not new.nodes
-        
+
     @pytest.fixture()
     def pointee(self, project, user, auth):
         pointee = ProjectFactory(creator=user)

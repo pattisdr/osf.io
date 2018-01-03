@@ -3,7 +3,7 @@ import pytest
 from addons.wiki.exceptions import NameMaximumLengthError
 
 from addons.wiki.models import WikiPage, NodeWikiPage
-from addons.wiki.tests.factories import NodeWikiFactory, WikiFactory, WikiVersionFactory
+from addons.wiki.tests.factories import WikiFactory, WikiVersionFactory
 from osf_tests.factories import NodeFactory, UserFactory, ProjectFactory
 from tests.base import OsfTestCase
 

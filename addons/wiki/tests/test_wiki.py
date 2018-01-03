@@ -16,7 +16,7 @@ from osf_tests.factories import (
     UserFactory, NodeFactory, ProjectFactory,
     AuthUserFactory, RegistrationFactory
 )
-from addons.wiki.tests.factories import NodeWikiFactory
+from addons.wiki.tests.factories import WikiFactory, WikiVersionFactory
 
 from website.exceptions import NodeStateError
 from addons.wiki import settings
@@ -720,10 +720,13 @@ class TestWikiLinks(OsfTestCase):
     def test_links(self):
         user = AuthUserFactory()
         project = ProjectFactory(creator=user)
-        wiki = NodeWikiFactory(
-            content='[[wiki2]]',
+        wiki_page = WikiFactory(
             user=user,
             node=project,
+        )
+        wiki = WikiVersionFactory(
+            content='[[wiki2]]',
+            wiki_page=wiki_page,
         )
         assert_in(
             '/{}/wiki/wiki2/'.format(project._id),
@@ -734,7 +737,14 @@ class TestWikiLinks(OsfTestCase):
     def test_bad_links(self):
         content = u'<span></span><iframe src="http://httpbin.org/"></iframe>'
         node = ProjectFactory()
-        wiki = NodeWikiFactory(content=content, node=node)
+        wiki_page = WikiFactory(
+            user=user,
+            node=project,
+        )
+        wiki = WikiVersionFactory(
+            content=content,
+            wiki_page=wiki_page,
+        )
         expected = render_content(content, node)
         assert_equal(expected, wiki.html(node))
 
