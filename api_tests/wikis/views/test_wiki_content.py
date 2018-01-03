@@ -23,8 +23,7 @@ class TestWikiContentView(ApiWikiTestCase):
     def _set_up_public_registration_with_wiki_page(self):
         self._set_up_public_project_with_wiki_page()
         self.public_registration = RegistrationFactory(project=self.public_project, user=self.user, is_public=True)
-        self.public_registration_wiki_id = self.public_registration.wiki_pages_versions['home'][0]
-        self.public_registration.wiki_pages_current = {'home': self.public_registration_wiki_id}
+        self.public_registration_wiki_id = self.public_registration.get_wiki_version('home')._id
         self.public_registration.save()
         self.public_registration_url = '/{}wikis/{}/content/'.format(API_BASE, self.public_registration_wiki_id)
 

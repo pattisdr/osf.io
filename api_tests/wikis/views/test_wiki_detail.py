@@ -8,12 +8,12 @@ from api.base.settings.defaults import API_BASE
 
 from osf.models import Guid
 
-from addons.wiki.models import NodeWikiPage
+from addons.wiki.models import WikiVersion
 
 from tests.base import ApiWikiTestCase
 from osf_tests.factories import (ProjectFactory, RegistrationFactory,
                                  PrivateLinkFactory, CommentFactory)
-from addons.wiki.tests.factories import NodeWikiFactory
+from addons.wiki.tests.factories import WikiFactory, WikiVersionFactory
 
 
 class TestWikiDetailView(ApiWikiTestCase):
@@ -21,8 +21,12 @@ class TestWikiDetailView(ApiWikiTestCase):
     def _set_up_public_project_with_wiki_page(self, project_options=None):
         project_options = project_options or {}
         self.public_project = ProjectFactory(is_public=True, creator=self.user, **project_options)
-        self.public_wiki = self._add_project_wiki_page(self.public_project, self.user)
+        from addons.wiki.tests.factories import WikiFactory, WikiVersionFactory
+        with mock.patch('osf.models.AbstractNode.update_search'):
+            self.public_wiki_page = WikiFactory(node=self.public_project, user=self.user)
+            self.public_wiki= WikiVersionFactory(wiki_page=self.public_wiki_page, user=self.user)
         self.public_url = '/{}wikis/{}/'.format(API_BASE, self.public_wiki._id)
+        return self.public_wiki_page
 
     def _set_up_private_project_with_wiki_page(self):
         self.private_project = ProjectFactory(creator=self.user)
@@ -32,7 +36,7 @@ class TestWikiDetailView(ApiWikiTestCase):
     def _set_up_public_registration_with_wiki_page(self):
         self._set_up_public_project_with_wiki_page()
         self.public_registration = RegistrationFactory(project=self.public_project, user=self.user, is_public=True)
-        self.public_registration_wiki_id = self.public_registration.wiki_pages_versions['home'][0]
+        self.public_registration_wiki_id = self.public_registration.get_wiki_version('home', 1)._id
         self.public_registration.wiki_pages_current = {'home': self.public_registration_wiki_id}
         self.public_registration.save()
         self.public_registration_url = '/{}wikis/{}/'.format(API_BASE, self.public_registration_wiki_id)
@@ -40,7 +44,7 @@ class TestWikiDetailView(ApiWikiTestCase):
     def _set_up_private_registration_with_wiki_page(self):
         self._set_up_private_project_with_wiki_page()
         self.private_registration = RegistrationFactory(project=self.private_project, user=self.user)
-        self.private_registration_wiki_id = self.private_registration.wiki_pages_versions['home'][0]
+        self.private_registration_wiki_id = self.private_registration.get_wiki_version('home', 1)._id
         self.private_registration.wiki_pages_current = {'home': self.private_registration_wiki_id}
         self.private_registration.save()
         self.private_registration_url = '/{}wikis/{}/'.format(API_BASE, self.private_registration_wiki_id)
@@ -218,12 +222,15 @@ class TestWikiDetailView(ApiWikiTestCase):
         self._set_up_public_project_with_wiki_page()
         # TODO: Remove mocking when StoredFileNode is implemented
         with mock.patch('osf.models.AbstractNode.update_search'):
-            current_wiki = NodeWikiFactory(node=self.public_project, user=self.user)
-        old_version_id = self.public_project.wiki_pages_versions[current_wiki.page_name][-2]
-        old_version = NodeWikiPage.load(old_version_id)
+            current_wiki = WikiVersionFactory(wiki_page=self.public_wiki_page, identifier=2)
+        old_version = self.public_project.get_wiki_version(current_wiki.page_name, 1)
         url = '/{}wikis/{}/'.format(API_BASE, old_version._id)
         res = self.app.get(url, expect_errors=True)
         assert_equal(res.status_code, 404)
+
+        url = '/{}wikis/{}/'.format(API_BASE, current_wiki._id)
+        res = self.app.get(url)
+        assert_equal(res.status_code, 200)
 
     def test_public_node_wiki_relationship_links(self):
         self._set_up_public_project_with_wiki_page()
