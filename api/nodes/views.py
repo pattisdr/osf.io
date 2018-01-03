@@ -2,6 +2,8 @@ import re
 
 from django.apps import apps
 from django.db.models import Q, OuterRef, Exists
+from django.db.models.expressions import F
+from django.db.models.aggregates import Max
 from django.utils import timezone
 from rest_framework import generics, permissions as drf_permissions
 from rest_framework.exceptions import PermissionDenied, ValidationError, NotFound, MethodNotAllowed, NotAuthenticated
@@ -104,7 +106,7 @@ from osf.models import OSFUser
 from osf.models import NodeRelation, Guid
 from osf.models import BaseFileNode
 from osf.models.files import File, Folder
-from addons.wiki.models import NodeWikiPage
+from addons.wiki.models import WikiVersion
 from website import mails
 from website.exceptions import NodeStateError
 from website.util.permissions import ADMIN, PERMISSIONS
@@ -2881,8 +2883,8 @@ class NodeWikiList(JSONAPIBaseView, generics.ListAPIView, NodeMixin, ListFilterM
 
     def get_default_queryset(self):
         node = self.get_node()
-        node_wiki_pages = node.wiki_pages_current.values() if node.wiki_pages_current else []
-        return NodeWikiPage.objects.filter(guids___id__in=node_wiki_pages)
+        wiki_page_ids = node.wikis.filter(is_deleted=False)
+        return WikiVersion.objects.annotate(newest_version=Max('wiki_page__versions__identifier')).filter(identifier=F('newest_version'), wiki_page__id__in=wiki_page_ids, is_deleted=False)
 
     def get_queryset(self):
         return self.get_queryset_from_request()

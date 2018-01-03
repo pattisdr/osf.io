@@ -64,14 +64,14 @@ class WikiSerializer(JSONAPISerializer):
     def get_current_user_can_comment(self, obj):
         user = self.context['request'].user
         auth = Auth(user if not user.is_anonymous else None)
-        return obj.node.can_comment(auth)
+        return obj.wiki_page.node.can_comment(auth)
 
     def get_content_type(self, obj):
         return 'text/markdown'
 
     def get_extra(self, obj):
         return {
-            'version': obj.version
+            'version': obj.identifier
         }
 
     def get_wiki_content(self, obj):
@@ -82,15 +82,14 @@ class WikiSerializer(JSONAPISerializer):
 
 
 class NodeWikiSerializer(WikiSerializer):
-
     node = RelationshipField(
         related_view='nodes:node-detail',
-        related_view_kwargs={'node_id': '<node._id>'}
+        related_view_kwargs={'node_id': '<wiki_page.node._id>'}
     )
 
     comments = RelationshipField(
         related_view='nodes:node-comments',
-        related_view_kwargs={'node_id': '<node._id>'},
+        related_view_kwargs={'node_id': '<wiki_page.node._id>'},
         related_meta={'unread': 'get_unread_comments_count'},
         filter={'target': '<_id>'}
     )
