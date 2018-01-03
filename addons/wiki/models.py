@@ -92,7 +92,7 @@ class WikiVersion(GuidMixin, BaseModel):
 
     @property
     def is_current(self):
-        return not self.wiki_page.is_deleted and int(self.identifier) == self.wiki_page.current_version_number
+        return not self.wiki_page.is_deleted and not self.is_deleted and int(self.identifier) == self.wiki_page.current_version_number
 
     def html(self, node):
         """The cleaned HTML of the page"""
