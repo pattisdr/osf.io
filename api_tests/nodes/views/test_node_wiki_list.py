@@ -1,11 +1,11 @@
 import mock
 import pytest
 
-from addons.wiki.tests.factories import NodeWikiFactory
+from addons.wiki.tests.factories import WikiFactory, WikiVersionFactory
 from api.base.settings.defaults import API_BASE
 from osf_tests.factories import (
-    AuthUserFactory, 
-    ProjectFactory, 
+    AuthUserFactory,
+    ProjectFactory,
     RegistrationFactory,
 )
 from rest_framework import exceptions
@@ -22,7 +22,8 @@ class TestNodeWikiList:
     def add_project_wiki_page(self):
         def add_page(node, user):
             with mock.patch('osf.models.AbstractNode.update_search'):
-                return NodeWikiFactory(node=node, user=user)
+                wiki_page = WikiFactory(node=node, user=user)
+                return WikiVersionFactory(wiki_page=wiki_page)
         return add_page
 
     @pytest.fixture()
@@ -56,9 +57,6 @@ class TestNodeWikiList:
     @pytest.fixture()
     def public_registration(self, user, public_project, public_wiki):
         public_registration = RegistrationFactory(project=public_project, user=user, is_public=True)
-        wiki_id = public_registration.wiki_pages_versions['home'][0]
-        public_registration.wiki_pages_current = {'home': wiki_id}
-        public_registration.save()
         return public_registration
 
     @pytest.fixture()
@@ -68,9 +66,6 @@ class TestNodeWikiList:
     @pytest.fixture()
     def private_registration(self, user, private_project, private_wiki):
         private_registration = RegistrationFactory(project=private_project, user=user)
-        wiki_id = private_registration.wiki_pages_versions['home'][0]
-        private_registration.wiki_pages_current = {'home': wiki_id}
-        private_registration.save()
         return private_registration
 
     @pytest.fixture()
@@ -127,7 +122,7 @@ class TestNodeWikiList:
         res = app.get(private_registration_url, auth=user.auth)
         assert res.status_code == 200
         wiki_ids = [wiki['id'] for wiki in res.json['data']]
-        assert private_registration.wiki_pages_versions['home'][0] in wiki_ids
+        assert private_registration.get_wiki_version('home')._id in wiki_ids
 
     def test_wikis_not_returned_for_withdrawn_registration(self, app, user, private_registration, private_registration_url):
         private_registration.is_public = True
@@ -207,9 +202,9 @@ class TestFilterNodeWikiList:
 
     @pytest.fixture()
     def wiki(self, user, private_project):
-        # TODO: Remove mocking when StoredFileNode is implemented
         with mock.patch('osf.models.AbstractNode.update_search'):
-            return NodeWikiFactory(node=private_project, user=user)
+            wiki_page = WikiFactory(node=private_project, user=user)
+            return WikiVersionFactory(wiki_page=wiki_page)
 
     @pytest.fixture()
     def date(self, wiki):
