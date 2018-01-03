@@ -141,7 +141,7 @@ class WikiVersion(GuidMixin, BaseModel):
 
     @property
     def root_target_page(self):
-        """The comment page type associated with NodeWikiPages."""
+        """The comment page type associated with WikiPages."""
         return 'wiki'
 
     @property
@@ -163,6 +163,17 @@ class WikiVersion(GuidMixin, BaseModel):
 
     def get_extra_log_params(self, comment):
         return {'wiki': {'name': self.page_name, 'url': comment.get_comment_page_url()}}
+
+    def clone_version(self, wiki_page):
+        """Clone a node wiki page.
+        :param node: The Node of the cloned wiki page
+        :return: The cloned wiki page
+        """
+        clone = self.clone()
+        clone.wiki_page = wiki_page
+        clone.user = self.user
+        clone.save()
+        return clone
 
 
 class WikiPage(GuidMixin, BaseModel):
@@ -212,6 +223,40 @@ class WikiPage(GuidMixin, BaseModel):
         self.page_name = new_name
         if save:
             self.save()
+
+    def clone_wiki(self, node_id):
+        """Clone a node wiki page.
+        :param node: The Node of the cloned wiki page
+        :return: The cloned wiki page
+        """
+        node = AbstractNode.load(node_id)
+        if not node:
+            raise ValueError('Invalid node')
+        clone = self.clone()
+        clone.node = node
+        clone.user = self.user
+        clone.save()
+        return clone
+
+    @classmethod
+    def clone_wiki_versions(cls, node, copy, user, save=True):
+        """Clone wiki pages for a forked or registered project.
+        First clones the WikiPage, then clones all WikiPage versions.
+        :param node: The Node that was forked/registered
+        :param copy: The fork/registration
+        :param user: The user who forked or registered the node
+        :param save: Whether to save the fork/registration
+        :return: copy
+        """
+        for wiki_page in node.wikis.all():
+            new_wiki_page = wiki_page.clone_wiki(copy._id)
+            if save:
+                new_wiki_page.save()
+            for version in wiki_page.get_versions():
+                new_version = version.clone_version(new_wiki_page)
+                if save:
+                    version.save()
+        return copy
 
 
 class NodeWikiPage(GuidMixin, BaseModel):
@@ -419,12 +464,12 @@ class NodeSettings(BaseNodeSettings):
 
     def after_fork(self, node, fork, user, save=True):
         """Copy wiki settings and wiki pages to forks."""
-        NodeWikiPage.clone_wiki_versions(node, fork, user, save)
+        WikiPage.clone_wiki_versions(node, fork, user, save)
         return super(NodeSettings, self).after_fork(node, fork, user, save)
 
     def after_register(self, node, registration, user, save=True):
         """Copy wiki settings and wiki pages to registrations."""
-        NodeWikiPage.clone_wiki_versions(node, registration, user, save)
+        WikiPage.clone_wiki_versions(node, registration, user, save)
         clone = self.clone()
         clone.owner = registration
         if save:
