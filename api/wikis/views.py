@@ -14,7 +14,7 @@ from api.wikis.serializers import (
 )
 
 from framework.auth.oauth_scopes import CoreScopes
-from addons.wiki.models import NodeWikiPage
+from addons.wiki.models import NodeWikiPage, WikiPage, WikiVersion
 
 
 class WikiMixin(object):
@@ -27,11 +27,11 @@ class WikiMixin(object):
 
     def get_wiki(self, check_permissions=True):
         pk = self.kwargs[self.wiki_lookup_url_kwarg]
-        wiki = NodeWikiPage.load(pk)
+        wiki = WikiVersion.load(pk)
         if not wiki:
             raise NotFound
 
-        if wiki.is_deleted:
+        if wiki.wiki_page.is_deleted:
             raise Gone
 
         # only show current wiki versions
@@ -112,7 +112,7 @@ class WikiDetail(JSONAPIBaseView, generics.RetrieveAPIView, WikiMixin):
     view_name = 'wiki-detail'
 
     def get_serializer_class(self):
-        if self.get_wiki().node.is_registration:
+        if self.get_wiki().wiki_page.node.is_registration:
             return RegistrationWikiDetailSerializer
         return NodeWikiDetailSerializer
 

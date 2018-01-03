@@ -99,12 +99,12 @@ class RegistrationWikiSerializer(WikiSerializer):
 
     node = RelationshipField(
         related_view='registrations:registration-detail',
-        related_view_kwargs={'node_id': '<node._id>'}
+        related_view_kwargs={'node_id': '<wiki_page.node._id>'}
     )
 
     comments = RelationshipField(
         related_view='registrations:registration-comments',
-        related_view_kwargs={'node_id': '<node._id>'},
+        related_view_kwargs={'node_id': '<wiki_page.node._id>'},
         related_meta={'unread': 'get_unread_comments_count'},
         filter={'target': '<_id>'}
     )
