@@ -2755,7 +2755,7 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
                 'version': new_version.identifier,
             },
             auth=auth,
-            log_date=wiki_page.date,
+            log_date=new_version.date,
             save=False,
         )
         self.save()

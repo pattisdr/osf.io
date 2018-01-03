@@ -175,6 +175,10 @@ class WikiVersion(GuidMixin, BaseModel):
         clone.save()
         return clone
 
+    @property
+    def deep_url(self):
+        return u'{}wiki/{}/'.format(self.wiki_page.node.deep_url, self.page_name)
+
 
 class WikiPage(GuidMixin, BaseModel):
     page_name = models.CharField(max_length=200, validators=[validate_page_name, ])
@@ -223,6 +227,10 @@ class WikiPage(GuidMixin, BaseModel):
         self.page_name = new_name
         if save:
             self.save()
+
+    @property
+    def deep_url(self):
+        return u'{}wiki/{}/'.format(self.node.deep_url, self.page_name)
 
     def clone_wiki(self, node_id):
         """Clone a node wiki page.
