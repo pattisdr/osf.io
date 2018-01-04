@@ -12,7 +12,6 @@ import tempfile
 from django.core import serializers
 from django.core.management.base import BaseCommand
 
-from addons.wiki.models import WikiPage, WikiVersion
 from addons.osfstorage.models import OsfStorageFileNode, OsfStorageFile
 from framework.auth.core import Auth
 from osf.models import (
