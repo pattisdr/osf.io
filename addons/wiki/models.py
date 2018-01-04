@@ -11,7 +11,7 @@ from django.db import models
 from framework.forms.utils import sanitize
 from markdown.extensions import codehilite, fenced_code, wikilinks
 from osf.models import AbstractNode, NodeLog
-from osf.models.base import BaseModel, GuidMixin, ObjectIDMixin, OptionalGuidMixin
+from osf.models.base import BaseModel, GuidMixin
 from osf.utils.fields import NonNaiveDateTimeField
 from website import settings
 from addons.wiki import utils as wiki_utils
@@ -263,7 +263,7 @@ class WikiPage(GuidMixin, BaseModel):
             for version in wiki_page.get_versions():
                 new_version = version.clone_version(new_wiki_page)
                 if save:
-                    version.save()
+                    new_version.save()
         return copy
 
 

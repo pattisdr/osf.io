@@ -2349,7 +2349,7 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
             if field == 'wiki_pages_current':
                 newest_wiki_page = None
                 for wiki_page in self.wikis().all():
-                    wiki_page = NodeWikiPage.load(wiki_page_id)
+                    wiki_page = NodeWikiPage.load(wiki_page._id)
                     wiki_version = wiki_page.versions.last()
                     if not newest_wiki_page:
                         newest_wiki_page = wiki_version

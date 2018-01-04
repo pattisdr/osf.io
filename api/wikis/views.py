@@ -14,7 +14,7 @@ from api.wikis.serializers import (
 )
 
 from framework.auth.oauth_scopes import CoreScopes
-from addons.wiki.models import NodeWikiPage, WikiPage, WikiVersion
+from addons.wiki.models import WikiVersion
 
 
 class WikiMixin(object):

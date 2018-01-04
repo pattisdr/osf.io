@@ -94,7 +94,7 @@ def _get_wiki_pages_current(node):
             'wiki_content': _wiki_page_content(page.page_name, node=node)
         }
         # TODO: remove after forward slash migration
-         for page in node.wikis.all() if not page.is_deleted
+        for page in node.wikis.all() if not page.is_deleted
     ]
 
 
