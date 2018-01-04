@@ -32,7 +32,7 @@ from osf.models import (
 )
 from osf.models.node import AbstractNodeQuerySet
 from osf.models.spam import SpamStatus
-from addons.wiki.models import NodeWikiPage
+from addons.wiki.models import WikiPage, WikiVersion
 from osf.exceptions import ValidationError, ValidationValueError
 from framework.auth.core import Auth
 
@@ -2844,7 +2844,7 @@ class TestForkNode:
     def test_forking_clones_project_wiki_pages(self, user, auth):
         project = ProjectFactory(creator=user, is_public=True)
         # TODO: Unmock when StoredFileNode is implemented
-        with mock.patch('osf.models.AbstractNode.update_search')
+        with mock.patch('osf.models.AbstractNode.update_search'):
             wiki_page = WikiFactory(
                 user=user,
                 node=project,
@@ -2852,17 +2852,19 @@ class TestForkNode:
             wiki = WikiVersionFactory(
                 wiki_page=wiki_page,
             )
-            current_wiki = WikiVersionFactory(wiki_page=wiki_page, version=2)
+            current_wiki = WikiVersionFactory(wiki_page=wiki_page, identifier=2)
         fork = project.fork_node(auth)
         assert fork.wiki_private_uuids == {}
 
-        registration_wiki_current = NodeWikiPage.load(fork.wiki_pages_current[current_wiki.page_name])
-        assert registration_wiki_current.node == fork
-        assert registration_wiki_current._id != current_wiki._id
+        fork_wiki_current = fork.get_wiki_version(current_wiki.page_name)
+        assert fork_wiki_current.wiki_page.node == fork
+        assert fork_wiki_current._id != current_wiki._id
+        assert fork_wiki_current.identifier == 2
 
-        registration_wiki_version = NodeWikiPage.load(fork.wiki_pages_versions[wiki.page_name][0])
-        assert registration_wiki_version.node == fork
-        assert registration_wiki_version._id != wiki._id
+        fork_wiki_version = fork.get_wiki_version(wiki.page_name, version=1)
+        assert fork_wiki_version.wiki_page.node == fork
+        assert fork_wiki_version._id != wiki._id
+        assert fork_wiki_version.identifier == 1
 
 class TestContributorOrdering:
 

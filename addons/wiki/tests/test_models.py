@@ -2,7 +2,7 @@ import pytest
 
 from addons.wiki.exceptions import NameMaximumLengthError
 
-from addons.wiki.models import WikiPage, NodeWikiPage
+from addons.wiki.models import WikiPage
 from addons.wiki.tests.factories import WikiFactory, WikiVersionFactory
 from osf_tests.factories import NodeFactory, UserFactory, ProjectFactory
 from tests.base import OsfTestCase
@@ -47,10 +47,10 @@ class TestWikiPageModel:
         assert ver1.is_current is False
 
 
-class TestNodeWikiPage(OsfTestCase):
+class TestWikiPage(OsfTestCase):
 
     def setUp(self):
-        super(TestNodeWikiPage, self).setUp()
+        super(TestWikiPage, self).setUp()
         self.user = UserFactory()
         self.project = ProjectFactory(creator=self.user)
         self.wiki = WikiFactory(user=self.user, node=self.project)

@@ -178,8 +178,8 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
     anonymous = has_anonymous_link(node, auth)
     wiki_name = (wname or '').strip()
     wiki_key = to_mongo_key(wiki_name)
-    wiki_page = node.get_wiki_page(wiki_name)
     wiki_version = node.get_wiki_version(wiki_name)
+    wiki_page = wiki_version.wiki_page
     wiki_settings = node.get_addon('wiki')
     can_edit = (
         auth.logged_in and not

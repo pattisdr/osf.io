@@ -334,8 +334,6 @@ def update_user_async(self, user_id, index=None):
         self.retry(exc)
 
 def serialize_node(node, category):
-    NodeWikiPage = apps.get_model('addons_wiki.NodeWikiPage')
-
     elastic_document = {}
     parent_id = node.parent_id
 
@@ -378,7 +376,7 @@ def serialize_node(node, category):
         'preprint_url': node.preprint_url,
     }
     if not node.is_retracted:
-        for wiki in NodeWikiPage.objects.filter(guids___id__in=node.wiki_pages_current.values()):
+        for wiki in node.get_wiki_pages_current():
             # '.' is not allowed in field names in ES2
             elastic_document['wikis'][wiki.page_name.replace('.', ' ')] = wiki.raw_text(node)
 

@@ -315,9 +315,9 @@ class TestWikiViews(OsfTestCase):
         url = self.project.api_url_for('project_wiki_validate_name', wname='CaPsLoCk')
         res = self.app.get(url, auth=self.user.auth)
         assert_equal(res.status_code, 200)
-        assert_not_in('capslock', self.project.wiki_pages_current)
         self.project.update_node_wiki('CaPsLoCk', 'hello', self.consolidate_auth)
         assert_equal('capslock', self.project.wikis.all()[0].wiki_key)
+        assert_equal('CaPsLoCk', self.project.wikis.all()[0].page_name)
 
     def test_project_wiki_validate_name_display_correct_capitalization(self):
         url = self.project.api_url_for('project_wiki_validate_name', wname='CaPsLoCk')
