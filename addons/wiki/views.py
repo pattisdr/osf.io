@@ -4,6 +4,7 @@ import httplib as http
 import logging
 
 from flask import request
+from django.db.models.expressions import F
 
 from framework.exceptions import HTTPError
 from framework.auth.utils import privacy_info_handle
@@ -82,7 +83,7 @@ def _get_wiki_versions(node, name, anonymous=False):
             'user_fullname': privacy_info_handle(version.user.fullname, anonymous, name=True),
             'date': '{} UTC'.format(version.date.replace(microsecond=0).isoformat().replace('T', ' ')),
         }
-        for version in versions if not version.is_deleted
+        for version in versions
     ]
 
 def _get_wiki_pages_current(node):
@@ -90,11 +91,10 @@ def _get_wiki_pages_current(node):
         {
             'name': page.page_name,
             'url': node.web_url_for('project_wiki_view', wname=page.page_name, _guid=True),
-            'wiki_id': page.get_version()._primary_key,
+            'wiki_id': page._primary_key,
             'wiki_content': _wiki_page_content(page.page_name, node=node)
         }
-        # TODO: remove after forward slash migration
-        for page in node.wikis.all() if not page.is_deleted
+        for page in node.get_wiki_pages_current().order_by(F('name'))
     ]
 
 

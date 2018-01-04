@@ -15,6 +15,8 @@ from django.core.exceptions import ValidationError
 from django.core.urlresolvers import reverse
 from django.db import models, transaction, connection
 from django.db.models.signals import post_save
+from django.db.models.expressions import F
+from django.db.models.aggregates import Max
 from django.dispatch import receiver
 from django.utils import timezone
 from django.utils.functional import cached_property
@@ -1996,8 +1998,8 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         new._is_templated_clone = True  # This attribute may be read in post_save handlers
 
         # Clear quasi-foreign fields
-        new.wiki_pages_current.clear()
-        new.wiki_pages_versions.clear()
+        # new.wiki_pages_current.clear()
+        # new.wiki_pages_versions.clear()
         new.wiki_private_uuids.clear()
         new.file_guid_to_share_uuids.clear()
 
@@ -2341,20 +2343,17 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
             super(AbstractNode, self).save()
 
     def _get_spam_content(self, saved_fields):
-        NodeWikiPage = apps.get_model('addons_wiki.NodeWikiPage')
         spam_fields = self.SPAM_CHECK_FIELDS if self.is_public and 'is_public' in saved_fields else self.SPAM_CHECK_FIELDS.intersection(
             saved_fields)
         content = []
         for field in spam_fields:
             if field == 'wiki_pages_current':
                 newest_wiki_page = None
-                for wiki_page in self.wikis().all():
-                    wiki_page = NodeWikiPage.load(wiki_page._id)
-                    wiki_version = wiki_page.versions.last()
+                for wiki_page in self.get_wiki_pages_current():
                     if not newest_wiki_page:
-                        newest_wiki_page = wiki_version
-                    elif wiki_version.date > newest_wiki_page.date:
-                        newest_wiki_page = wiki_version
+                        newest_wiki_page = wiki_page
+                    elif wiki_page.date > newest_wiki_page.date:
+                        newest_wiki_page = wiki_page
                 if newest_wiki_page:
                     content.append(newest_wiki_page.raw_text(self).encode('utf-8'))
             else:
@@ -2668,6 +2667,11 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
     def include_wiki_settings(self, user):
         """Check if node meets requirements to make publicly editable."""
         return self.get_descendants_recursive()
+
+    def get_wiki_pages_current(self):
+        WikiVersion = apps.get_model('addons_wiki.WikiVersion')
+        wiki_page_ids = self.wikis.filter(is_deleted=False)
+        return WikiVersion.objects.annotate(name=F('wiki_page__page_name'), newest_version=Max('wiki_page__versions__identifier')).filter(identifier=F('newest_version'), wiki_page__id__in=wiki_page_ids, is_deleted=False)
 
     def get_wiki_page(self, name):
         WikiPage = apps.get_model('addons_wiki.WikiPage')

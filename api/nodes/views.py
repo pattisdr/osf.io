@@ -2,8 +2,6 @@ import re
 
 from django.apps import apps
 from django.db.models import Q, OuterRef, Exists
-from django.db.models.expressions import F
-from django.db.models.aggregates import Max
 from django.utils import timezone
 from rest_framework import generics, permissions as drf_permissions
 from rest_framework.exceptions import PermissionDenied, ValidationError, NotFound, MethodNotAllowed, NotAuthenticated
@@ -2882,9 +2880,7 @@ class NodeWikiList(JSONAPIBaseView, generics.ListAPIView, NodeMixin, ListFilterM
     ordering = ('-date', )  # default ordering
 
     def get_default_queryset(self):
-        node = self.get_node()
-        wiki_page_ids = node.wikis.filter(is_deleted=False)
-        return WikiVersion.objects.annotate(newest_version=Max('wiki_page__versions__identifier')).filter(identifier=F('newest_version'), wiki_page__id__in=wiki_page_ids, is_deleted=False)
+        return self.get_node().get_wiki_pages_current()
 
     def get_queryset(self):
         return self.get_queryset_from_request()
