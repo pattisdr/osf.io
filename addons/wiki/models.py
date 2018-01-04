@@ -190,6 +190,9 @@ class WikiVersion(GuidMixin, BaseModel):
     def deep_url(self):
         return u'{}wiki/{}/'.format(self.wiki_page.node.deep_url, self.page_name)
 
+    def to_json(self, user):
+        return {}
+
 
 class WikiPage(GuidMixin, BaseModel):
     page_name = models.CharField(max_length=200, validators=[validate_page_name, ])
@@ -279,6 +282,9 @@ class WikiPage(GuidMixin, BaseModel):
                 if save:
                     new_version.save()
         return copy
+
+    def to_json(self, user):
+        return {}
 
 
 class NodeWikiPage(GuidMixin, BaseModel):
