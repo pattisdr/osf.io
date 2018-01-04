@@ -83,7 +83,7 @@ def _get_wiki_versions(node, name, anonymous=False):
             'user_fullname': privacy_info_handle(version.user.fullname, anonymous, name=True),
             'date': '{} UTC'.format(version.date.replace(microsecond=0).isoformat().replace('T', ' ')),
         }
-        for version in versions
+        for version in versions.order_by('-date')
     ]
 
 def _get_wiki_pages_current(node):
@@ -178,8 +178,8 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
     anonymous = has_anonymous_link(node, auth)
     wiki_name = (wname or '').strip()
     wiki_key = to_mongo_key(wiki_name)
+    wiki_page = node.get_wiki_page(wiki_name)
     wiki_version = node.get_wiki_version(wiki_name)
-    wiki_page = wiki_version.wiki_page
     wiki_settings = node.get_addon('wiki')
     can_edit = (
         auth.logged_in and not
@@ -438,7 +438,7 @@ def project_wiki_validate_name(wname, auth, node, **kwargs):
     wiki_name = wname.strip()
     wiki_key = to_mongo_key(wiki_name)
 
-    if wiki_key in node.wikis.values_list('wiki_key', flat=true) or wiki_key == 'home':
+    if wiki_key in node.wikis.values_list('wiki_key', flat=True) or wiki_key == 'home':
         raise HTTPError(http.CONFLICT, data=dict(
             message_short='Wiki page name conflict.',
             message_long='A wiki page with that name already exists.'

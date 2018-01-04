@@ -105,7 +105,7 @@ def export_wikis(node, current_dir):
     """
     wikis_dir = os.path.join(current_dir, 'wikis')
     os.mkdir(wikis_dir)
-    for wiki in node.get_wiki_pages_current:
+    for wiki in node.get_wiki_pages_current():
         if wiki.content:
             with io.open(os.path.join(wikis_dir, '{}.md'.format(wiki.page_name)), 'w', encoding='utf-8') as f:
                 f.write(wiki.content)
@@ -121,7 +121,7 @@ def export_node(node, user, current_dir):
 
     """
     export_metadata(node, current_dir)
-    if node.wiki_pages_current:
+    if node.get_wiki_pages_current():
         export_wikis(node, current_dir)
     if OsfStorageFileNode.objects.filter(node=node):
         export_files(node, user, current_dir)

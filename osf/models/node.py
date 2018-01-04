@@ -1648,8 +1648,8 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
             raise NodeStateError('Folders may not be registered')
         original = self
 
-        # Note: Cloning a node will clone each node wiki page version and add it to
-        # `registered.wiki_pages_current` and `registered.wiki_pages_versions`.
+        # Note: Cloning a node will clone each WikiPage on the node and all the related WikiVersions
+        # and point them towards the registration
         if original.is_deleted:
             raise NodeStateError('Cannot register deleted node.')
 
@@ -1843,8 +1843,8 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         if original.is_deleted:
             raise NodeStateError('Cannot fork deleted node.')
 
-        # Note: Cloning a node will clone each node wiki page version and add it to
-        # `registered.wiki_pages_current` and `registered.wiki_pages_versions`.
+        # Note: Cloning a node will clone each WikiPage on the node and all the related WikiVersions
+        # and point them towards the fork
         forked = original.clone()
         if isinstance(forked, Registration):
             forked.recast('osf.node')
@@ -1998,8 +1998,6 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         new._is_templated_clone = True  # This attribute may be read in post_save handlers
 
         # Clear quasi-foreign fields
-        # new.wiki_pages_current.clear()
-        # new.wiki_pages_versions.clear()
         new.wiki_private_uuids.clear()
         new.file_guid_to_share_uuids.clear()
 

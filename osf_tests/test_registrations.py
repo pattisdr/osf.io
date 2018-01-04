@@ -13,7 +13,7 @@ from website.util.permissions import READ, WRITE, ADMIN
 from . import factories
 from .utils import assert_datetime_equal, mock_archive
 from .factories import get_default_metaschema
-from addons.wiki.tests.factories import WikiFactory, WikiPage
+from addons.wiki.tests.factories import WikiFactory, WikiVersionFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -273,8 +273,8 @@ class TestRegisterNode:
         )
 
     def test_registration_of_project_with_no_wiki_pages(self, registration):
-        assert registration.wiki_pages_versions == {}
-        assert registration.wiki_pages_current == {}
+        assert registration.get_wiki_pages_current().exists() is False
+        assert registration.wikis.all().exists() is False
         assert registration.wiki_private_uuids == {}
 
     @mock.patch('website.project.signals.after_create_registration')
@@ -302,7 +302,7 @@ class TestRegisterNode:
         registration_wiki_version = registration.get_wiki_version(wiki.page_name, version=1)
         assert registration_wiki_version.wiki_page.node == registration
         assert registration_wiki_version._id != wiki._id
-        assert registration_wiki_current.identifier == 1
+        assert registration_wiki_version.identifier == 1
 
     def test_legacy_private_registrations_can_be_made_public(self, registration, auth):
         registration.is_public = False
