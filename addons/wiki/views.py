@@ -256,7 +256,7 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
 
     ret = {
         'wiki_id': wiki_version._primary_key if wiki_version else None,
-        'wiki_name': wiki_page.page_name if wiki_page else wiki_name,
+        'wiki_name': wiki_version.page_name if wiki_version else wiki_name,
         'wiki_content': content,
         'rendered_before_update': rendered_before_update,
         'page': wiki_page,
@@ -438,7 +438,7 @@ def project_wiki_validate_name(wname, auth, node, **kwargs):
     wiki_name = wname.strip()
     wiki_key = to_mongo_key(wiki_name)
 
-    if wiki_key in node.wikis.values_list('wiki_key'), flat=true) or wiki_key == 'home':
+    if wiki_key in node.wikis.values_list('wiki_key', flat=true) or wiki_key == 'home':
         raise HTTPError(http.CONFLICT, data=dict(
             message_short='Wiki page name conflict.',
             message_long='A wiki page with that name already exists.'

@@ -82,7 +82,7 @@ class WikiVersion(GuidMixin, BaseModel):
     user = models.ForeignKey('osf.OSFUser', null=True, blank=True, on_delete=models.CASCADE)
     wiki_page = models.ForeignKey('WikiPage', null=True, blank=True, on_delete=models.CASCADE, related_name='versions')
     content = models.TextField(default='', blank=True)
-    identifier = models.CharField(max_length=100, blank=False, null=False)
+    identifier = models.IntegerField(default=1)
     date = NonNaiveDateTimeField(auto_now_add=True)
     is_deleted = models.BooleanField(default=False, db_index=True)
 

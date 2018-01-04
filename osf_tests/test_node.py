@@ -2837,8 +2837,8 @@ class TestForkNode:
     def test_fork_project_with_no_wiki_pages(self, user, auth):
         project = ProjectFactory(creator=user)
         fork = project.fork_node(auth)
-        assert fork.wiki_pages_versions == {}
-        assert fork.wiki_pages_current == {}
+        assert fork.get_wiki_pages_current().exists() is False
+        assert fork.wikis.all().exists() is False
         assert fork.wiki_private_uuids == {}
 
     def test_forking_clones_project_wiki_pages(self, user, auth):
@@ -3787,10 +3787,13 @@ class TestTemplateNode:
         new = project.use_as_template(
             auth=auth
         )
-        assert 'template' in project.wiki_pages_current
-        assert 'template' in project.wiki_pages_versions
-        assert new.wiki_pages_current == {}
-        assert new.wiki_pages_versions == {}
+        assert project.get_wiki_page('template').page_name == 'template'
+        latest_version = project.get_wiki_version('template')
+        assert latest_version.identifier == 1
+        assert latest_version.is_current is True
+
+        assert new.get_wiki_page('template') is None
+        assert new.get_wiki_version('template') is None
 
     def test_user_who_makes_node_from_template_has_creator_permission(self):
         project = ProjectFactory(is_public=True)
