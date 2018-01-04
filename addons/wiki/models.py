@@ -108,6 +108,11 @@ class WikiVersion(GuidMixin, BaseModel):
             logger.warning('Returning unlinkified content.')
             return sanitized_content
 
+    def raw_text(self, node):
+        """ The raw text of the page, suitable for using in a test search"""
+
+        return sanitize(self.html(node), tags=[], strip=True)
+
     @property
     def rendered_before_update(self):
         return self.date < WIKI_CHANGE_DATE
@@ -138,6 +143,12 @@ class WikiVersion(GuidMixin, BaseModel):
     def target_type(self):
         """The object "type" used in the OSF v2 API."""
         return 'wiki'
+
+    def save(self, *args, **kwargs):
+        rv = super(WikiVersion, self).save(*args, **kwargs)
+        if self.wiki_page.node:
+            self.wiki_page.node.update_search()
+        return rv
 
     @property
     def root_target_page(self):
@@ -190,7 +201,10 @@ class WikiPage(GuidMixin, BaseModel):
 
     def save(self, *args, **kwargs):
         self.wiki_key = wiki_utils.to_mongo_key(self.page_name)
-        return super(WikiPage, self).save(*args, **kwargs)
+        rv = super(WikiPage, self).save(*args, **kwargs)
+        if self.node:
+            self.node.update_search()
+        return rv
 
     @property
     def current_version_number(self):
