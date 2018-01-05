@@ -78,7 +78,7 @@ def build_wiki_url(node, label, base, end):
     return '/{pid}/wiki/{wname}/'.format(pid=node._id, wname=label)
 
 
-class WikiVersion(GuidMixin, BaseModel):
+class WikiVersion(ObjectIDMixin, BaseModel):
     user = models.ForeignKey('osf.OSFUser', null=True, blank=True, on_delete=models.CASCADE)
     wiki_page = models.ForeignKey('WikiPage', null=True, blank=True, on_delete=models.CASCADE, related_name='versions')
     content = models.TextField(default='', blank=True)
