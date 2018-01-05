@@ -11,7 +11,7 @@ from django.db import models
 from framework.forms.utils import sanitize
 from markdown.extensions import codehilite, fenced_code, wikilinks
 from osf.models import AbstractNode, NodeLog
-from osf.models.base import BaseModel, GuidMixin
+from osf.models.base import BaseModel, GuidMixin, ObjectIDMixin
 from osf.utils.fields import NonNaiveDateTimeField
 from website import settings
 from addons.wiki import utils as wiki_utils
@@ -200,10 +200,8 @@ class WikiPage(GuidMixin, BaseModel):
     user = models.ForeignKey('osf.OSFUser', null=True, blank=True, on_delete=models.CASCADE)
     node = models.ForeignKey('osf.AbstractNode', null=True, blank=True, on_delete=models.CASCADE, related_name='wikis')
     is_deleted = models.BooleanField(default=False, db_index=True)
-    wiki_key = models.CharField(max_length=200, null=True)
 
     def save(self, *args, **kwargs):
-        self.wiki_key = wiki_utils.to_mongo_key(self.page_name)
         rv = super(WikiPage, self).save(*args, **kwargs)
         if self.node:
             self.node.update_search()

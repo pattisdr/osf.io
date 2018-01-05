@@ -316,7 +316,6 @@ class TestWikiViews(OsfTestCase):
         res = self.app.get(url, auth=self.user.auth)
         assert_equal(res.status_code, 200)
         self.project.update_node_wiki('CaPsLoCk', 'hello', self.consolidate_auth)
-        assert_equal('capslock', self.project.wikis.all()[0].wiki_key)
         assert_equal('CaPsLoCk', self.project.wikis.all()[0].page_name)
 
     def test_project_wiki_validate_name_display_correct_capitalization(self):
@@ -506,7 +505,7 @@ class TestWikiDelete(OsfTestCase):
     @mock.patch('addons.wiki.utils.broadcast_to_sharejs')
     def test_project_wiki_delete(self, mock_shrejs):
         page = self.elephant_wiki.wiki_page
-        assert_in('elephants', [wiki.wiki_key for wiki in self.project.wikis.all()])
+        assert_in('elephants', [wiki.page_name.lower() for wiki in self.project.wikis.all()])
         assert_false(self.elephant_wiki.wiki_page.is_deleted)
         url = self.project.api_url_for(
             'project_wiki_delete',
@@ -528,7 +527,7 @@ class TestWikiDelete(OsfTestCase):
         self.project.update_node_wiki(SPECIAL_CHARACTERS_ALLOWED, 'Hello Special Characters', self.consolidate_auth)
         self.special_characters_wiki = self.project.get_wiki_version(SPECIAL_CHARACTERS_ALLOWED)
         wiki_page = self.special_characters_wiki.wiki_page
-        assert_in(to_mongo_key(SPECIAL_CHARACTERS_ALLOWED), [wiki.wiki_key for wiki in self.project.wikis.all()])
+        assert_in(to_mongo_key(SPECIAL_CHARACTERS_ALLOWED), [wiki.page_name.lower() for wiki in self.project.wikis.all()])
         url = self.project.api_url_for(
             'project_wiki_delete',
             wname=SPECIAL_CHARACTERS_ALLOWED
