@@ -137,12 +137,6 @@ class WikiVersion(GuidMixin, BaseModel):
 
         return self.content
 
-    # For Comment API compatibility
-    @property
-    def target_type(self):
-        """The object "type" used in the OSF v2 API."""
-        return 'wiki'
-
     def save(self, *args, **kwargs):
         rv = super(WikiVersion, self).save(*args, **kwargs)
         if self.wiki_page.node:
@@ -150,29 +144,8 @@ class WikiVersion(GuidMixin, BaseModel):
         return rv
 
     @property
-    def root_target_page(self):
-        """The comment page type associated with WikiPages."""
-        return 'wiki'
-
-    @property
-    def absolute_api_v2_url(self):
-        path = '/wikis/{}/'.format(self._id)
-        return api_v2_url(path)
-
-    # used by django and DRF
-    def get_absolute_url(self):
-        return self.absolute_api_v2_url
-
-    @property
     def page_name(self):
         return self.wiki_page.page_name
-
-    def belongs_to_node(self, node_id):
-        """Check whether the wiki is attached to the specified node."""
-        return self.wiki_page.node._id == node_id
-
-    def get_extra_log_params(self, comment):
-        return {'wiki': {'name': self.page_name, 'url': comment.get_comment_page_url()}}
 
     def clone_version(self, wiki_page):
         """Clone a node wiki page.
@@ -205,6 +178,10 @@ class WikiPage(GuidMixin, BaseModel):
         if self.node:
             self.node.update_search()
         return rv
+
+    def belongs_to_node(self, node_id):
+        """Check whether the wiki is attached to the specified node."""
+        return self.node._id == node_id
 
     @property
     def current_version_number(self):
@@ -241,6 +218,11 @@ class WikiPage(GuidMixin, BaseModel):
         self.page_name = new_name
         if save:
             self.save()
+
+    @property
+    def root_target_page(self):
+        """The comment page type associated with WikiPages."""
+        return 'wiki'
 
     @property
     def deep_url(self):
@@ -282,6 +264,24 @@ class WikiPage(GuidMixin, BaseModel):
 
     def to_json(self, user):
         return {}
+
+    def get_extra_log_params(self, comment):
+        return {'wiki': {'name': self.page_name, 'url': comment.get_comment_page_url()}}
+
+    # For Comment API compatibility
+    @property
+    def target_type(self):
+        """The object "type" used in the OSF v2 API."""
+        return 'wiki'
+
+    # used by django and DRF
+    def get_absolute_url(self):
+        return self.absolute_api_v2_url
+
+    @property
+    def absolute_api_v2_url(self):
+        path = '/wikis/{}/'.format(self._id)
+        return api_v2_url(path)
 
 
 class NodeWikiPage(GuidMixin, BaseModel):

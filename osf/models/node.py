@@ -2712,14 +2712,10 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         WikiPage = apps.get_model('addons_wiki.WikiPage')
         Comment = apps.get_model('osf.Comment')
 
-        has_comments = False
         current = None
-
         wiki_page = self.get_wiki_page(name)
         if wiki_page:
             current = wiki_page.get_version()
-            if Comment.objects.filter(root_target=current.guids.all()[0]).exists():
-                has_comments = True
         else:
             wiki_page = WikiPage(
                 page_name=name,
@@ -2727,12 +2723,7 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
                 node=self
             )
             wiki_page.save()
-
         new_version = wiki_page.create_version(user=auth.user, content=content)
-
-        if has_comments:
-            Comment.objects.filter(root_target=current.guids.all()[0]).update(root_target=Guid.load(new_version._id))
-            Comment.objects.filter(target=current.guids.all()[0]).update(target=Guid.load(new_version._id))
 
         if current:
             for contrib in self.contributors:
@@ -2748,7 +2739,7 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
                 'project': self.parent_id,
                 'node': self._primary_key,
                 'page': wiki_page.page_name,
-                'page_id': new_version._primary_key,
+                'page_id': wiki_page._primary_key,
                 'version': new_version.identifier,
             },
             auth=auth,

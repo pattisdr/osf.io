@@ -91,7 +91,7 @@ def _get_wiki_pages_current(node):
         {
             'name': page.page_name,
             'url': node.web_url_for('project_wiki_view', wname=page.page_name, _guid=True),
-            'wiki_id': page._primary_key,
+            'wiki_id': page.wiki_page._primary_key,
             'wiki_content': _wiki_page_content(page.page_name, node=node)
         }
         for page in node.get_wiki_pages_current().order_by(F('name'))
@@ -255,7 +255,7 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
     }
 
     ret = {
-        'wiki_id': wiki_version._primary_key if wiki_version else None,
+        'wiki_id': wiki_version.wiki_page._primary_key if wiki_version else None,
         'wiki_name': wiki_version.page_name if wiki_version else wiki_name,
         'wiki_content': content,
         'rendered_before_update': rendered_before_update,
