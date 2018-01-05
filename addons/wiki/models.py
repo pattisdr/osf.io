@@ -84,7 +84,6 @@ class WikiVersion(GuidMixin, BaseModel):
     content = models.TextField(default='', blank=True)
     identifier = models.IntegerField(default=1)
     date = NonNaiveDateTimeField(auto_now_add=True)
-    is_deleted = models.BooleanField(default=False, db_index=True)
 
     @property
     def _primary_key(self):
@@ -92,7 +91,7 @@ class WikiVersion(GuidMixin, BaseModel):
 
     @property
     def is_current(self):
-        return not self.wiki_page.is_deleted and not self.is_deleted and int(self.identifier) == self.wiki_page.current_version_number
+        return not self.wiki_page.is_deleted and int(self.identifier) == self.wiki_page.current_version_number
 
     def html(self, node):
         """The cleaned HTML of the page"""
@@ -210,7 +209,7 @@ class WikiPage(GuidMixin, BaseModel):
     @property
     def current_version_number(self):
         if self.versions.exists():
-            return self.versions.filter(is_deleted=False).count()
+            return self.versions.count()
         return 0
 
     @property
@@ -229,14 +228,14 @@ class WikiPage(GuidMixin, BaseModel):
                 return self.versions.last()
             return None
         try:
-            return self.versions.get(identifier=version, is_deleted=False)
+            return self.versions.get(identifier=version)
         except WikiVersion.DoesNotExist:
             if required:
                 raise VersionNotFoundError(version)
             return None
 
     def get_versions(self):
-        return self.versions.filter(is_deleted=False)
+        return self.versions.all()
 
     def rename(self, new_name, save=True):
         self.page_name = new_name
