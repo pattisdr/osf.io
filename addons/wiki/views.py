@@ -436,9 +436,8 @@ def project_wiki_rename(auth, wname, **kwargs):
 @must_have_addon('wiki', 'node')
 def project_wiki_validate_name(wname, auth, node, **kwargs):
     wiki_name = wname.strip()
-    wiki_key = to_mongo_key(wiki_name)
-
-    wiki = node.get_wiki_page(wiki_name)
+    wiki_key = wiki_name.lower()
+    wiki = node.get_wiki_page(wname)
 
     if (wiki and not wiki.is_deleted) or wiki_key == 'home':
         raise HTTPError(http.CONFLICT, data=dict(

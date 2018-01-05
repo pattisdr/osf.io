@@ -2670,21 +2670,19 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
     def get_wiki_pages_current(self):
         WikiVersion = apps.get_model('addons_wiki.WikiVersion')
         wiki_page_ids = self.wikis.filter(is_deleted=False)
-        return WikiVersion.objects.annotate(name=F('wiki_page__page_name'), newest_version=Max('wiki_page__versions__identifier')).filter(identifier=F('newest_version'), wiki_page__id__in=wiki_page_ids, is_deleted=False)
+        return WikiVersion.objects.annotate(name=F('wiki_page__page_name'), newest_version=Max('wiki_page__versions__identifier')).filter(identifier=F('newest_version'), wiki_page__id__in=wiki_page_ids)
 
     def get_wiki_page(self, name):
         WikiPage = apps.get_model('addons_wiki.WikiPage')
         try:
             name = (name or '').strip()
-            key = to_mongo_key(name)
-            return self.wikis.get(wiki_key=key, is_deleted=False)
+            return self.wikis.get(page_name__iexact=name, is_deleted=False)
         except WikiPage.DoesNotExist:
             return None
 
     def get_wiki_version(self, name=None, version=None, id=None):
         WikiVersion = apps.get_model('addons_wiki.WikiVersion')
         if name:
-            name = (name or '').strip()
             wiki_page = self.get_wiki_page(name)
             if not wiki_page:
                 return None
@@ -2714,7 +2712,6 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         WikiPage = apps.get_model('addons_wiki.WikiPage')
         Comment = apps.get_model('osf.Comment')
 
-        name = (name or '').strip()
         has_comments = False
         current = None
 
@@ -2732,9 +2729,6 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
             wiki_page.save()
 
         new_version = wiki_page.create_version(user=auth.user, content=content)
-        if wiki_page.is_deleted:
-            wiki_page.is_deleted = False
-            wiki_page.save()
 
         if has_comments:
             Comment.objects.filter(root_target=current.guids.all()[0]).update(root_target=Guid.load(new_version._id))
@@ -2778,13 +2772,12 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
             PageConflictError,
             PageNotFoundError,
         )
-
         name = (name or '').strip()
-        key = to_mongo_key(name)
         new_name = (new_name or '').strip()
-        new_key = to_mongo_key(new_name)
         page = self.get_wiki_page(name)
         existing_wiki_page = self.get_wiki_page(new_name)
+        key = name.lower()
+        new_key = new_name.lower()
 
         if key == 'home':
             raise PageCannotRenameError('Cannot rename wiki home page')
@@ -2823,15 +2816,10 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         )
 
     def delete_node_wiki(self, name, auth):
-        name = (name or '').strip()
         page = self.get_wiki_page(name)
         page_pk = page._primary_key
         page.is_deleted = True
-        page.page_name = page.page_name + str(randint(100000, 999999))
         page.save()
-        for version in page.get_versions():
-            version.is_deleted = True
-            version.save()
 
         self.add_log(
             action=NodeLog.WIKI_DELETED,
