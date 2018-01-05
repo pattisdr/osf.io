@@ -231,7 +231,7 @@ class WikiPage(GuidMixin, BaseModel):
                 return self.versions.last()
             return None
         try:
-            return self.versions.get(identifier=version)
+            return self.versions.get(identifier=version, is_deleted=False)
         except WikiVersion.DoesNotExist:
             if required:
                 raise VersionNotFoundError(version)

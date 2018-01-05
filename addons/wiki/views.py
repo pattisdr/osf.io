@@ -438,7 +438,9 @@ def project_wiki_validate_name(wname, auth, node, **kwargs):
     wiki_name = wname.strip()
     wiki_key = to_mongo_key(wiki_name)
 
-    if wiki_key in node.wikis.values_list('wiki_key', flat=True) or wiki_key == 'home':
+    wiki = node.get_wiki_page(wiki_name)
+
+    if (wiki and not wiki.is_deleted) or wiki_key == 'home':
         raise HTTPError(http.CONFLICT, data=dict(
             message_short='Wiki page name conflict.',
             message_long='A wiki page with that name already exists.'

@@ -27,7 +27,6 @@ def to_mongo(item):
 def to_mongo_key(item):
     return to_mongo(item).strip().lower()
 
-
 def generate_private_uuid(node, wname):
     """
     Generate private uuid for internal use in sharejs namespacing.

@@ -4,6 +4,7 @@ import logging
 import re
 import urlparse
 import warnings
+from random import randint
 
 import bson
 from django.db.models import Q
@@ -2676,7 +2677,7 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         try:
             name = (name or '').strip()
             key = to_mongo_key(name)
-            return self.wikis.get(wiki_key=key)
+            return self.wikis.get(wiki_key=key, is_deleted=False)
         except WikiPage.DoesNotExist:
             return None
 
@@ -2717,12 +2718,12 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         has_comments = False
         current = None
 
-        try:
-            wiki_page = self.wikis.get(page_name=name)
+        wiki_page = self.get_wiki_page(name)
+        if wiki_page:
             current = wiki_page.get_version()
             if Comment.objects.filter(root_target=current.guids.all()[0]).exists():
                 has_comments = True
-        except WikiPage.DoesNotExist:
+        else:
             wiki_page = WikiPage(
                 page_name=name,
                 user=auth.user,
@@ -2798,10 +2799,6 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
 
         # rename the page first in case we hit a validation exception.
         old_name = page.page_name
-        # If renaming a wiki to same name as deleted wiki, modify page_name of deleted wiki
-        if existing_wiki_page and existing_wiki_page.is_deleted:
-            existing_wiki_page.page_name = existing_wiki_page.page_name + '_deleted'
-            existing_wiki_page.save()
         page.rename(new_name)
 
         # TODO: merge historical records like update (prevents log breaks)
@@ -2830,8 +2827,9 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         page = self.get_wiki_page(name)
         page_pk = page._primary_key
         page.is_deleted = True
+        page.page_name = page.page_name + str(randint(100000, 999999))
         page.save()
-        for version in page.versions.all():
+        for version in page.get_versions():
             version.is_deleted = True
             version.save()
 
