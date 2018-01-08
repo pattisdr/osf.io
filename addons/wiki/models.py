@@ -143,10 +143,6 @@ class WikiVersion(ObjectIDMixin, BaseModel):
             self.wiki_page.node.update_search()
         return rv
 
-    @property
-    def page_name(self):
-        return self.wiki_page.page_name
-
     def clone_version(self, wiki_page):
         """Clone a node wiki page.
         :param node: The Node of the cloned wiki page
@@ -300,6 +296,14 @@ class NodeWikiPage(GuidMixin, BaseModel):
     content = models.TextField(default='', blank=True)
     user = models.ForeignKey('osf.OSFUser', null=True, blank=True, on_delete=models.CASCADE)
     node = models.ForeignKey('osf.AbstractNode', null=True, blank=True, on_delete=models.CASCADE)
+
+    @property
+    def is_current(self):
+        key = wiki_utils.to_mongo_key(self.page_name)
+        if key in self.node.wiki_pages_current:
+            return self.node.wiki_pages_current[key] == self._id
+        else:
+            return False
 
     @property
     def deep_url(self):

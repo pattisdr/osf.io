@@ -89,10 +89,10 @@ def _get_wiki_versions(node, name, anonymous=False):
 def _get_wiki_pages_current(node):
     return [
         {
-            'name': page.page_name,
-            'url': node.web_url_for('project_wiki_view', wname=page.page_name, _guid=True),
+            'name': page.wiki_page.page_name,
+            'url': node.web_url_for('project_wiki_view', wname=page.wiki_page.page_name, _guid=True),
             'wiki_id': page.wiki_page._primary_key,
-            'wiki_content': _wiki_page_content(page.page_name, node=node)
+            'wiki_content': _wiki_page_content(page.wiki_page.page_name, node=node)
         }
         for page in node.get_wiki_pages_current().order_by(F('name'))
     ]
@@ -255,8 +255,8 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
     }
 
     ret = {
-        'wiki_id': wiki_version.wiki_page._primary_key if wiki_version else None,
-        'wiki_name': wiki_version.page_name if wiki_version else wiki_name,
+        'wiki_id': wiki_page._primary_key if wiki_page else None,
+        'wiki_name': wiki_page.page_name if wiki_page else wiki_name,
         'wiki_content': content,
         'rendered_before_update': rendered_before_update,
         'page': wiki_page,
@@ -472,7 +472,7 @@ def project_wiki_grid_data(auth, node, **kwargs):
 
 
 def format_home_wiki_page(node):
-    home_wiki = node.get_wiki_version('home')
+    home_wiki = node.get_wiki_page('home')
     home_wiki_page = {
         'page': {
             'url': node.web_url_for('project_wiki_home'),
