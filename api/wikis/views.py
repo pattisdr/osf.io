@@ -9,12 +9,13 @@ from api.base.renderers import PlainTextRenderer
 from api.wikis.permissions import ContributorOrPublic, ExcludeWithdrawals
 from api.wikis.serializers import (
     WikiSerializer,
+    WikiVersionSerializer,
     NodeWikiDetailSerializer,
     RegistrationWikiDetailSerializer,
 )
 
 from framework.auth.oauth_scopes import CoreScopes
-from addons.wiki.models import WikiVersion
+from addons.wiki.models import WikiVersion, WikiPage
 
 
 class WikiMixin(object):
@@ -27,16 +28,12 @@ class WikiMixin(object):
 
     def get_wiki(self, check_permissions=True):
         pk = self.kwargs[self.wiki_lookup_url_kwarg]
-        wiki = WikiVersion.load(pk)
+        wiki = WikiPage.load(pk)
         if not wiki:
             raise NotFound
 
-        if wiki.wiki_page.is_deleted:
+        if wiki.is_deleted:
             raise Gone
-
-        # only show current wiki versions
-        if not wiki.is_current:
-            raise NotFound
 
         if check_permissions:
             # May raise a permission denied
@@ -112,7 +109,7 @@ class WikiDetail(JSONAPIBaseView, generics.RetrieveAPIView, WikiMixin):
     view_name = 'wiki-detail'
 
     def get_serializer_class(self):
-        if self.get_wiki().wiki_page.node.is_registration:
+        if self.get_wiki().node.is_registration:
             return RegistrationWikiDetailSerializer
         return NodeWikiDetailSerializer
 
@@ -144,3 +141,23 @@ class WikiContent(JSONAPIBaseView, generics.RetrieveAPIView, WikiMixin):
     def get(self, request, **kwargs):
         wiki = self.get_wiki()
         return Response(wiki.content)
+
+class WikiVersions(JSONAPIBaseView, generics.ListAPIView, WikiMixin):
+    """view for rendering all versions of a particular WikiPage """
+
+    permission_classes = (
+        drf_permissions.IsAuthenticatedOrReadOnly,
+        base_permissions.TokenHasScope,
+        ContributorOrPublic,
+        ExcludeWithdrawals
+    )
+    view_category = 'wikis'
+    view_name = 'wiki-versions'
+    serializer_class = WikiVersionSerializer
+
+    required_read_scopes = [CoreScopes.WIKI_BASE_READ]
+    required_write_scopes = [CoreScopes.NULL]
+
+
+    def get_queryset(self):
+        return self.get_wiki().get_versions()

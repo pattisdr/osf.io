@@ -165,6 +165,15 @@ class WikiVersion(ObjectIDMixin, BaseModel):
     def to_json(self, user):
         return {}
 
+    @property
+    def absolute_api_v2_url(self):
+        path = '/wiki_versions/{}/'.format(self._id)
+        return api_v2_url(path)
+
+    # used by django and DRF
+    def get_absolute_url(self):
+        return self.absolute_api_v2_url
+
 
 class WikiPage(GuidMixin, BaseModel):
     page_name = models.CharField(max_length=200, validators=[validate_page_name, ])

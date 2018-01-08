@@ -2879,19 +2879,10 @@ class NodeWikiList(JSONAPIBaseView, generics.ListAPIView, NodeMixin, ListFilterM
     ordering = ('-date', )  # default ordering
 
     def get_default_queryset(self):
-        return self.get_node().get_wiki_pages_current()
+        return self.get_node().wikis.filter(is_deleted=False)
 
     def get_queryset(self):
         return self.get_queryset_from_request()
-
-    def param_queryset(self, query_params, default_queryset):
-        params = self.request.query_params.copy()
-        # page_name is stored on the WikiPage, not the WikiVersion
-        if params and 'filter[name]' in params:
-            name = params['filter[name]']
-            del params['filter[name]']
-            return default_queryset.filter(wiki_page__page_name=name) | super(NodeWikiList, self).param_queryset(params, default_queryset)
-        return super(NodeWikiList, self).param_queryset(params, default_queryset)
 
 
 class NodeLinkedNodesRelationship(LinkedNodesRelationship, NodeMixin):

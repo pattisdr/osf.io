@@ -59,19 +59,19 @@ class WikiSerializer(JSONAPISerializer):
         return 'file'
 
     def get_size(self, obj):
-        return sys.getsizeof(obj.content)
+        return sys.getsizeof(obj.get_version().content)
 
     def get_current_user_can_comment(self, obj):
         user = self.context['request'].user
         auth = Auth(user if not user.is_anonymous else None)
-        return obj.wiki_page.node.can_comment(auth)
+        return obj.node.can_comment(auth)
 
     def get_content_type(self, obj):
         return 'text/markdown'
 
     def get_extra(self, obj):
         return {
-            'version': obj.identifier
+            'version': obj.get_version().identifier
         }
 
     def get_wiki_content(self, obj):
@@ -84,14 +84,19 @@ class WikiSerializer(JSONAPISerializer):
 class NodeWikiSerializer(WikiSerializer):
     node = RelationshipField(
         related_view='nodes:node-detail',
-        related_view_kwargs={'node_id': '<wiki_page.node._id>'}
+        related_view_kwargs={'node_id': '<node._id>'}
     )
 
     comments = RelationshipField(
         related_view='nodes:node-comments',
-        related_view_kwargs={'node_id': '<wiki_page.node._id>'},
+        related_view_kwargs={'node_id': '<node._id>'},
         related_meta={'unread': 'get_unread_comments_count'},
         filter={'target': '<_id>'}
+    )
+
+    versions = RelationshipField(
+        related_view='wikis:wiki-versions',
+        related_view_kwargs={'wiki_id': '<_id>'},
     )
 
 
@@ -99,15 +104,41 @@ class RegistrationWikiSerializer(WikiSerializer):
 
     node = RelationshipField(
         related_view='registrations:registration-detail',
-        related_view_kwargs={'node_id': '<wiki_page.node._id>'}
+        related_view_kwargs={'node_id': '<node._id>'}
     )
 
     comments = RelationshipField(
         related_view='registrations:registration-comments',
-        related_view_kwargs={'node_id': '<wiki_page.node._id>'},
+        related_view_kwargs={'node_id': '<node._id>'},
         related_meta={'unread': 'get_unread_comments_count'},
         filter={'target': '<_id>'}
     )
+
+
+class WikiVersionSerializer(JSONAPISerializer):
+    id = IDField(source='_id', read_only=True)
+    type = TypeField()
+    identifier = ser.IntegerField()
+    date_modified = DateByVersion(source='date')
+    content = ser.CharField()
+
+    wiki_page = RelationshipField(
+        related_view='wikis:wiki-detail',
+        related_view_kwargs={'wiki_id': '<wiki_page._id>'}
+    )
+
+    user = RelationshipField(
+        related_view='users:user-detail',
+        related_view_kwargs={'user_id': '<user._id>'}
+    )
+
+    links = LinksField({})
+
+    def get_absolute_url(self, obj):
+        return obj.get_absolute_url()
+
+    class Meta:
+        type_ = 'wiki-version'
 
 
 class NodeWikiDetailSerializer(NodeWikiSerializer):
