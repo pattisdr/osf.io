@@ -15,7 +15,7 @@ from api.wikis.serializers import (
 )
 
 from framework.auth.oauth_scopes import CoreScopes
-from addons.wiki.models import WikiVersion, WikiPage
+from addons.wiki.models import WikiPage
 
 
 class WikiMixin(object):
@@ -157,7 +157,6 @@ class WikiVersions(JSONAPIBaseView, generics.ListAPIView, WikiMixin):
 
     required_read_scopes = [CoreScopes.WIKI_BASE_READ]
     required_write_scopes = [CoreScopes.NULL]
-
 
     def get_queryset(self):
         return self.get_wiki().get_versions()

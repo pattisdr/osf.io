@@ -4,7 +4,6 @@ import logging
 import re
 import urlparse
 import warnings
-from random import randint
 
 import bson
 from django.db.models import Q
@@ -30,7 +29,6 @@ from framework import status
 from framework.celery_tasks.handlers import enqueue_task
 from framework.exceptions import PermissionsError
 from framework.sentry import log_exception
-from addons.wiki.utils import to_mongo_key
 from osf.exceptions import ValidationValueError
 from osf.models.contributor import (Contributor, RecentlyAddedContributor,
                                     get_contributor_permissions)
@@ -68,7 +66,7 @@ from website.util.permissions import (ADMIN, CREATOR_PERMISSIONS,
                                       DEFAULT_CONTRIBUTOR_PERMISSIONS, READ,
                                       WRITE, expand_permissions,
                                       reduce_permissions)
-from .base import BaseModel, Guid, GuidMixin, GuidMixinQuerySet
+from .base import BaseModel, GuidMixin, GuidMixinQuerySet
 
 
 logger = logging.getLogger(__name__)
@@ -2710,7 +2708,6 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         :param auth: All the auth information including user, API key.
         """
         WikiPage = apps.get_model('addons_wiki.WikiPage')
-        Comment = apps.get_model('osf.Comment')
 
         current = None
         wiki_page = self.get_wiki_page(name)
