@@ -38,6 +38,7 @@ class TestUpdateNodeWiki(OsfTestCase):
         self.project.update_node_wiki('home', 'Hello world 2', self.auth)
         assert self.project.get_wiki_version('home').is_current is True
         self.project.update_node_wiki('home', 'Hello world 3', self.auth)
+        assert self.project.get_wiki_version('home').is_current is True
 
     def test_wiki_content(self):
         # Wiki has correct content
@@ -262,6 +263,7 @@ class TestRenameNodeWiki(OsfTestCase):
         new_content = 'new content'
         # create the old page and delete it
         self.project.update_node_wiki(old_name, old_content, self.auth)
+        old_page = self.project.get_wiki_version(old_name)
         assert self.project.get_wiki_page(old_name).is_deleted is False
         self.project.delete_node_wiki(old_name, self.auth)
         assert self.project.get_wiki_page(old_name) is None
@@ -269,9 +271,10 @@ class TestRenameNodeWiki(OsfTestCase):
         self.project.update_node_wiki(new_name, new_content, self.auth)
         self.project.rename_node_wiki(new_name, old_name, self.auth)
         new_page = self.project.get_wiki_version(old_name)
-        old_page = self.project.get_wiki_version(old_name, version=1)
-        # renaming over an existing deleted page replaces it.
-        assert new_content == old_page.content
+        # renaming over an existing deleted page just creates a new page with
+        # the same name as the deleted page. Page names just need to be unique
+        # among non-deleted wikis.
+        assert old_content == old_page.content
         assert new_content == new_page.content
         assert self.project.logs.latest().action == 'wiki_renamed'
 
@@ -333,15 +336,20 @@ class TestDeleteNodeWiki(OsfTestCase):
         # Delete wiki
         self.project.delete_node_wiki('home', self.auth)
         # Number of versions is still correct
-        # TODO returning 0 versions if wiki has been deleted.
-        # assert self.wiki_page.current_version_number == 1
+        self.wiki_page.reload()
+        assert self.wiki_page.is_deleted is True
+        assert self.wiki_page.current_version_number == 1
+        # get_wiki_page only returns non-deleted wikis
+        assert self.project.get_wiki_page('home') is None
 
     def test_wiki_delete(self):
-        page = self.project.get_wiki_version('home')
+        page = self.project.get_wiki_page('home')
         self.project.delete_node_wiki('home', self.auth)
 
         # page was deleted
-        assert self.project.get_wiki_version('home') is None
+        page.reload()
+        assert page.is_deleted is True
+        assert self.project.get_wiki_page('home') is None
 
         log = self.project.logs.latest()
 

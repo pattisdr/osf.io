@@ -215,7 +215,7 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
         raise WIKI_INVALID_VERSION_ERROR
 
     # ensure home is always lower case since it cannot be renamed
-    if wiki_key  == 'home':
+    if wiki_key == 'home':
         wiki_name = 'home'
 
     if wiki_version:
