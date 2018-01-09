@@ -169,7 +169,6 @@ class TestWikiViews(OsfTestCase):
     def test_project_wiki_edit_post_with_new_wname_and_no_content(self):
         # note: forward slashes not allowed in page_name
         page_name = fake.catch_phrase().replace('/', ' ')
-
         old_wiki_page_count = WikiVersion.objects.all().count()
         url = self.project.web_url_for('project_wiki_edit_post', wname=page_name)
         # User submits to edit form with no content
@@ -215,8 +214,8 @@ class TestWikiViews(OsfTestCase):
         res = self.app.post(url, {'content': 'new content'}, auth=self.user.auth).follow()
         assert_equal(res.status_code, 200)
         self.project.reload()
-        wiki = self.project.get_wiki_version(new_wname)
-        assert_equal(wiki.wiki_page.page_name, new_wname)
+        wiki = self.project.get_wiki_page(new_wname)
+        assert_equal(wiki.page_name, new_wname)
 
         # updating content should return correct url as well.
         res = self.app.post(url, {'content': 'updated content'}, auth=self.user.auth).follow()
@@ -295,7 +294,7 @@ class TestWikiViews(OsfTestCase):
         url = self.project.api_url_for('project_wiki_validate_name', wname='newpage', auth=self.consolidate_auth)
         self.app.get(url, auth=self.user.auth)
         self.project.reload()
-        assert_in('newpage', [wiki.page_name for wiki in self.project.wikis.all()])
+        assert_is_not_none(self.project.get_wiki_page('newpage'))
 
     def test_wiki_validate_name_collision_doesnt_clear(self):
         self.project.update_node_wiki('oldpage', 'some text', self.consolidate_auth)
@@ -316,7 +315,7 @@ class TestWikiViews(OsfTestCase):
         res = self.app.get(url, auth=self.user.auth)
         assert_equal(res.status_code, 200)
         self.project.update_node_wiki('CaPsLoCk', 'hello', self.consolidate_auth)
-        assert_equal('CaPsLoCk', self.project.wikis.all()[0].page_name)
+        assert_equal(self.project.get_wiki_page('CaPsLoCk').page_name, 'CaPsLoCk')
 
     def test_project_wiki_validate_name_display_correct_capitalization(self):
         url = self.project.api_url_for('project_wiki_validate_name', wname='CaPsLoCk')
@@ -499,14 +498,14 @@ class TestWikiDelete(OsfTestCase):
         self.auth = creator.auth
         self.project.update_node_wiki('Elephants', 'Hello Elephants', self.consolidate_auth)
         self.project.update_node_wiki('Lions', 'Hello Lions', self.consolidate_auth)
-        self.elephant_wiki = self.project.get_wiki_version('Elephants')
-        self.lion_wiki = self.project.get_wiki_version('Lions')
+        self.elephant_wiki = self.project.get_wiki_page('Elephants')
+        self.lion_wiki = self.project.get_wiki_page('Lions')
 
     @mock.patch('addons.wiki.utils.broadcast_to_sharejs')
     def test_project_wiki_delete(self, mock_shrejs):
-        page = self.elephant_wiki.wiki_page
-        assert_in('elephants', [wiki.page_name.lower() for wiki in self.project.wikis.all()])
-        assert_false(self.elephant_wiki.wiki_page.is_deleted)
+        page = self.elephant_wiki
+        assert_equal(page.page_name.lower(), 'elephants')
+        assert_false(page.is_deleted)
         url = self.project.api_url_for(
             'project_wiki_delete',
             wname='Elephants'
@@ -525,9 +524,8 @@ class TestWikiDelete(OsfTestCase):
         # with assert_raises(NameInvalidError):
         #     self.project.update_node_wiki(SPECIAL_CHARACTERS_ALL, 'Hello Special Characters', self.consolidate_auth)
         self.project.update_node_wiki(SPECIAL_CHARACTERS_ALLOWED, 'Hello Special Characters', self.consolidate_auth)
-        self.special_characters_wiki = self.project.get_wiki_version(SPECIAL_CHARACTERS_ALLOWED)
-        wiki_page = self.special_characters_wiki.wiki_page
-        assert_in(SPECIAL_CHARACTERS_ALLOWED, [wiki.page_name.lower() for wiki in self.project.wikis.all()])
+        self.special_characters_wiki = self.project.get_wiki_page(SPECIAL_CHARACTERS_ALLOWED)
+        assert_equal(self.special_characters_wiki.page_name, SPECIAL_CHARACTERS_ALLOWED)
         url = self.project.api_url_for(
             'project_wiki_delete',
             wname=SPECIAL_CHARACTERS_ALLOWED
@@ -537,8 +535,8 @@ class TestWikiDelete(OsfTestCase):
             auth=self.auth
         )
         self.project.reload()
-        wiki_page.reload()
-        assert_true(wiki_page.is_deleted)
+        self.special_characters_wiki.reload()
+        assert_true(self.special_characters_wiki.is_deleted)
 
     @mock.patch('addons.wiki.utils.broadcast_to_sharejs')
     def test_wiki_versions_do_not_reappear_after_delete(self, mock_sharejs):
@@ -555,7 +553,7 @@ class TestWikiDelete(OsfTestCase):
         self.project.delete_node_wiki('Hippos', self.consolidate_auth)
         wiki_page.reload()
         assert_true(wiki_page.is_deleted)
-        # Creates new wiki with same name
+        # Creates new wiki with same name as deleted wiki
         self.project.update_node_wiki('Hippos', 'Hello again hippos', self.consolidate_auth)
         wiki_page = self.project.get_wiki_page('Hippos')
         assert_equal(wiki_page.current_version_number, 1)
@@ -578,8 +576,8 @@ class TestWikiRename(OsfTestCase):
         self.page_name = 'page2'
         self.project.update_node_wiki(self.page_name, 'content', self.consolidate_auth)
         self.project.save()
-        self.page = self.project.get_wiki_version(self.page_name)
 
+        self.page = self.project.get_wiki_version(self.page_name)
         self.wiki = self.project.get_wiki_page('home')
         self.url = self.project.api_url_for(
             'project_wiki_rename',
@@ -1317,22 +1315,22 @@ class TestWikiMenu(OsfTestCase):
     def test_format_project_wiki_pages_contributor(self):
         self.project.update_node_wiki('home', 'content here', self.consolidate_auth)
         self.project.update_node_wiki('zoo', 'koala', self.consolidate_auth)
-        home_page = self.project.get_wiki_version(name='home')
-        zoo_page = self.project.get_wiki_version(name='zoo')
+        home_page = self.project.get_wiki_page(name='home')
+        zoo_page = self.project.get_wiki_page(name='zoo')
         data = views.format_project_wiki_pages(self.project, self.consolidate_auth)
         expected = [
             {
                 'page': {
                     'url': self.project.web_url_for('project_wiki_view', wname='home', _guid=True),
                     'name': 'Home',
-                    'id': home_page.wiki_page._primary_key,
+                    'id': home_page._primary_key,
                 }
             },
             {
                 'page': {
                     'url': self.project.web_url_for('project_wiki_view', wname='zoo', _guid=True),
                     'name': 'zoo',
-                    'id': zoo_page.wiki_page._primary_key,
+                    'id': zoo_page._primary_key,
                 }
             }
         ]
@@ -1357,7 +1355,7 @@ class TestWikiMenu(OsfTestCase):
     def test_format_component_wiki_pages_contributor(self):
         self.component.update_node_wiki('home', 'home content', self.consolidate_auth)
         self.component.update_node_wiki('zoo', 'koala', self.consolidate_auth)
-        zoo_page = self.component.get_wiki_version(name='zoo')
+        zoo_page = self.component.get_wiki_page(name='zoo')
         expected = [
             {
                 'page': {
@@ -1376,7 +1374,7 @@ class TestWikiMenu(OsfTestCase):
                         'page': {
                             'url': self.component.web_url_for('project_wiki_view', wname='zoo', _guid=True),
                             'name': 'zoo',
-                            'id': zoo_page.wiki_page._primary_key,
+                            'id': zoo_page._primary_key,
                         },
                     }
                 ],
