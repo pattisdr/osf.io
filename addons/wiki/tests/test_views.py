@@ -66,7 +66,7 @@ class TestUpdateNodeWiki(OsfTestCase):
         assert self.project.logs.filter(action='wiki_updated').count() == 2
 
     def test_update_log_specifics(self):
-        page = self.project.get_wiki_version('home')
+        page = self.project.get_wiki_page('home')
         log = self.project.logs.latest()
         assert 'wiki_updated' == log.action
         assert page._primary_key == log.params['page_id']
@@ -104,7 +104,7 @@ class TestUpdateNodeWiki(OsfTestCase):
         project = ProjectFactory(creator=self.user, is_public=True)
         wiki_page = WikiFactory(node=project, page_name='test')
         wiki = WikiVersionFactory(wiki_page=wiki_page)
-        comment = CommentFactory(node=project, target=Guid.load(wiki._id), user=UserFactory())
+        comment = CommentFactory(node=project, target=Guid.load(wiki_page._id), user=UserFactory())
 
         # user views comments -- sets user.comments_viewed_timestamp
         url = project.api_url_for('update_comments_timestamp')
@@ -124,7 +124,7 @@ class TestUpdateNodeWiki(OsfTestCase):
         new_version_id = project.get_wiki_version('test')._id
         assert new_version_id in self.user.comments_viewed_timestamp
         assert wiki._id not in self.user.comments_viewed_timestamp
-        assert comment.target.referent._id == new_version_id
+        assert comment.target.referent._id == wiki_page._id
 
     # Regression test for https://openscience.atlassian.net/browse/OSF-6138
     def test_update_wiki_updates_contributor_comments_viewed_timestamp(self):
@@ -134,7 +134,7 @@ class TestUpdateNodeWiki(OsfTestCase):
         project.save()
         wiki_page = WikiFactory(node=project, page_name='test')
         wiki = WikiVersionFactory(wiki_page=wiki_page)
-        comment = CommentFactory(node=project, target=Guid.load(wiki._id), user=self.user)
+        comment = CommentFactory(node=project, target=Guid.load(wiki_page._id), user=self.user)
 
         # user views comments -- sets user.comments_viewed_timestamp
         url = project.api_url_for('update_comments_timestamp')
@@ -162,7 +162,7 @@ class TestUpdateNodeWiki(OsfTestCase):
         new_version_id = project.get_wiki_version('test')._id
         assert new_version_id in contributor.comments_viewed_timestamp
         assert wiki._id not in contributor.comments_viewed_timestamp
-        assert comment.target.referent._id == new_version_id
+        assert comment.target.referent._id == wiki_page._id
 
     # Regression test for https://openscience.atlassian.net/browse/OSF-8584
     def test_no_read_more_when_less_than_400_character(self):
@@ -242,8 +242,8 @@ class TestRenameNodeWiki(OsfTestCase):
         self.project.update_node_wiki(old_name, 'new content', self.auth)
         self.project.rename_node_wiki(old_name, new_name, self.auth)
         page = self.project.get_wiki_version(new_name)
-        assert old_name != page.page_name
-        assert new_name == page.page_name
+        assert old_name != page.wiki_page.page_name
+        assert new_name == page.wiki_page.page_name
         assert self.project.logs.latest().action == 'wiki_renamed'
 
     def test_rename_page_case_sensitive(self):
@@ -252,7 +252,7 @@ class TestRenameNodeWiki(OsfTestCase):
         self.project.update_node_wiki(old_name, 'new content', self.auth)
         self.project.rename_node_wiki(old_name, new_name, self.auth)
         new_page = self.project.get_wiki_version(new_name)
-        assert new_name == new_page.page_name
+        assert new_name == new_page.wiki_page.page_name
         assert self.project.logs.latest().action == 'wiki_renamed'
 
     def test_rename_existing_deleted_page(self):
@@ -264,7 +264,7 @@ class TestRenameNodeWiki(OsfTestCase):
         self.project.update_node_wiki(old_name, old_content, self.auth)
         assert self.project.get_wiki_page(old_name).is_deleted is False
         self.project.delete_node_wiki(old_name, self.auth)
-        assert self.project.get_wiki_page(old_name).is_deleted is True
+        assert self.project.get_wiki_page(old_name) is None
         # create the new page and rename it
         self.project.update_node_wiki(new_name, new_content, self.auth)
         self.project.rename_node_wiki(new_name, old_name, self.auth)
@@ -357,5 +357,5 @@ class TestDeleteNodeWiki(OsfTestCase):
         # Delete wiki
         self.project.delete_node_wiki('home', self.auth)
         # Check versions
-        assert self.project.get_wiki_version('home', 2).content == 'Hola mundo'
-        assert self.project.get_wiki_version('home', 1).content == 'Hello world'
+        assert self.project.get_wiki_version('home', 2) == None
+        assert self.project.get_wiki_version('home', 1) == None

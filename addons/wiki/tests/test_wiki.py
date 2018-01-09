@@ -216,7 +216,7 @@ class TestWikiViews(OsfTestCase):
         assert_equal(res.status_code, 200)
         self.project.reload()
         wiki = self.project.get_wiki_version(new_wname)
-        assert_equal(wiki.page_name, new_wname)
+        assert_equal(wiki.wiki_page.page_name, new_wname)
 
         # updating content should return correct url as well.
         res = self.app.post(url, {'content': 'updated content'}, auth=self.user.auth).follow()
@@ -230,7 +230,7 @@ class TestWikiViews(OsfTestCase):
         assert_equal(res.status_code, 200)
         self.project.reload()
         wiki = self.project.get_wiki_version(new_wname)
-        assert_equal(wiki.page_name, new_wname)
+        assert_equal(wiki.wiki_page.page_name, new_wname)
         assert_equal(wiki.content, new_wiki_content)
         assert_equal(res.status_code, 200)
 
@@ -370,7 +370,7 @@ class TestWikiViews(OsfTestCase):
     def test_wiki_id_url_get_returns_302_and_resolves(self):
         name = 'page by id'
         self.project.update_node_wiki(name, 'some content', Auth(self.project.creator))
-        page = self.project.get_wiki_version(name)
+        page = self.project.get_wiki_page(name)
         page_url = self.project.web_url_for('project_wiki_view', wname=page.page_name, _guid=True)
         url = self.project.web_url_for('project_wiki_id_page', wid=page._primary_key, _guid=True)
         res = self.app.get(url)
@@ -527,7 +527,7 @@ class TestWikiDelete(OsfTestCase):
         self.project.update_node_wiki(SPECIAL_CHARACTERS_ALLOWED, 'Hello Special Characters', self.consolidate_auth)
         self.special_characters_wiki = self.project.get_wiki_version(SPECIAL_CHARACTERS_ALLOWED)
         wiki_page = self.special_characters_wiki.wiki_page
-        assert_in(to_mongo_key(SPECIAL_CHARACTERS_ALLOWED), [wiki.page_name.lower() for wiki in self.project.wikis.all()])
+        assert_in(SPECIAL_CHARACTERS_ALLOWED, [wiki.page_name.lower() for wiki in self.project.wikis.all()])
         url = self.project.api_url_for(
             'project_wiki_delete',
             wname=SPECIAL_CHARACTERS_ALLOWED
@@ -557,7 +557,7 @@ class TestWikiDelete(OsfTestCase):
         assert_true(wiki_page.is_deleted)
         # Creates new wiki with same name
         self.project.update_node_wiki('Hippos', 'Hello again hippos', self.consolidate_auth)
-        wiki_page.reload()
+        wiki_page = self.project.get_wiki_page('Hippos')
         assert_equal(wiki_page.current_version_number, 1)
         self.project.update_node_wiki('Hippos', 'Hello again hippopotamus', self.consolidate_auth)
         wiki_page.reload()
@@ -600,7 +600,7 @@ class TestWikiRename(OsfTestCase):
 
         new_wiki = self.project.get_wiki_version(new_name)
         assert_true(new_wiki)
-        assert_equal(new_wiki._primary_key, self.page._primary_key)
+        assert_equal(new_wiki.wiki_page._primary_key, self.page.wiki_page._primary_key)
         assert_equal(new_wiki.content, self.page.content)
         assert_equal(new_wiki.identifier, self.page.identifier)
 
@@ -735,10 +735,11 @@ class TestWikiLinks(OsfTestCase):
     # Regression test for https://sentry.osf.io/osf/production/group/310/
     def test_bad_links(self):
         content = u'<span></span><iframe src="http://httpbin.org/"></iframe>'
+        user = AuthUserFactory()
         node = ProjectFactory()
         wiki_page = WikiFactory(
             user=user,
-            node=project,
+            node=node,
         )
         wiki = WikiVersionFactory(
             content=content,
@@ -1324,14 +1325,14 @@ class TestWikiMenu(OsfTestCase):
                 'page': {
                     'url': self.project.web_url_for('project_wiki_view', wname='home', _guid=True),
                     'name': 'Home',
-                    'id': home_page._primary_key,
+                    'id': home_page.wiki_page._primary_key,
                 }
             },
             {
                 'page': {
                     'url': self.project.web_url_for('project_wiki_view', wname='zoo', _guid=True),
                     'name': 'zoo',
-                    'id': zoo_page._primary_key,
+                    'id': zoo_page.wiki_page._primary_key,
                 }
             }
         ]
@@ -1347,7 +1348,7 @@ class TestWikiMenu(OsfTestCase):
                 'page': {
                     'url': self.project.web_url_for('project_wiki_view', wname='home', _guid=True),
                     'name': 'Home',
-                    'id': home_page._primary_key,
+                    'id': home_page.wiki_page._primary_key,
                 }
             }
         ]
@@ -1375,7 +1376,7 @@ class TestWikiMenu(OsfTestCase):
                         'page': {
                             'url': self.component.web_url_for('project_wiki_view', wname='zoo', _guid=True),
                             'name': 'zoo',
-                            'id': zoo_page._primary_key,
+                            'id': zoo_page.wiki_page._primary_key,
                         },
                     }
                 ],

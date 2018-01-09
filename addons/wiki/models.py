@@ -205,7 +205,7 @@ class WikiPage(GuidMixin, BaseModel):
             return None
 
     def get_versions(self):
-        return self.versions.all()
+        return self.versions.all().order_by('-date')
 
     def rename(self, new_name, save=True):
         self.page_name = new_name
