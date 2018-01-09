@@ -722,13 +722,11 @@ class TestWikiCommentDetailView(CommentDetailMixin):
     @pytest.fixture()
     def wiki(self, user, private_project):
         with mock.patch('osf.models.AbstractNode.update_search'):
-            wiki_page = WikiFactory(
+            wiki = WikiFactory(
                 user=user,
                 node=private_project,
             )
-            wiki = WikiVersionFactory(
-                wiki_page=wiki_page,
-            )
+            return wiki
 
     @pytest.fixture()
     def comment(self, user, private_project, wiki):
@@ -752,12 +750,9 @@ class TestWikiCommentDetailView(CommentDetailMixin):
     @pytest.fixture()
     def public_wiki(self, user, public_project):
         with mock.patch('osf.models.AbstractNode.update_search'):
-            wiki_page = WikiFactory(
+            return WikiFactory(
                 user=user,
                 node=public_project,
-            )
-            return WikiVersionFactory(
-                wiki_page=wiki_page,
             )
 
     @pytest.fixture()
@@ -785,15 +780,10 @@ class TestWikiCommentDetailView(CommentDetailMixin):
     @pytest.fixture()
     def registration_wiki(self, registration, user):
         with mock.patch('osf.models.AbstractNode.update_search'):
-            wiki_page = WikiFactory(
+            return WikiFactory(
                 user=user,
                 node=registration,
             )
-            return WikiVersionFactory(
-                wiki_page=wiki_page,
-            )
-
-
 
     @pytest.fixture()
     def registration_comment(self, user, registration, registration_wiki):
@@ -824,10 +814,7 @@ class TestWikiCommentDetailView(CommentDetailMixin):
             user=user,
             node=project,
         )
-        test_wiki = WikiVersionFactory(
-            wiki_page=wiki_page,
-        )
-        comment = CommentFactory(node=project, target=Guid.load(test_wiki._id), user=non_contrib)
+        comment = CommentFactory(node=project, target=Guid.load(wiki_page._id), user=non_contrib)
         url = '/{}comments/{}/'.format(API_BASE, comment._id)
         payload = set_up_payload(comment._id)
         res = app.put_json_api(url, payload, auth=non_contrib.auth)
@@ -840,10 +827,7 @@ class TestWikiCommentDetailView(CommentDetailMixin):
             user=user,
             node=project,
         )
-        test_wiki = WikiVersionFactory(
-            wiki_page=wiki_page,
-        )
-        comment = CommentFactory(node=project, target=Guid.load(test_wiki._id), user=non_contrib)
+        comment = CommentFactory(node=project, target=Guid.load(wiki_page._id), user=non_contrib)
         project.comment_level = 'private'
         project.save()
         url = '/{}comments/{}/'.format(API_BASE, comment._id)
@@ -858,10 +842,7 @@ class TestWikiCommentDetailView(CommentDetailMixin):
             user=user,
             node=project,
         )
-        test_wiki = WikiVersionFactory(
-            wiki_page=wiki_page,
-        )
-        comment = CommentFactory(node=project, target=Guid.load(test_wiki._id), user=non_contrib)
+        comment = CommentFactory(node=project, target=Guid.load(wiki_page._id), user=non_contrib)
         url = '/{}comments/{}/'.format(API_BASE, comment._id)
         res = app.delete_json_api(url, auth=non_contrib.auth)
         assert res.status_code == 204
