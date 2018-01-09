@@ -245,7 +245,7 @@ class TestAUser(OsfTestCase):
         non_ascii = to_mongo_key('WöRlÐé')
         project.update_node_wiki('WöRlÐé', 'new content', Auth(self.user))
         wv = project.get_wiki_version(non_ascii)
-        assert wv.page_name.upper() == non_ascii.decode('utf-8').upper()
+        assert wv.wiki_page.page_name.upper() == non_ascii.decode('utf-8').upper()
 
     def test_noncontributor_cannot_see_wiki_if_no_content(self):
         user2 = UserFactory()
@@ -518,12 +518,9 @@ class TestShortUrls(OsfTestCase):
         # improvements to factories from @rliebz
         self.component.set_privacy('public', auth=self.consolidate_auth)
         self.component.set_privacy('private', auth=self.consolidate_auth)
-        wiki_page = WikiFactory(
+        self.wiki = WikiFactory(
             user=self.user,
             node=self.component,
-        )
-        self.wiki = WikiVersionFactory(
-            wiki_page=wiki_page,
         )
 
     def _url_to_body(self, url):
