@@ -83,7 +83,7 @@ def _get_wiki_versions(node, name, anonymous=False):
             'user_fullname': privacy_info_handle(version.user.fullname, anonymous, name=True),
             'date': '{} UTC'.format(version.date.replace(microsecond=0).isoformat().replace('T', ' ')),
         }
-        for version in versions.order_by('-date')
+        for version in versions
     ]
 
 def _get_wiki_pages_current(node):
