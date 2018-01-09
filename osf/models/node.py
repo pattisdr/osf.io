@@ -2668,7 +2668,7 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
 
     def get_wiki_pages_current(self):
         WikiVersion = apps.get_model('addons_wiki.WikiVersion')
-        wiki_page_ids = self.wikis.filter(is_deleted=False)
+        wiki_page_ids = self.wikis.filter(is_deleted=False).values_list('id', flat=True)
         return WikiVersion.objects.annotate(name=F('wiki_page__page_name'), newest_version=Max('wiki_page__versions__identifier')).filter(identifier=F('newest_version'), wiki_page__id__in=wiki_page_ids)
 
     def get_wiki_page(self, name=None, id=None):
