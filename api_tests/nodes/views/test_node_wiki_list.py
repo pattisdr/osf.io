@@ -23,7 +23,8 @@ class TestNodeWikiList:
         def add_page(node, user):
             with mock.patch('osf.models.AbstractNode.update_search'):
                 wiki_page = WikiFactory(node=node, user=user)
-                return WikiVersionFactory(wiki_page=wiki_page)
+                wiki_version = WikiVersionFactory(wiki_page=wiki_page)
+                return wiki_page
         return add_page
 
     @pytest.fixture()
@@ -122,7 +123,7 @@ class TestNodeWikiList:
         res = app.get(private_registration_url, auth=user.auth)
         assert res.status_code == 200
         wiki_ids = [wiki['id'] for wiki in res.json['data']]
-        assert private_registration.get_wiki_version('home')._id in wiki_ids
+        assert private_registration.get_wiki_page('home')._id in wiki_ids
 
     def test_wikis_not_returned_for_withdrawn_registration(self, app, user, private_registration, private_registration_url):
         private_registration.is_public = True
@@ -204,7 +205,8 @@ class TestFilterNodeWikiList:
     def wiki(self, user, private_project):
         with mock.patch('osf.models.AbstractNode.update_search'):
             wiki_page = WikiFactory(node=private_project, user=user)
-            return WikiVersionFactory(wiki_page=wiki_page)
+            wiki_version = WikiVersionFactory(wiki_page=wiki_page)
+            return wiki_page
 
     @pytest.fixture()
     def date(self, wiki):
