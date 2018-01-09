@@ -86,10 +86,6 @@ class WikiVersion(ObjectIDMixin, BaseModel):
     date = NonNaiveDateTimeField(auto_now_add=True)
 
     @property
-    def _primary_key(self):
-        return self._id
-
-    @property
     def is_current(self):
         return not self.wiki_page.is_deleted and int(self.identifier) == self.wiki_page.current_version_number
 
@@ -145,21 +141,14 @@ class WikiVersion(ObjectIDMixin, BaseModel):
 
     def clone_version(self, wiki_page):
         """Clone a node wiki page.
-        :param node: The Node of the cloned wiki page
-        :return: The cloned wiki page
+        :param wiki_page: The wiki_page you want attached to the clone.
+        :return: The cloned wiki version
         """
         clone = self.clone()
         clone.wiki_page = wiki_page
         clone.user = self.user
         clone.save()
         return clone
-
-    @property
-    def deep_url(self):
-        return u'{}wiki/{}/'.format(self.wiki_page.node.deep_url, self.page_name)
-
-    def to_json(self, user):
-        return {}
 
     @property
     def absolute_api_v2_url(self):
@@ -199,8 +188,7 @@ class WikiPage(GuidMixin, BaseModel):
         return u'{}wiki/{}/'.format(self.node.url, self.page_name)
 
     def create_version(self, user, content):
-        current_version = 0 if self.is_deleted else self.current_version_number
-        version = WikiVersion(user=user, wiki_page=self, content=content, identifier=current_version + 1)
+        version = WikiVersion(user=user, wiki_page=self, content=content, identifier=self.current_version_number + 1)
         version.save()
         return version
 
@@ -234,7 +222,7 @@ class WikiPage(GuidMixin, BaseModel):
         return u'{}wiki/{}/'.format(self.node.deep_url, self.page_name)
 
     def clone_wiki(self, node_id):
-        """Clone a node wiki page.
+        """Clone a wiki page.
         :param node: The Node of the cloned wiki page
         :return: The cloned wiki page
         """
