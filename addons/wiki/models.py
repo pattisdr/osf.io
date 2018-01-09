@@ -137,6 +137,8 @@ class WikiVersion(ObjectIDMixin, BaseModel):
         rv = super(WikiVersion, self).save(*args, **kwargs)
         if self.wiki_page.node:
             self.wiki_page.node.update_search()
+        self.wiki_page.date = self.date
+        self.wiki_page.save()
         return rv
 
     def clone_version(self, wiki_page):
