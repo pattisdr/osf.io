@@ -45,6 +45,7 @@ from osf.models.tag import Tag
 from osf.models.user import OSFUser
 from osf.models.validators import validate_doi, validate_title
 from framework.auth.core import Auth, get_user
+from addons.wiki import utils as wiki_utils
 from osf.utils.datetime_aware_jsonfield import DateTimeAwareJSONField
 from osf.utils.fields import NonNaiveDateTimeField
 from osf.utils.requests import DummyRequest, get_request_and_user_id
@@ -2670,13 +2671,15 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         wiki_page_ids = self.wikis.filter(is_deleted=False)
         return WikiVersion.objects.annotate(name=F('wiki_page__page_name'), newest_version=Max('wiki_page__versions__identifier')).filter(identifier=F('newest_version'), wiki_page__id__in=wiki_page_ids)
 
-    def get_wiki_page(self, name):
+    def get_wiki_page(self, name=None, id=None):
         WikiPage = apps.get_model('addons_wiki.WikiPage')
-        try:
-            name = (name or '').strip()
-            return self.wikis.get(page_name__iexact=name, is_deleted=False)
-        except WikiPage.DoesNotExist:
-            return None
+        if name:
+            try:
+                name = (name or '').strip()
+                return self.wikis.get(page_name__iexact=name, is_deleted=False)
+            except WikiPage.DoesNotExist:
+                return None
+        return WikiPage.load(id)
 
     def get_wiki_version(self, name=None, version=None, id=None):
         WikiVersion = apps.get_model('addons_wiki.WikiVersion')
@@ -2764,8 +2767,8 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         new_name = (new_name or '').strip()
         page = self.get_wiki_page(name)
         existing_wiki_page = self.get_wiki_page(new_name)
-        key = name.lower()
-        new_key = new_name.lower()
+        key = wiki_utils.to_mongo_key(name)
+        new_key = wiki_utils.to_mongo_key(new_name)
 
         if key == 'home':
             raise PageCannotRenameError('Cannot rename wiki home page')

@@ -364,9 +364,9 @@ def project_wiki_home(**kwargs):
 @must_have_addon('wiki', 'node')
 def project_wiki_id_page(auth, wid, **kwargs):
     node = kwargs['node'] or kwargs['project']
-    wiki_version = node.get_wiki_version(id=wid)
-    if wiki_version:
-        return redirect(node.web_url_for('project_wiki_view', wname=wiki_version.page_name, _guid=True))
+    wiki = node.get_wiki_page(id=wid)
+    if wiki:
+        return redirect(node.web_url_for('project_wiki_view', wname=wiki.page_name, _guid=True))
     else:
         raise WIKI_PAGE_NOT_FOUND_ERROR
 
