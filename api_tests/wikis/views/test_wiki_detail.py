@@ -24,8 +24,8 @@ class TestWikiDetailView(ApiWikiTestCase):
         from addons.wiki.tests.factories import WikiFactory, WikiVersionFactory
         with mock.patch('osf.models.AbstractNode.update_search'):
             self.public_wiki_page = WikiFactory(node=self.public_project, user=self.user)
-            self.public_wiki= WikiVersionFactory(wiki_page=self.public_wiki_page, user=self.user)
-        self.public_url = '/{}wikis/{}/'.format(API_BASE, self.public_wiki._id)
+            self.public_wiki = WikiVersionFactory(wiki_page=self.public_wiki_page, user=self.user)
+        self.public_url = '/{}wikis/{}/'.format(API_BASE, self.public_wiki_page._id)
         return self.public_wiki_page
 
     def _set_up_private_project_with_wiki_page(self):
@@ -36,14 +36,14 @@ class TestWikiDetailView(ApiWikiTestCase):
     def _set_up_public_registration_with_wiki_page(self):
         self._set_up_public_project_with_wiki_page()
         self.public_registration = RegistrationFactory(project=self.public_project, user=self.user, is_public=True)
-        self.public_registration_wiki_id = self.public_registration.get_wiki_version('home', 1)._id
+        self.public_registration_wiki_id = self.public_registration.get_wiki_page('home')._id
         self.public_registration.save()
         self.public_registration_url = '/{}wikis/{}/'.format(API_BASE, self.public_registration_wiki_id)
 
     def _set_up_private_registration_with_wiki_page(self):
         self._set_up_private_project_with_wiki_page()
         self.private_registration = RegistrationFactory(project=self.private_project, user=self.user)
-        self.private_registration_wiki_id = self.private_registration.get_wiki_version('home', 1)._id
+        self.private_registration_wiki_id = self.private_registration.get_wiki_page('home')._id
         self.private_registration.save()
         self.private_registration_url = '/{}wikis/{}/'.format(API_BASE, self.private_registration_wiki_id)
 
@@ -51,19 +51,19 @@ class TestWikiDetailView(ApiWikiTestCase):
         self._set_up_public_project_with_wiki_page()
         res = self.app.get(self.public_url)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data']['id'], self.public_wiki._id)
+        assert_equal(res.json['data']['id'], self.public_wiki_page._id)
 
     def test_public_node_logged_in_non_contributor_can_view_wiki(self):
         self._set_up_public_project_with_wiki_page()
         res = self.app.get(self.public_url, auth=self.non_contributor.auth)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data']['id'], self.public_wiki._id)
+        assert_equal(res.json['data']['id'], self.public_wiki_page._id)
 
     def test_public_node_logged_in_contributor_can_view_wiki(self):
         self._set_up_public_project_with_wiki_page()
         res = self.app.get(self.public_url, auth=self.user.auth)
         assert_equal(res.status_code, 200)
-        assert_equal(res.json['data']['id'], self.public_wiki._id)
+        assert_equal(res.json['data']['id'], self.public_wiki_page._id)
 
     def test_private_node_logged_out_user_cannot_view_wiki(self):
         self._set_up_private_project_with_wiki_page()
@@ -172,7 +172,7 @@ class TestWikiDetailView(ApiWikiTestCase):
         res = self.app.get(self.public_url)
         assert_equal(res.status_code, 200)
         url = res.json['data']['relationships']['comments']['links']['related']['href']
-        comment = CommentFactory(node=self.public_project, target=Guid.load(self.public_wiki._id), user=self.user)
+        comment = CommentFactory(node=self.public_project, target=Guid.load(self.public_wiki_page._id), user=self.user)
         res = self.app.get(url)
         assert_equal(res.status_code, 200)
         assert_equal(res.json['data'][0]['type'], 'comments')
@@ -207,7 +207,7 @@ class TestWikiDetailView(ApiWikiTestCase):
         self._set_up_public_project_with_wiki_page()
         res = self.app.get(self.public_url)
         url = res.json['data']['links']['download']
-        expected_url = '/{}wikis/{}/content/'.format(API_BASE, self.public_wiki._id)
+        expected_url = '/{}wikis/{}/content/'.format(API_BASE, self.public_wiki_page._id)
         assert_equal(res.status_code, 200)
         assert_in(expected_url, url)
 
@@ -216,19 +216,17 @@ class TestWikiDetailView(ApiWikiTestCase):
         res = self.app.get(url, expect_errors=True)
         assert_equal(res.status_code, 404)
 
-    def test_old_wiki_versions_not_returned(self):
+    def test_deleted_wiki_not_returned(self):
         self._set_up_public_project_with_wiki_page()
-        # TODO: Remove mocking when StoredFileNode is implemented
-        with mock.patch('osf.models.AbstractNode.update_search'):
-            current_wiki = WikiVersionFactory(wiki_page=self.public_wiki_page, identifier=2)
-        old_version = self.public_project.get_wiki_version(current_wiki.page_name, 1)
-        url = '/{}wikis/{}/'.format(API_BASE, old_version._id)
-        res = self.app.get(url, expect_errors=True)
-        assert_equal(res.status_code, 404)
-
-        url = '/{}wikis/{}/'.format(API_BASE, current_wiki._id)
+        url = '/{}wikis/{}/'.format(API_BASE, self.public_wiki_page._id)
         res = self.app.get(url)
         assert_equal(res.status_code, 200)
+        self.public_wiki_page.is_deleted = True
+        self.public_wiki_page.save()
+
+        res = self.app.get(url, expect_errors=True)
+        assert_equal(res.status_code, 410)
+
 
     def test_public_node_wiki_relationship_links(self):
         self._set_up_public_project_with_wiki_page()
