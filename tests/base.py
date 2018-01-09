@@ -336,7 +336,8 @@ class ApiWikiTestCase(ApiTestCase):
         # Mock out update_search. TODO: Remove when StoredFileNode is implemented
         with mock.patch('osf.models.AbstractNode.update_search'):
             wiki_page = WikiFactory(node=node, user=user)
-            return WikiVersionFactory(wiki_page=wiki_page)
+            wiki_version = WikiVersionFactory(wiki_page=wiki_page)
+            return wiki_page
 
 # From Flask-Security: https://github.com/mattupstate/flask-security/blob/develop/flask_security/utils.py
 class CaptureSignals(object):
