@@ -215,7 +215,7 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
         raise WIKI_INVALID_VERSION_ERROR
 
     # ensure home is always lower case since it cannot be renamed
-    if wiki_key == 'home':
+    if wiki_name.lower() == 'home':
         wiki_name = 'home'
 
     if wiki_version:
@@ -234,7 +234,7 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
             wiki_utils.generate_private_uuid(node, wiki_name)
         sharejs_uuid = wiki_utils.get_sharejs_uuid(node, wiki_name)
     else:
-        if (not wiki_page or wiki_page.is_deleted) and wiki_key != 'home':
+        if not wiki_page and wiki_key != 'home':
             raise WIKI_PAGE_NOT_FOUND_ERROR
         if 'edit' in request.args:
             if wiki_settings.is_publicly_editable:
