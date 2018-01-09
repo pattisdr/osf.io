@@ -294,12 +294,12 @@ class TestRegisterNode:
         registration = project.register_node(get_default_metaschema(), Auth(user), '', None)
         assert registration.wiki_private_uuids == {}
 
-        registration_wiki_current = registration.get_wiki_version(current_wiki.page_name)
+        registration_wiki_current = registration.get_wiki_version(current_wiki.wiki_page.page_name)
         assert registration_wiki_current.wiki_page.node == registration
         assert registration_wiki_current._id != current_wiki._id
         assert registration_wiki_current.identifier == 2
 
-        registration_wiki_version = registration.get_wiki_version(wiki.page_name, version=1)
+        registration_wiki_version = registration.get_wiki_version(wiki.wiki_page.page_name, version=1)
         assert registration_wiki_version.wiki_page.node == registration
         assert registration_wiki_version._id != wiki._id
         assert registration_wiki_version.identifier == 1

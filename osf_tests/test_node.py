@@ -2856,12 +2856,12 @@ class TestForkNode:
         fork = project.fork_node(auth)
         assert fork.wiki_private_uuids == {}
 
-        fork_wiki_current = fork.get_wiki_version(current_wiki.page_name)
+        fork_wiki_current = fork.get_wiki_version(current_wiki.wiki_page.page_name)
         assert fork_wiki_current.wiki_page.node == fork
         assert fork_wiki_current._id != current_wiki._id
         assert fork_wiki_current.identifier == 2
 
-        fork_wiki_version = fork.get_wiki_version(wiki.page_name, version=1)
+        fork_wiki_version = fork.get_wiki_version(wiki.wiki_page.page_name, version=1)
         assert fork_wiki_version.wiki_page.node == fork
         assert fork_wiki_version._id != wiki._id
         assert fork_wiki_version.identifier == 1
