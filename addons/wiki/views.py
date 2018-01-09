@@ -97,7 +97,6 @@ def _get_wiki_pages_current(node):
         for page in node.get_wiki_pages_current().order_by(F('name'))
     ]
 
-
 def _get_wiki_api_urls(node, name, additional_urls=None):
     urls = {
         'base': node.api_url_for('project_wiki_home'),
@@ -140,10 +139,9 @@ def wiki_page_draft(wname, **kwargs):
 def _wiki_page_content(wname, wver=None, **kwargs):
     node = kwargs['node'] or kwargs['project']
     wiki_version = node.get_wiki_version(wname, version=wver)
-    rendered_before_update = wiki_version.rendered_before_update if wiki_version else False
     return {
         'wiki_content': wiki_version.content if wiki_version else '',
-        'rendered_before_update': rendered_before_update
+        'rendered_before_update': wiki_version.rendered_before_update if wiki_version else False
     }
 
 @must_be_valid_project
@@ -217,7 +215,7 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
         raise WIKI_INVALID_VERSION_ERROR
 
     # ensure home is always lower case since it cannot be renamed
-    if wiki_name.lower() == 'home':
+    if wiki_key  == 'home':
         wiki_name = 'home'
 
     if wiki_version:
