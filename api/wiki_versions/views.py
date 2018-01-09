@@ -1,10 +1,11 @@
 from rest_framework import generics, permissions as drf_permissions
 from rest_framework.exceptions import NotFound
 
+from api.base.exceptions import Gone
 from api.base import permissions as base_permissions
 from api.base.views import JSONAPIBaseView
 from api.wiki_versions.permissions import ContributorOrPublic, ExcludeWithdrawals
-from api.wikis.serializers import (
+from api.wiki_versions.serializers import (
     WikiVersionSerializer,
 )
 
@@ -14,7 +15,7 @@ from addons.wiki.models import WikiVersion
 
 class WikiVersionMixin(object):
     """Mixin with convenience methods for retrieving the wiki version based on the
-    URL. By default, fetches the wiki version based on the wiki-version_id kwarg.
+    URL. By default, fetches the wiki version based on the wiki_version_id kwarg.
     """
     wiki_lookup_url_kwarg = 'wiki_version_id'
 
@@ -23,6 +24,9 @@ class WikiVersionMixin(object):
         wiki = WikiVersion.load(pk)
         if not wiki:
             raise NotFound
+
+        if wiki.wiki_page.is_deleted:
+            raise Gone
 
         if check_permissions:
             # May raise a permission denied
@@ -35,16 +39,26 @@ class WikiVersionDetail(JSONAPIBaseView, generics.RetrieveAPIView, WikiVersionMi
 
     ###Permissions
 
-    Wiki pages on public nodes are given read-only access to everyone. Wiki pages on private nodes are only visible to
+    Wiki versions on public nodes are given read-only access to everyone. Wiki versions on private nodes are only visible to
     contributors and administrators on the parent node.
 
     Note that if an anonymous view_only key is being used, the user relationship will not be exposed.
+
+    ##Attributes
+
+    OSF wiki entities have the "wikis" `type`.
+
+        name                        type                   description
+        ======================================================================================================
+        date_modified               iso8601 timestamp      timestamp when the wiki version was last updated
+        content_type                string                 MIME-type
+        identifier                  integer                version number of the wiki
 
     ##Relationships
 
     ###User
 
-    The user who created the wiki.
+    The user who created the wiki version.
 
     ###WikiPage
 
@@ -53,6 +67,7 @@ class WikiVersionDetail(JSONAPIBaseView, generics.RetrieveAPIView, WikiVersionMi
     ##Links
 
         self:  the canonical api endpoint of this wiki
+        download: the link to retrive the contents of the wiki version
 
     ##Query Params
 
@@ -73,7 +88,7 @@ class WikiVersionDetail(JSONAPIBaseView, generics.RetrieveAPIView, WikiVersionMi
     required_read_scopes = [CoreScopes.WIKI_BASE_READ]
     required_write_scopes = [CoreScopes.NULL]
 
-    view_category = 'wiki_versions'
+    view_category = 'wiki-versions'
     view_name = 'wiki-version-detail'
 
     # overrides RetrieveAPIView

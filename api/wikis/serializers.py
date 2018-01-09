@@ -115,32 +115,6 @@ class RegistrationWikiSerializer(WikiSerializer):
     )
 
 
-class WikiVersionSerializer(JSONAPISerializer):
-    id = IDField(source='_id', read_only=True)
-    type = TypeField()
-    identifier = ser.IntegerField()
-    date_modified = DateByVersion(source='date')
-    content = ser.CharField()
-
-    wiki_page = RelationshipField(
-        related_view='wikis:wiki-detail',
-        related_view_kwargs={'wiki_id': '<wiki_page._id>'}
-    )
-
-    user = RelationshipField(
-        related_view='users:user-detail',
-        related_view_kwargs={'user_id': '<user._id>'}
-    )
-
-    links = LinksField({})
-
-    def get_absolute_url(self, obj):
-        return obj.get_absolute_url()
-
-    class Meta:
-        type_ = 'wiki-version'
-
-
 class NodeWikiDetailSerializer(NodeWikiSerializer):
     """
     Overrides NodeWikiSerializer to make id required.

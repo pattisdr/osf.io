@@ -9,9 +9,11 @@ from api.base.renderers import PlainTextRenderer
 from api.wikis.permissions import ContributorOrPublic, ExcludeWithdrawals
 from api.wikis.serializers import (
     WikiSerializer,
-    WikiVersionSerializer,
     NodeWikiDetailSerializer,
     RegistrationWikiDetailSerializer,
+)
+from api.wiki_versions.serializers import (
+    WikiVersionSerializer,
 )
 
 from framework.auth.oauth_scopes import CoreScopes
@@ -140,10 +142,50 @@ class WikiContent(JSONAPIBaseView, generics.RetrieveAPIView, WikiMixin):
 
     def get(self, request, **kwargs):
         wiki = self.get_wiki()
-        return Response(wiki.content)
+        return Response(wiki.get_version().content)
 
 class WikiVersions(JSONAPIBaseView, generics.ListAPIView, WikiMixin):
-    """view for rendering all versions of a particular WikiPage """
+    """View for rendering all versions of a particular WikiPage
+
+    ###Permissions
+
+    Wiki versions on public nodes are given read-only access to everyone. Wiki versions on private nodes are only visible to
+    contributors and administrators on the parent node.
+
+    Note that if an anonymous view_only key is being used, the user relationship will not be exposed.
+
+    ##Attributes
+
+    OSF wiki entities have the "wikis" `type`.
+
+        name                        type                   description
+        ======================================================================================================
+        date_modified               iso8601 timestamp      timestamp when the wiki version was last updated
+        content_type                string                 MIME-type
+        identifier                  integer                version number of the wiki
+
+    ##Relationships
+
+    ###User
+
+    The user who created the wiki version.
+
+    ###WikiPage
+
+    The wiki that this version belongs to
+
+    ##Links
+
+        self:  the canonical api endpoint of this wiki
+        download: the link to retrive the contents of the wiki version
+
+    ##Query Params
+
+    *None*.
+
+    #This Request/Response
+
+    """
 
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
