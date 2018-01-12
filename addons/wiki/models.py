@@ -13,11 +13,13 @@ from markdown.extensions import codehilite, fenced_code, wikilinks
 from osf.models import AbstractNode, NodeLog
 from osf.models.base import BaseModel, GuidMixin, ObjectIDMixin
 from osf.utils.fields import NonNaiveDateTimeField
+from osf.utils.requests import DummyRequest, get_request_and_user_id
 from website import settings
 from addons.wiki import utils as wiki_utils
 from website.exceptions import NodeStateError
 from website.util import api_v2_url
 from website.files.exceptions import VersionNotFoundError
+from website.util import get_headers_from_request
 
 from .exceptions import (
     NameEmptyError,
@@ -139,7 +141,19 @@ class WikiVersion(ObjectIDMixin, BaseModel):
             self.wiki_page.node.update_search()
         self.wiki_page.date = self.date
         self.wiki_page.save()
+        self.spam_check()
         return rv
+
+    def spam_check(self):
+        request, user_id = get_request_and_user_id()
+        request_headers = {}
+        if not isinstance(request, DummyRequest):
+            request_headers = {
+                k: v
+                for k, v in get_headers_from_request(request).items()
+                if isinstance(v, basestring)
+            }
+        return self.wiki_page.node.check_spam(self.user, ['wiki_pages_current'], request_headers)
 
     def clone_version(self, wiki_page):
         """Clone a node wiki page.

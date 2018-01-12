@@ -225,7 +225,6 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         'embargo',
         'is_public',
         'is_deleted',
-        'wiki_pages_current',
         'node_license',
         'preprint_file',
     }
@@ -234,7 +233,6 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
     SPAM_CHECK_FIELDS = {
         'title',
         'description',
-        'wiki_pages_current',
     }
 
     # Fields that are writable by Node.update
