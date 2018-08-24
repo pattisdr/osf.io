@@ -177,7 +177,7 @@ class TestCommentModel:
                 user.is_registered = False
                 user.is_claimed = False
                 user.save()
-                node.add_contributor(user, visible=False, permissions=[permissions.READ], save=True)
+                node.add_contributor(user, visible=False, permissions=permissions.READ, save=True)
 
                 Comment.create(
                     auth=auth,
@@ -276,7 +276,7 @@ class TestCommentModel:
                 user.is_registered = False
                 user.is_claimed = False
                 user.save()
-                comment.node.add_contributor(user, visible=False, permissions=[permissions.READ])
+                comment.node.add_contributor(user, visible=False, permissions=permissions.READ)
                 comment.node.save()
 
                 comment.edit(
@@ -321,7 +321,7 @@ class TestCommentModel:
         project = ProjectFactory()
         user = UserFactory()
         project.set_privacy('private')
-        project.add_contributor(user, permissions=[permissions.READ])
+        project.add_contributor(user, permissions=permissions.READ)
         project.save()
 
         assert project.can_comment(Auth(user=user))

@@ -208,8 +208,8 @@ class TestOSFUser:
         # Both the master and dupe are contributors
         project.add_contributor(user2, log=False)
         project.add_contributor(user, log=False)
-        project.set_permissions(user=user, permissions=['read'])
-        project.set_permissions(user=user2, permissions=['read', 'write', 'admin'])
+        project.set_permissions(user=user, permissions='read')
+        project.set_permissions(user=user2, permissions='admin')
         project.set_visible(user=user, visible=False)
         project.set_visible(user=user2, visible=True)
         project.save()
@@ -1997,7 +1997,7 @@ class TestUserGdprDelete:
         second_admin_contrib = UserFactory()
         project = ProjectFactory(creator=user)
         project.add_contributor(second_admin_contrib)
-        project.set_permissions(user=second_admin_contrib, permissions=['read', 'write', 'admin'])
+        project.set_permissions(user=second_admin_contrib, permissions='admin')
         project.save()
         return project
 
@@ -2006,7 +2006,7 @@ class TestUserGdprDelete:
         second_admin_contrib = UserFactory()
         project = ProjectFactory(creator=user)
         project.add_contributor(second_admin_contrib)
-        project.set_permissions(user=second_admin_contrib, permissions=['read', 'write', 'admin'])
+        project.set_permissions(user=second_admin_contrib, permissions='admin')
         user = project.creator
 
         node_settings = project.add_addon('github', auth=None)

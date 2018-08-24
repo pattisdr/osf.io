@@ -526,7 +526,7 @@ class TestNodeCommentCreate(NodeCommentsCreateMixin):
         project_private = ProjectFactory(
             is_public=False, creator=user, comment_level='private')
         project_private.add_contributor(
-            user_read_contrib, permissions=['read'])
+            user_read_contrib, permissions='read')
         project_private.save()
         url_private = '/{}nodes/{}/comments/'.format(
             API_BASE, project_private._id)
@@ -540,7 +540,7 @@ class TestNodeCommentCreate(NodeCommentsCreateMixin):
     def project_public_comment_private(self, user, user_read_contrib, payload):
         project_public = ProjectFactory(
             is_public=True, creator=user, comment_level='private')
-        project_public.add_contributor(user_read_contrib, permissions=['read'])
+        project_public.add_contributor(user_read_contrib, permissions='read')
         project_public.save()
         url_public = '/{}nodes/{}/comments/'.format(
             API_BASE, project_public._id)
@@ -554,7 +554,7 @@ class TestNodeCommentCreate(NodeCommentsCreateMixin):
     def project_public_comment_public(self, user, user_read_contrib, payload):
         """ Public project configured so that any logged-in user can comment."""
         project_public = ProjectFactory(is_public=True, creator=user)
-        project_public.add_contributor(user_read_contrib, permissions=['read'])
+        project_public.add_contributor(user_read_contrib, permissions='read')
         project_public.save()
         url_public = '/{}nodes/{}/comments/'.format(
             API_BASE, project_public._id)
@@ -568,7 +568,7 @@ class TestNodeCommentCreate(NodeCommentsCreateMixin):
     def project_private_comment_public(self, user, user_read_contrib, payload):
         project_private = ProjectFactory(is_public=False, creator=user)
         project_private.add_contributor(
-            user_read_contrib, permissions=['read'])
+            user_read_contrib, permissions='read')
         project_private.save()
         url_private = '/{}nodes/{}/comments/'.format(
             API_BASE, project_private._id)
@@ -955,7 +955,7 @@ class TestFileCommentCreate(NodeCommentsCreateMixin):
         project_private = ProjectFactory(
             is_public=False, creator=user, comment_level='private')
         project_private.add_contributor(
-            user_read_contrib, permissions=['read'])
+            user_read_contrib, permissions='read')
         project_private.save()
         url_private = '/{}nodes/{}/comments/'.format(
             API_BASE, project_private._id)
@@ -971,7 +971,7 @@ class TestFileCommentCreate(NodeCommentsCreateMixin):
     def project_public_comment_private(self, user, user_read_contrib, payload):
         project_public = ProjectFactory(
             is_public=True, creator=user, comment_level='private')
-        project_public.add_contributor(user_read_contrib, permissions=['read'])
+        project_public.add_contributor(user_read_contrib, permissions='read')
         project_public.save()
         url_public = '/{}nodes/{}/comments/'.format(
             API_BASE, project_public._id)
@@ -987,7 +987,7 @@ class TestFileCommentCreate(NodeCommentsCreateMixin):
     def project_public_comment_public(self, user, user_read_contrib, payload):
         """ Public project configured so that any logged-in user can comment."""
         project_public = ProjectFactory(is_public=True, creator=user)
-        project_public.add_contributor(user_read_contrib, permissions=['read'])
+        project_public.add_contributor(user_read_contrib, permissions='read')
         project_public.save()
         url_public = '/{}nodes/{}/comments/'.format(
             API_BASE, project_public._id)
@@ -1003,7 +1003,7 @@ class TestFileCommentCreate(NodeCommentsCreateMixin):
     def project_private_comment_public(self, user, user_read_contrib, payload):
         project_private = ProjectFactory(is_public=False, creator=user)
         project_private.add_contributor(
-            user_read_contrib, permissions=['read'])
+            user_read_contrib, permissions='read')
         project_private.save()
         url_private = '/{}nodes/{}/comments/'.format(
             API_BASE, project_private._id)
@@ -1085,7 +1085,7 @@ class TestWikiCommentCreate(NodeCommentsCreateMixin):
         project_private = ProjectFactory(
             is_public=False, creator=user, comment_level='private')
         project_private.add_contributor(
-            user_read_contrib, permissions=['read'])
+            user_read_contrib, permissions='read')
         project_private.save()
         url_private = '/{}nodes/{}/comments/'.format(
             API_BASE, project_private._id)
@@ -1102,7 +1102,7 @@ class TestWikiCommentCreate(NodeCommentsCreateMixin):
     def project_public_comment_private(self, user, user_read_contrib, payload):
         project_public = ProjectFactory(
             is_public=True, creator=user, comment_level='private')
-        project_public.add_contributor(user_read_contrib, permissions=['read'])
+        project_public.add_contributor(user_read_contrib, permissions='read')
         project_public.save()
         url_public = '/{}nodes/{}/comments/'.format(
             API_BASE, project_public._id)
@@ -1119,7 +1119,7 @@ class TestWikiCommentCreate(NodeCommentsCreateMixin):
     def project_public_comment_public(self, user, user_read_contrib, payload):
         """ Public project configured so that any logged-in user can comment."""
         project_public = ProjectFactory(is_public=True, creator=user)
-        project_public.add_contributor(user_read_contrib, permissions=['read'])
+        project_public.add_contributor(user_read_contrib, permissions='read')
         project_public.save()
         url_public = '/{}nodes/{}/comments/'.format(
             API_BASE, project_public._id)
@@ -1136,7 +1136,7 @@ class TestWikiCommentCreate(NodeCommentsCreateMixin):
     def project_private_comment_public(self, user, user_read_contrib, payload):
         project_private = ProjectFactory(is_public=False, creator=user)
         project_private.add_contributor(
-            user_read_contrib, permissions=['read'])
+            user_read_contrib, permissions='read')
         project_private.save()
         url_private = '/{}nodes/{}/comments/'.format(
             API_BASE, project_private._id)
@@ -1222,7 +1222,7 @@ class TestCommentRepliesCreate(NodeCommentsCreateMixin):
         project_private = ProjectFactory.create(
             is_public=False, creator=user, comment_level='private')
         project_private.add_contributor(
-            user_read_contrib, permissions=['read'], save=True)
+            user_read_contrib, permissions='read', save=True)
         comment_private = CommentFactory(node=project_private, user=user)
         url_private = '/{}nodes/{}/comments/'.format(
             API_BASE, project_private._id)
@@ -1238,7 +1238,7 @@ class TestCommentRepliesCreate(NodeCommentsCreateMixin):
         project_public = ProjectFactory.create(
             is_public=True, creator=user, comment_level='private')
         project_public.add_contributor(
-            user_read_contrib, permissions=['read'], save=True)
+            user_read_contrib, permissions='read', save=True)
         comment_public = CommentFactory(node=project_public, user=user)
         url_public = '/{}nodes/{}/comments/'.format(
             API_BASE, project_public._id)
@@ -1253,7 +1253,7 @@ class TestCommentRepliesCreate(NodeCommentsCreateMixin):
     def project_private_comment_public(self, user, user_read_contrib, payload):
         project_private = ProjectFactory(is_public=False, creator=user)
         project_private.add_contributor(
-            user_read_contrib, permissions=['read'], save=True)
+            user_read_contrib, permissions='read', save=True)
         comment_private = CommentFactory(node=project_private, user=user)
         comment_reply = CommentFactory(
             node=project_private,
@@ -1273,7 +1273,7 @@ class TestCommentRepliesCreate(NodeCommentsCreateMixin):
     def project_public_comment_public(self, user, user_read_contrib, payload):
         project_public = ProjectFactory(is_public=True, creator=user)
         project_public.add_contributor(
-            user_read_contrib, permissions=['read'], save=True)
+            user_read_contrib, permissions='read', save=True)
         comment_public = CommentFactory(node=project_public, user=user)
         comment_reply = CommentFactory(
             node=project_public,

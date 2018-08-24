@@ -808,7 +808,7 @@ class RegistrationRetractionViewsTestCase(OsfTestCase):
         self.registration.add_contributor(
             unreg,
             auth=Auth(self.user),
-            permissions=['read', 'write', 'admin']
+            permissions='admin'
         )
         self.registration.save()
         self.app.post_json(

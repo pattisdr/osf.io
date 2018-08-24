@@ -1027,7 +1027,7 @@ class TestWikiShareJSMongo(OsfTestCase):
         user = UserFactory()
         self.project.add_contributor(
             contributor=user,
-            permissions=['read', 'write', 'admin'],
+            permissions='admin',
             auth=Auth(user=self.user),
         )
         self.project.save()

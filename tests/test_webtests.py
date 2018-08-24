@@ -145,7 +145,7 @@ class TestAUser(OsfTestCase):
         project = ProjectFactory(creator=self.user)
         project.add_contributor(
             self.user,
-            permissions=['read', 'write', 'admin'],
+            permissions='admin',
             save=True)
         res = self.app.get('/{0}/addons/'.format(project._primary_key), auth=self.auth, auto_follow=True)
         assert_in('OSF Storage', res)
@@ -168,7 +168,7 @@ class TestAUser(OsfTestCase):
         project = ProjectFactory()
         project.add_contributor(
             self.user,
-            permissions=['read', 'write', 'admin'],
+            permissions='admin',
             save=True)
         # User goes to the project page
         res = self.app.get(project.url, auth=self.auth).maybe_follow()
@@ -179,7 +179,7 @@ class TestAUser(OsfTestCase):
         project = ProjectFactory()
         project.add_contributor(
             self.user,
-            permissions=['read', 'write'],
+            permissions='write',
             save=True)
         # User goes to the project page
         res = self.app.get(project.url, auth=self.auth).maybe_follow()
@@ -190,7 +190,7 @@ class TestAUser(OsfTestCase):
         project = ProjectFactory(is_public=True)
         project.add_contributor(
             self.user,
-            permissions=['read', 'write', 'admin'],
+            permissions='admin',
             save=True)
         # User goes to the project page
         res = self.app.get(project.url, auth=self.auth).maybe_follow()
@@ -201,7 +201,7 @@ class TestAUser(OsfTestCase):
         project = ProjectFactory(is_public=True)
         project.add_contributor(
             self.user,
-            permissions=['read', 'write'],
+            permissions='write',
             save=True)
         # User goes to the project page
         res = self.app.get(project.url, auth=self.auth).maybe_follow()
@@ -322,7 +322,7 @@ class TestComponents(OsfTestCase):
         non_admin = AuthUserFactory()
         self.component.add_contributor(
             non_admin,
-            permissions=['read', 'write'],
+            permissions='write',
             auth=self.consolidate_auth,
             save=True,
         )
@@ -346,7 +346,7 @@ class TestComponents(OsfTestCase):
         non_admin = AuthUserFactory()
         self.component.add_contributor(
             non_admin,
-            permissions=['read', 'write'],
+            permissions='write',
             auth=self.consolidate_auth,
             save=True,
         )
@@ -388,7 +388,7 @@ class TestPrivateLinkView(OsfTestCase):
         link2.save()
         self.project.add_contributor(
             self.user,
-            permissions=['read'],
+            permissions='read',
             save=True,
         )
         res = self.app.get(self.project_url, {'view_only': link2.key},
@@ -403,7 +403,7 @@ class TestPrivateLinkView(OsfTestCase):
     def test_no_warning_for_read_only_user_with_invalid_link(self):
         self.project.add_contributor(
             self.user,
-            permissions=['read'],
+            permissions='read',
             save=True,
         )
         res = self.app.get(self.project_url, {'view_only': 'not_valid'},
