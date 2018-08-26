@@ -1653,8 +1653,8 @@ class TestPreprintPermissions(OsfTestCase):
         self.preprint.save()
 
         project = ProjectFactory(creator=self.preprint.creator)
-        project.add_contributor(self.read_contrib, ['read'], save=True)
-        project.add_contributor(self.write_contrib, ['read', 'write'], save=True)
+        project.add_contributor(self.read_contrib, 'read', save=True)
+        project.add_contributor(self.write_contrib, 'write', save=True)
 
         self.preprint.add_contributor(self.read_contrib, 'admin', save=True)
         self.preprint.add_contributor(self.write_contrib, 'admin', save=True)
@@ -1686,9 +1686,9 @@ class TestPreprintPermissions(OsfTestCase):
         self.preprint.save()
 
         project = ProjectFactory(creator=self.preprint.creator)
-        project.add_contributor(self.read_contrib, ['read', 'write', 'admin'], save=True)
-        project.add_contributor(self.write_contrib, ['read', 'write', 'admin'], save=True)
-        project.add_contributor(self.noncontrib, ['read', 'write', 'admin'], save=True)
+        project.add_contributor(self.read_contrib, 'admin', save=True)
+        project.add_contributor(self.write_contrib, 'admin', save=True)
+        project.add_contributor(self.noncontrib, 'admin', save=True)
 
         # noncontrib
         with assert_raises(PermissionsError):

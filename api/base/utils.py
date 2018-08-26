@@ -140,7 +140,7 @@ def default_node_list_permission_queryset(user, model_cls):
     # **DO NOT** change the order of the querysets below.
     # If get_roots() is called on default_node_list_qs & default_node_permission_qs,
     # Django's alaising will break and the resulting QS will be empty and you will be sad.
-    return default_node_permission_queryset(user, model_cls) & default_node_list_queryset(model_cls)
+    return (default_node_permission_queryset(user, model_cls) & default_node_list_queryset(model_cls)).distinct('id', 'modified')
 
 def extend_querystring_params(url, params):
     scheme, netloc, path, query, _ = urlparse.urlsplit(url)

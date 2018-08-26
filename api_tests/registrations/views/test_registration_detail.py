@@ -207,11 +207,9 @@ class TestRegistrationUpdate:
         private_registration = RegistrationFactory(
             project=private_project, creator=user)
         private_registration.add_contributor(
-            read_only_contributor, permissions=[
-                permissions.READ])
+            read_only_contributor, permissions=permissions.READ)
         private_registration.add_contributor(
-            read_write_contributor, permissions=[
-                permissions.WRITE])
+            read_write_contributor, permissions=permissions.WRITE)
         private_registration.save()
         return private_registration
 
