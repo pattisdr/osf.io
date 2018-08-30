@@ -1,4 +1,5 @@
 from django.db import models
+from guardian.models import GroupObjectPermissionBase, UserObjectPermissionBase
 from guardian.shortcuts import assign_perm, remove_perm
 from framework.exceptions import PermissionsError
 
@@ -187,3 +188,11 @@ class OSFGroup(GuardianMixin, base.BaseModel):
             self.update_group_permissions()
             self.make_manager(self.creator)
         return ret
+
+
+class OSFGroupUserObjectPermission(UserObjectPermissionBase):
+    content_object = models.ForeignKey(OSFGroup, on_delete=models.CASCADE)
+
+
+class OSFGroupGroupObjectPermission(GroupObjectPermissionBase):
+    content_object = models.ForeignKey(OSFGroup, on_delete=models.CASCADE)

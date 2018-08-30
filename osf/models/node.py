@@ -26,6 +26,7 @@ from keen import scoped_keys
 from psycopg2._psycopg import AsIs
 from typedmodels.models import TypedModel, TypedModelManager
 from include import IncludeManager
+from guardian.models import GroupObjectPermissionBase, UserObjectPermissionBase
 from guardian.shortcuts import get_perms, get_objects_for_user, get_groups_with_perms
 
 from framework import status
@@ -2342,6 +2343,15 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
             return DataCiteClient(base_url=settings.DATACITE_URL, prefix=settings.DATACITE_PREFIX)
         else:
             return None
+
+
+class NodeUserObjectPermission(UserObjectPermissionBase):
+    content_object = models.ForeignKey(AbstractNode, on_delete=models.CASCADE)
+
+
+class NodeGroupObjectPermission(GroupObjectPermissionBase):
+    content_object = models.ForeignKey(AbstractNode, on_delete=models.CASCADE)
+
 
 class Node(AbstractNode):
     """
