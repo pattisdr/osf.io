@@ -6,6 +6,7 @@ from rest_framework import exceptions
 from osf_tests.factories import (
     ProjectFactory,
     AuthUserFactory,
+    OSFGroupFactory
 )
 
 
@@ -75,7 +76,7 @@ def disable_user(disabled_contrib, private_project):
 class NodeCitationsMixin:
 
     def test_node_citations(
-            self, app, admin_contributor,
+            self, app, admin_contributor, private_project,
             write_contrib, read_contrib,
             non_contrib, private_url, public_url
     ):
@@ -101,6 +102,13 @@ class NodeCitationsMixin:
         res = app.get(private_url, expect_errors=True)
         assert res.status_code == 401
         assert res.json['errors'][0]['detail'] == exceptions.NotAuthenticated.default_detail
+
+    #   test_read_group_mem_can_view_private_project_citations
+        group_mem = AuthUserFactory()
+        group = OSFGroupFactory(creator=group_mem)
+        private_project.add_osf_group(group, 'read')
+        res = app.get(private_url, auth=group_mem.auth)
+        assert res.status_code == 200
 
     #   test_unauthenticated_can_view_public_project_citations
         res = app.get(public_url)
