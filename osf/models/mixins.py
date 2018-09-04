@@ -833,7 +833,12 @@ class ContributorMixin(models.Model):
         return self._get_admin_contributor_ids(include_self=True)
 
     def is_contributor(self, user, explicit=False):
-        """Return whether ``user`` has been given read permissions to the object"""
+        """
+        Return whether ``user`` has been given read permissions to the object
+        By default, returns True if user is a contributor or the osf group has permissions.
+
+        If explicit = False, just must be an explicit contributor.
+        """
         kwargs = self.contributor_kwargs
         kwargs['user'] = user
         # Checking if contributor object or if user has read permissions, since unregistered
@@ -888,7 +893,7 @@ class ContributorMixin(models.Model):
         if contrib_to_add.is_disabled:
             raise ValidationValueError('Deactivated users cannot be added as contributors.')
 
-        if self.is_contributor(contrib_to_add):
+        if self.is_contributor(contrib_to_add, explicit=True):
             if permissions is None:
                 return False
             # Permissions must be overridden if changed when contributor is
@@ -991,7 +996,7 @@ class ContributorMixin(models.Model):
             contributor = get_user(email=email)
             # Unregistered users may have multiple unclaimed records, so
             # only raise error if user is registered.
-            if contributor.is_registered or self.is_contributor(contributor):
+            if contributor.is_registered or self.is_contributor(contributor, explicit=True):
                 raise
 
             contributor.add_unclaimed_record(
@@ -1350,7 +1355,7 @@ class ContributorMixin(models.Model):
         return contributor.visible
 
     def set_visible(self, user, visible, log=True, auth=None, save=False):
-        if not self.is_contributor(user):
+        if not self.is_contributor(user, explicit=True):
             raise ValueError(u'User {0} not in contributors'.format(user))
         kwargs = self.contributor_kwargs
         kwargs['user'] = user
