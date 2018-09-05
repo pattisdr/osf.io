@@ -1,5 +1,6 @@
 from django.apps import apps
-
+from django.db.models import Q
+from guardian.shortcuts import get_objects_for_user
 from api.addons.views import AddonSettingsMixin
 from api.base import permissions as base_permissions
 from api.base.exceptions import Conflict, UserGone
@@ -7,8 +8,7 @@ from api.base.filters import ListFilterMixin, PreprintFilterMixin
 from api.base.parsers import (JSONAPIRelationshipParser,
                               JSONAPIRelationshipParserForRegularJSON)
 from api.base.serializers import AddonAccountSerializer
-from api.base.utils import (default_node_list_queryset,
-                            default_node_list_permission_queryset,
+from api.base.utils import (default_node_list_permission_queryset,
                             get_object_or_error,
                             get_user_auth)
 from api.base.views import JSONAPIBaseView, WaterButlerMixin
@@ -268,11 +268,19 @@ class UserNodes(JSONAPIBaseView, generics.ListAPIView, UserMixin, NodesFilterMix
     ordering = ('-modified',)
 
     # overrides NodesFilterMixin
+
     def get_default_queryset(self):
         user = self.get_user()
+        # Nodes the requested user has read_permissions on
+        default_queryset = get_objects_for_user(user, 'read_node', Node).filter(is_deleted=False)
         if user != self.request.user:
-            return default_node_list_permission_queryset(user=self.request.user, model_cls=Node).filter(contributor__user__id=user.id)
-        return default_node_list_queryset(model_cls=Node).filter(contributor__user__id=user.id)
+            if self.request.user.is_anonymous:
+                return default_queryset.filter(Q(is_public=True))
+            else:
+                # Requested user nodes that the logged in user can view
+                read_user_query = Q(id__in=get_objects_for_user(self.request.user, 'read_node', default_queryset))
+                return default_queryset.filter(read_user_query | Q(is_public=True))
+        return default_queryset
 
     # overrides ListAPIView
     def get_queryset(self):

@@ -1,10 +1,11 @@
 import pytest
-
+from django.core.exceptions import ValidationError
 from django.contrib.auth.models import Group
 
 from framework.auth import Auth
+from django.contrib.auth.models import AnonymousUser
 from framework.exceptions import PermissionsError
-from osf.models import OSFGroup, Node
+from osf.models import OSFGroup, Node, OSFUser
 from .factories import (
     NodeFactory,
     ProjectFactory,
@@ -102,6 +103,41 @@ class TestOSFGroup:
         osf_group.make_member(user_two, Auth(manager))
         assert user_two not in osf_group.managers
         assert user_two in osf_group.members
+
+    def test_add_unregistered_member(self, manager, member, osf_group, user_two):
+        test_fullname = 'Test User'
+        test_email = 'test_member@cos.io'
+        test_manager_email = 'test_manager@cos.io'
+
+        # Email already exists
+        with pytest.raises(ValidationError):
+            osf_group.add_unregistered_member(test_fullname, user_two.username, auth=Auth(manager))
+
+        # Test need manager perms to add
+        with pytest.raises(PermissionsError):
+            osf_group.add_unregistered_member(test_fullname, test_email, auth=Auth(member))
+
+        # Add member
+        osf_group.add_unregistered_member(test_fullname, test_email, auth=Auth(manager))
+        unreg_user = OSFUser.objects.get(username=test_email)
+        assert unreg_user in osf_group.members
+        assert unreg_user not in osf_group.managers
+        # Unreg user hasn't claimed account, so they have no permissions, even though they belong to member group
+        assert osf_group.has_permission(unreg_user, 'member') is False
+        assert osf_group._id in unreg_user.unclaimed_records
+
+        # Attempt to add unreg user as a member
+        with pytest.raises(ValidationError):
+            osf_group.add_unregistered_member(test_fullname, test_email, auth=Auth(manager))
+
+        # Add unregistered manager
+        osf_group.add_unregistered_member(test_fullname, test_manager_email, auth=Auth(manager), role='manager')
+        unreg_manager = OSFUser.objects.get(username=test_manager_email)
+        assert unreg_manager in osf_group.members
+        assert unreg_manager in osf_group.managers
+        # Unreg manager hasn't claimed account, so they have no permissions, even though they belong to member group
+        assert osf_group.has_permission(unreg_manager, 'member') is False
+        assert osf_group._id in unreg_manager.unclaimed_records
 
     def test_remove_member(self, manager, member, user_three, osf_group):
         new_member = UserFactory()
@@ -234,6 +270,28 @@ class TestOSFGroup:
         assert project.has_permission(member, 'write') is True
         assert project.has_permission(member, 'read') is True
 
+    def test_update_osf_group_node(self, manager, member, osf_group, project):
+        project.add_osf_group(osf_group, 'admin')
+
+        assert project.has_permission(member, 'admin') is True
+        assert project.has_permission(member, 'write') is True
+        assert project.has_permission(member, 'read') is True
+
+        project.update_osf_group(osf_group, 'read')
+        assert project.has_permission(member, 'admin') is False
+        assert project.has_permission(member, 'write') is False
+        assert project.has_permission(member, 'read') is True
+
+        project.update_osf_group(osf_group, 'write')
+        assert project.has_permission(member, 'admin') is False
+        assert project.has_permission(member, 'write') is True
+        assert project.has_permission(member, 'read') is True
+
+        project.update_osf_group(osf_group, 'admin')
+        assert project.has_permission(member, 'admin') is True
+        assert project.has_permission(member, 'write') is True
+        assert project.has_permission(member, 'read') is True
+
     def test_remove_osf_group_from_node(self, manager, member, user_two, osf_group, project):
         # noncontributor
         with pytest.raises(PermissionsError):
@@ -290,3 +348,109 @@ class TestOSFGroup:
                                                                         project_two.id,
                                                                         child_two.id,
                                                                         grandchild_two.id))
+
+        grandchild_two.is_deleted = True
+        grandchild_two.save()
+        can_view = Node.objects.can_view(member)
+        assert len(can_view) == 5
+        assert grandchild_two not in can_view
+
+    def test_parent_admin_users_osf_groups(self, manager, member, project, osf_group):
+        child = NodeFactory(parent=project, creator=manager)
+        project.add_osf_group(osf_group, 'admin')
+        # Manager has explict admin to child, member has implicit admin.
+        # Manager should be in admin_contributors, member should be in parent_admin_contributors
+
+        assert manager in child.admin_users
+        assert member not in child.admin_users
+
+        assert manager not in child.parent_admin_users
+        assert member in child.parent_admin_users
+
+    def test_get_users_with_perm_osf_groups(self, project, manager, member, osf_group):
+        # Explicitly added as a contributor
+        read_users = project.get_users_with_perm('read')
+        write_users = project.get_users_with_perm('write')
+        admin_users = project.get_users_with_perm('admin')
+        assert len(project.get_users_with_perm('read')) == 1
+        assert len(project.get_users_with_perm('write')) == 1
+        assert len(project.get_users_with_perm('admin')) == 1
+        assert manager in read_users
+        assert manager in write_users
+        assert manager in admin_users
+
+        # Added through osf groups
+        project.add_osf_group(osf_group, 'write')
+        read_users = project.get_users_with_perm('read')
+        write_users = project.get_users_with_perm('write')
+        admin_users = project.get_users_with_perm('admin')
+        assert len(project.get_users_with_perm('read')) == 2
+        assert len(project.get_users_with_perm('write')) == 2
+        assert len(project.get_users_with_perm('admin')) == 1
+        assert member in read_users
+        assert member in write_users
+        assert member not in admin_users
+
+    def test_osf_group_node_can_view(self, project, manager, member, osf_group):
+        assert project.can_view(Auth(member)) is False
+        project.add_osf_group(osf_group, 'read')
+        assert project.can_view(Auth(member)) is True
+        assert project.can_edit(Auth(member)) is False
+
+        project.remove_osf_group(osf_group)
+        project.add_osf_group(osf_group, 'write')
+        assert project.can_view(Auth(member)) is True
+        assert project.can_edit(Auth(member)) is True
+
+        child = ProjectFactory(parent=project)
+        project.remove_osf_group(osf_group)
+        project.add_osf_group(osf_group, 'admin')
+        # implicit OSF Group admin
+        assert child.can_view(Auth(member)) is True
+        assert child.can_edit(Auth(member)) is False
+
+        grandchild = ProjectFactory(parent=child)
+        assert grandchild.can_view(Auth(member)) is True
+        assert grandchild.can_edit(Auth(member)) is False
+
+    def test_node_has_permission(self, project, manager, member, osf_group):
+        assert project.can_view(Auth(member)) is False
+        project.add_osf_group(osf_group, 'read')
+        assert project.has_permission(member, 'read') is True
+        assert project.has_permission(member, 'write') is False
+
+        project.remove_osf_group(osf_group)
+        project.add_osf_group(osf_group, 'write')
+        assert project.has_permission(member, 'read') is True
+        assert project.has_permission(member, 'write') is True
+        assert project.has_permission(member, 'admin') is False
+
+        child = ProjectFactory(parent=project)
+        project.remove_osf_group(osf_group)
+        project.add_osf_group(osf_group, 'admin')
+        # implicit OSF Group admin
+        assert child.has_permission(member, 'admin') is False
+        assert child.has_permission(member, 'read') is True
+
+        grandchild = ProjectFactory(parent=child)
+        assert grandchild.has_permission(member, 'write') is False
+        assert grandchild.has_permission(member, 'read') is True
+
+    def test_node_get_permissions_override(self, project, manager, member, osf_group):
+        project.add_osf_group(osf_group, 'write')
+        assert set(project.get_permissions(member)) == set(['write_node', 'read_node'])
+
+        project.remove_osf_group(osf_group)
+        project.add_osf_group(osf_group, 'read')
+        assert set(project.get_permissions(member)) == set(['read_node'])
+
+        anon = AnonymousUser()
+        assert project.get_permissions(anon) == []
+
+    def test_is_contributor(self, project, manager, member, osf_group):
+        assert project.is_contributor(manager) is True
+        assert project.is_contributor(member) is False
+
+        project.add_osf_group(osf_group, 'read')
+        assert project.is_contributor(member) is True
+        assert project.is_contributor(member, explicit=True) is False

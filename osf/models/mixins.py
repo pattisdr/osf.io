@@ -26,11 +26,9 @@ from osf.models.tag import Tag
 from osf.models.validators import validate_subject_hierarchy
 from osf.utils.fields import NonNaiveDateTimeField
 from osf.utils.machines import ReviewsMachine, NodeRequestMachine, PreprintRequestMachine
-from osf.utils.permissions import ADMIN
+from osf.utils.permissions import ADMIN, READ
 from osf.utils.workflows import DefaultStates, DefaultTriggers, ReviewStates, ReviewTriggers
 from osf.utils.requests import get_request_and_user_id
-from osf.exceptions import PreprintStateError
-from website.exceptions import NodeStateError
 from website.project import signals as project_signals
 from website import settings
 from website import mails
@@ -338,7 +336,7 @@ class NodeLinkMixin(models.Model):
             )
 
         if self.is_registration:
-            raise NodeStateError('Cannot add a node link to a registration')
+            raise self.state_error('Cannot add a node link to a registration')
 
         # Append node link
         node_relation, created = NodeRelation.objects.get_or_create(
@@ -834,11 +832,20 @@ class ContributorMixin(models.Model):
     def admin_contributor_ids(self):
         return self._get_admin_contributor_ids(include_self=True)
 
-    def is_contributor(self, user):
-        """Return whether ``user`` is a contributor on the object."""
+    def is_contributor(self, user, explicit=False):
+        """
+        Return whether ``user`` has been given read permissions to the object
+        By default, returns True if user is a contributor or the osf group has permissions.
+
+        If explicit = False, just must be an explicit contributor.
+        """
         kwargs = self.contributor_kwargs
         kwargs['user'] = user
-        return user is not None and self.contributor_class.objects.filter(**kwargs).exists()
+        # Checking if contributor object or if user has read permissions, since unregistered
+        # contributors do not have any actual permissions.
+        if explicit:
+            return user is not None and self.contributor_class.objects.filter(**kwargs).exists()
+        return user is not None and (self.has_permission(user, READ, check_parent=False) or self.contributor_class.objects.filter(**kwargs).exists())
 
     def active_contributors(self, include=lambda n: True):
         for contrib in self.contributors.filter(is_active=True):
@@ -886,7 +893,7 @@ class ContributorMixin(models.Model):
         if contrib_to_add.is_disabled:
             raise ValidationValueError('Deactivated users cannot be added as contributors.')
 
-        if self.is_contributor(contrib_to_add):
+        if self.is_contributor(contrib_to_add, explicit=True):
             if permissions is None:
                 return False
             # Permissions must be overridden if changed when contributor is
@@ -989,7 +996,7 @@ class ContributorMixin(models.Model):
             contributor = get_user(email=email)
             # Unregistered users may have multiple unclaimed records, so
             # only raise error if user is registered.
-            if contributor.is_registered or self.is_contributor(contributor):
+            if contributor.is_registered or self.is_contributor(contributor, explicit=True):
                 raise
 
             contributor.add_unclaimed_record(
@@ -1348,7 +1355,7 @@ class ContributorMixin(models.Model):
         return contributor.visible
 
     def set_visible(self, user, visible, log=True, auth=None, save=False):
-        if not self.is_contributor(user):
+        if not self.is_contributor(user, explicit=True):
             raise ValueError(u'User {0} not in contributors'.format(user))
         kwargs = self.contributor_kwargs
         kwargs['user'] = user
@@ -1425,10 +1432,7 @@ class ContributorMixin(models.Model):
 
         if validate and (self.has_permission(user, 'admin') and 'admin' not in permissions):
             if self.get_group('admin').user_set.count() <= 1:
-                Preprint = apps.get_model('osf.Preprint')
-                if isinstance(self, Preprint):
-                    raise PreprintStateError('Must have at least one registered admin contributor')
-                raise NodeStateError('Must have at least one registered admin contributor')
+                raise self.state_error('Must have at least one registered admin contributor')
         self.clear_permissions(user)
         self.add_permission(user, permissions)
         if save:

@@ -529,7 +529,7 @@ class BaseLinkedList(JSONAPIBaseView, generics.ListAPIView):
     def get_queryset(self):
         auth = get_user_auth(self.request)
 
-        return self.get_node().linked_nodes.filter(is_deleted=False).exclude(type='osf.collection').can_view(user=auth.user, private_link=auth.private_link).distinct('id', 'modified').order_by('-modified')
+        return self.get_node().linked_nodes.filter(is_deleted=False).exclude(type='osf.collection').can_view(user=auth.user, private_link=auth.private_link).order_by('-modified')
 
 
 class WaterButlerMixin(object):
