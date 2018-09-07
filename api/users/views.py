@@ -16,6 +16,7 @@ from api.base.throttling import SendEmailThrottle
 from api.institutions.serializers import InstitutionSerializer
 from api.nodes.filters import NodesFilterMixin
 from api.nodes.serializers import NodeSerializer
+from api.nodes.utils import NodeOptimizationMixin
 from api.preprints.serializers import PreprintSerializer
 from api.registrations.serializers import RegistrationSerializer
 from api.users.permissions import (CurrentUser, ReadOnlyOrCurrentUser,
@@ -248,7 +249,7 @@ class UserAddonAccountDetail(JSONAPIBaseView, generics.RetrieveAPIView, UserMixi
         return account
 
 
-class UserNodes(JSONAPIBaseView, generics.ListAPIView, UserMixin, NodesFilterMixin):
+class UserNodes(JSONAPIBaseView, generics.ListAPIView, UserMixin, NodesFilterMixin, NodeOptimizationMixin):
     """The documentation for this endpoint can be found [here](https://developer.osf.io/#operation/users_nodes_list).
     """
     permission_classes = (
@@ -275,12 +276,12 @@ class UserNodes(JSONAPIBaseView, generics.ListAPIView, UserMixin, NodesFilterMix
         default_queryset = get_objects_for_user(user, 'read_node', Node).filter(is_deleted=False)
         if user != self.request.user:
             if self.request.user.is_anonymous:
-                return default_queryset.filter(Q(is_public=True))
+                return self.optimize_node_queryset(default_queryset.filter(Q(is_public=True)))
             else:
                 # Requested user nodes that the logged in user can view
                 read_user_query = Q(id__in=get_objects_for_user(self.request.user, 'read_node', default_queryset))
-                return default_queryset.filter(read_user_query | Q(is_public=True))
-        return default_queryset
+                return self.optimize_node_queryset(default_queryset.filter(read_user_query | Q(is_public=True)))
+        return self.optimize_node_queryset(default_queryset)
 
     # overrides ListAPIView
     def get_queryset(self):

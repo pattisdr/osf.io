@@ -295,14 +295,14 @@ def test_module(ctx, module=None, numprocesses=None, nocapture=False, params=Non
             '--cov', 'website',
         ])
     if not nocapture:
-        args += ['-s']
-    if numprocesses > 1:
-        args += ['-n {}'.format(numprocesses), '--max-slave-restart=0']
+        args += ['-s', '-x', '--pdb']
+    # if numprocesses > 1:
+        # args += ['-n {}'.format(numprocesses), '--max-slave-restart=0']
     modules = [module] if isinstance(module, basestring) else module
     args.extend(modules)
-    if params:
-        params = [params] if isinstance(params, basestring) else params
-        args.extend(params)
+    # if params:
+    #     params = [params] if isinstance(params, basestring) else params
+    #     args.extend(params)
     retcode = pytest.main(args)
     sys.exit(retcode)
 

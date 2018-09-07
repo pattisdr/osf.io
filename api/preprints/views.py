@@ -28,7 +28,7 @@ from api.preprints.serializers import (
     PreprintCitationSerializer,
     PreprintContributorDetailSerializer,
     PreprintContributorsSerializer,
-    PreprintProviderSerializer,
+    PreprintStorageProviderSerializer,
     PreprintContributorsCreateSerializer
 )
 from api.files.serializers import OsfStorageFileSerializer
@@ -38,10 +38,11 @@ from api.nodes.serializers import (
 
 from api.identifiers.views import IdentifierList
 from api.identifiers.serializers import PreprintIdentifierSerializer
-from api.nodes.views import NodeMixin, NodeContributorsList, NodeContributorDetail, NodeFilesList, NodeProvidersList, NodeProvider
+from api.nodes.views import NodeMixin, NodeContributorsList, NodeContributorDetail, NodeFilesList, NodeStorageProvidersList, NodeStorageProvider
 from api.preprints.permissions import (
     PreprintPublishedOrAdmin,
     PreprintPublishedOrWrite,
+    ModeratorIfNeverPublicWithdrawn,
     AdminOrPublic,
     ContributorDetailPermissions,
     PreprintFilesPermissions
@@ -66,7 +67,7 @@ class PreprintMixin(NodeMixin):
         except Preprint.DoesNotExist:
             raise NotFound
 
-        if preprint.deleted or (preprint.is_retracted and not preprint.ever_public):
+        if preprint.deleted is not None:
             raise NotFound
 
         # May raise a permission denied
@@ -122,6 +123,7 @@ class PreprintDetail(JSONAPIBaseView, generics.RetrieveUpdateAPIView, PreprintMi
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
         base_permissions.TokenHasScope,
+        ModeratorIfNeverPublicWithdrawn,
         ContributorOrPublic,
         PreprintPublishedOrWrite,
     )
@@ -420,7 +422,7 @@ class PreprintActionList(JSONAPIBaseView, generics.ListCreateAPIView, ListFilter
         return self.get_queryset_from_request()
 
 
-class PreprintProvidersList(NodeProvidersList, PreprintMixin):
+class PreprintStorageProvidersList(NodeStorageProvidersList, PreprintMixin):
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
         ContributorOrPublic,
@@ -431,12 +433,12 @@ class PreprintProvidersList(NodeProvidersList, PreprintMixin):
     required_read_scopes = [CoreScopes.PREPRINT_FILE_READ]
     required_write_scopes = [CoreScopes.PREPRINT_FILE_WRITE]
 
-    serializer_class = PreprintProviderSerializer
+    serializer_class = PreprintStorageProviderSerializer
     view_category = 'preprints'
-    view_name = 'preprint-providers'
+    view_name = 'preprint-storage-providers'
 
     def get_provider_item(self, provider):
-        return NodeProvider(provider, self.get_preprint())
+        return NodeStorageProvider(provider, self.get_preprint())
 
     def get_queryset(self):
         # Preprints Providers restricted so only osfstorage is allowed

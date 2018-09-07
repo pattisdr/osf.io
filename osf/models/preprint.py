@@ -69,15 +69,20 @@ class PreprintManager(IncludeManager):
 
     def preprint_permissions_query(self, user=None, allow_contribs=True):
         if user:
+            moderator_for = get_objects_for_user(user, 'view_submissions', PreprintProvider)
             admin_user_query = Q(id__in=get_objects_for_user(user, 'admin_preprint', self.filter(Q(preprintcontributor__user_id=user.id))))
-            reviews_user_query = Q(is_public=True, provider__in=get_objects_for_user(user, 'view_submissions', PreprintProvider))
+            reviews_user_query = Q(is_public=True, provider__in=moderator_for)
             if allow_contribs:
                 contrib_user_query = ~Q(machine_state=DefaultStates.INITIAL.value) & Q(id__in=get_objects_for_user(user, 'read_preprint', self.filter(Q(preprintcontributor__user_id=user.id))))
                 query = (self.no_user_query | contrib_user_query | admin_user_query | reviews_user_query)
             else:
                 query = (self.no_user_query | admin_user_query | reviews_user_query)
         else:
+            moderator_for = PreprintProvider.objects.none()
             query = self.no_user_query
+
+        if not moderator_for.exists():
+            query = query & Q(Q(date_withdrawn__isnull=True) | Q(ever_public=True))
         return query
 
     def can_view(self, base_queryset=None, user=None, allow_contribs=True):
@@ -246,8 +251,20 @@ class Preprint(DirtyFieldsMixin, GuidMixin, IdentifierMixin, ReviewableMixin, Ba
             self.is_public and \
             self.has_submitted_preprint and not \
             self.deleted and not \
-            self.is_preprint_orphan and \
-            (not self.is_retracted or self.ever_public is True)
+            self.is_preprint_orphan and not \
+            (self.is_retracted and not self.ever_public)
+
+    @property
+    def should_request_identifiers(self):
+        return not self.all_tags.filter(name='qatest').exists()
+
+    @property
+    def has_pending_withdrawal_request(self):
+        return self.requests.filter(request_type='withdrawal', machine_state='pending').exists()
+
+    @property
+    def has_withdrawal_request(self):
+        return self.requests.filter(request_type='withdrawal').exists()
 
     @property
     def preprint_doi(self):
@@ -369,14 +386,13 @@ class Preprint(DirtyFieldsMixin, GuidMixin, IdentifierMixin, ReviewableMixin, Ba
         return log
 
     def can_view_files(self, auth=None):
-        if auth and auth.user:
-            return ((self.verified_publishable and not self.is_retracted) or
-                (self.is_public and auth.user.has_perm('view_submissions', self.provider)) or
-                self.has_permission(auth.user, 'admin') or
-                (self.is_contributor(auth.user) and self.has_submitted_preprint)
-            )
+        if self.is_retracted:
+            return False
+
+        if not auth or not auth.user:
+            return self.verified_publishable
         else:
-            return self.verified_publishable and not self.is_retracted
+            return self.can_view(auth=auth)
 
     def get_addons(self):
         # Override for ContributorMixin, Preprints don't have addons

@@ -2,6 +2,7 @@
 import urllib
 import furl
 import urlparse
+from distutils.version import StrictVersion
 
 from django.utils.http import urlquote
 from django.core.exceptions import ObjectDoesNotExist
@@ -140,7 +141,7 @@ def default_node_list_permission_queryset(user, model_cls):
     # **DO NOT** change the order of the querysets below.
     # If get_roots() is called on default_node_list_qs & default_node_permission_qs,
     # Django's alaising will break and the resulting QS will be empty and you will be sad.
-    return (default_node_permission_queryset(user, model_cls) & default_node_list_queryset(model_cls)).distinct('id', 'modified')
+    return (default_node_permission_queryset(user, model_cls) & default_node_list_queryset(model_cls))
 
 def extend_querystring_params(url, params):
     scheme, netloc, path, query, _ = urlparse.urlsplit(url)
@@ -174,13 +175,9 @@ def has_admin_scope(request):
 def is_deprecated(request_version, min_version=None, max_version=None):
     if not min_version and not max_version:
         raise NotImplementedError('Must specify min or max version.')
-    try:
-        request_version = float(request_version)
-        min_version = float(min_version) if min_version else min_version
-        max_version = float(max_version) if max_version else max_version
-    except ValueError:
-        return True
-    if min_version and request_version < min_version or max_version and request_version > max_version:
+    min_version_deprecated = min_version and StrictVersion(request_version) < StrictVersion(str(min_version))
+    max_version_deprecated = max_version and StrictVersion(request_version) > StrictVersion(str(max_version))
+    if min_version_deprecated or max_version_deprecated:
         return True
     return False
 
