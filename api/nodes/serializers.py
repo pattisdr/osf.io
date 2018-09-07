@@ -438,14 +438,12 @@ class NodeSerializer(TaxonomizableSerializerMixin, JSONAPISerializer):
                 return ['read']
         else:
             user = self.context['request'].user
-            all_perms = ['read', 'write', 'admin']
-            user_perms = []
-            for p in all_perms:
-                if obj.has_permission(user, p):
-                    user_perms.append(p)
-            if not user_perms:
-                user_perms = ['read']
-            return user_perms
+            if user.is_anonymous:
+                return ['read']
+            permissions = obj.get_permissions(user=user)
+            if not permissions:
+                permissions = ['read']
+            return permissions
 
     def get_current_user_can_comment(self, obj):
         user = self.context['request'].user
