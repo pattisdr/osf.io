@@ -41,8 +41,13 @@ def get_file_object(target, path, provider, request):
         raise NotFound('The {} provider is not configured for this project.'.format(provider))
 
     view_only = request.query_params.get('view_only', default=None)
-    url = waterbutler_api_url_for(target._id, provider, path, _internal=True,
-                                  meta=True, view_only=view_only)
+    base_url = None
+    if hasattr(target, 'osfstorage_region'):
+        base_url = target.osfstorage_region.waterbutler_url
+    url = waterbutler_api_url_for(
+        target._id, provider, path, _internal=True,
+        base_url=base_url, meta=True, view_only=view_only,
+    )
 
     waterbutler_request = requests.get(
         url,
@@ -84,6 +89,7 @@ class NodeOptimizationMixin(object):
         read_permission = Permission.objects.get(codename='read_node')
         user_group = OSFUserGroup.objects.filter(osfuser_id=auth.user.id if auth.user else None, group_id=OuterRef('group_id'))
         node_group = NodeGroupObjectPermission.objects.annotate(user_group=Subquery(user_group.values_list('group_id')[:1])).filter(user_group__isnull=False, content_object_id=OuterRef('pk'))
+        # TODO restore user_is_contrib
         return queryset.prefetch_related('root').prefetch_related('subjects').annotate(
             contrib_read=Exists(node_group.filter(permission_id=read_permission.id)),
             contrib_write=Exists(node_group.filter(permission_id=write_permission.id)),
@@ -91,4 +97,5 @@ class NodeOptimizationMixin(object):
             has_wiki_addon=Exists(wiki_addon),
             annotated_parent_id=Subquery(parent.values('parent__id')[:1], output_field=CharField()),
             annotated_tags=ArrayAgg('tags__name'),
-            has_admin_scope=Value(admin_scope, output_field=BooleanField()))
+            has_admin_scope=Value(admin_scope, output_field=BooleanField()),
+        )

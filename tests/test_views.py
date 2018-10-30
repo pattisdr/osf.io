@@ -23,6 +23,7 @@ from django.test import TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 
 from addons.github.tests.factories import GitHubAccountFactory
+from addons.wiki.models import WikiPage
 from framework.auth import cas
 from framework.auth.core import generate_verification_key
 from framework import auth
@@ -86,9 +87,11 @@ from osf_tests.factories import (
     ProjectFactory,
     ProjectWithAddonFactory,
     RegistrationFactory,
+    RegistrationProviderFactory,
     UserFactory,
     UnconfirmedUserFactory,
     UnregUserFactory,
+    RegionFactory
 )
 
 @mock_app.route('/errorexc')
@@ -1071,7 +1074,7 @@ class TestGetNodeTree(OsfTestCase):
         assert_equal(res.status_code, 200)
         assert_equal(res.json, [])
 
-    # Parent node should show because of user2 read access, the children should not
+    # Parent node should show because of user2 read access, and only child3
     def test_get_node_parent_not_admin(self):
         project = ProjectFactory(creator=self.user)
         project.add_contributor(self.user2, auth=Auth(self.user))
@@ -1079,13 +1082,15 @@ class TestGetNodeTree(OsfTestCase):
         child1 = NodeFactory(parent=project, creator=self.user)
         child2 = NodeFactory(parent=project, creator=self.user)
         child3 = NodeFactory(parent=project, creator=self.user)
+        child3.add_contributor(self.user2, auth=Auth(self.user))
         url = project.api_url_for('get_node_tree')
         res = self.app.get(url, auth=self.user2.auth)
         tree = res.json[0]
         parent_node_id = tree['node']['id']
         children = tree['children']
         assert_equal(parent_node_id, project._primary_key)
-        assert_equal(children, [])
+        assert_equal(len(children), 1)
+        assert_equal(children[0]['node']['id'], child3._primary_key)
 
 
 @pytest.mark.enable_enqueue_task
@@ -1117,7 +1122,7 @@ class TestUserProfile(OsfTestCase):
             auth=self.user.auth,
         )
         self.user.reload()
-        for key, value in payload.iteritems():
+        for key, value in payload.items():
             assert_equal(self.user.social[key], value)
         assert_true(self.user.social['researcherId'] is None)
 
@@ -1507,6 +1512,35 @@ class TestUserProfile(OsfTestCase):
 
         assert_not_in('Quick files', res.body)
 
+    def test_user_update_region(self):
+        user_settings = self.user.get_addon('osfstorage')
+        assert user_settings.default_region_id == 1
+
+        url = '/api/v1/profile/region/'
+        auth = self.user.auth
+        region = RegionFactory(name='Frankfort', _id='eu-central-1')
+        payload = {'region_id': 'eu-central-1'}
+
+        res = self.app.put_json(url, payload, auth=auth)
+        user_settings.reload()
+        assert user_settings.default_region_id == region.id
+
+    def test_user_update_region_missing_region_id_key(self):
+        url = '/api/v1/profile/region/'
+        auth = self.user.auth
+        region = RegionFactory(name='Frankfort', _id='eu-central-1')
+        payload = {'bad_key': 'eu-central-1'}
+
+        res = self.app.put_json(url, payload, auth=auth, expect_errors=True)
+        assert res.status_code == 400
+
+    def test_user_update_region_missing_bad_region(self):
+        url = '/api/v1/profile/region/'
+        auth = self.user.auth
+        payload = {'region_id': 'bad-region-1'}
+
+        res = self.app.put_json(url, payload, auth=auth, expect_errors=True)
+        assert res.status_code == 404
 
 class TestUserProfileApplicationsPage(OsfTestCase):
 
@@ -2086,7 +2120,8 @@ class TestAddingContributorViews(OsfTestCase):
     @mock.patch('website.mails.send_mail')
     def test_registering_project_does_not_send_contributor_added_email(self, send_mail, mock_archive):
         project = ProjectFactory()
-        project.register_node(get_default_metaschema(), Auth(user=project.creator), '', None)
+        provider = RegistrationProviderFactory()
+        project.register_node(get_default_metaschema(), Auth(user=project.creator), '', None, provider=provider)
         assert_false(send_mail.called)
 
     @mock.patch('website.mails.send_mail')
@@ -2756,7 +2791,7 @@ class TestPointerViews(OsfTestCase):
     def test_pointer_list_write_contributor_can_remove_public_component_entry(self):
         url = web_url_for('view_project', pid=self.project._id)
 
-        for i in xrange(3):
+        for i in range(3):
             self.project.add_pointer(ProjectFactory(creator=self.user),
                                      auth=Auth(user=self.user))
         self.project.save()
@@ -4326,7 +4361,7 @@ class TestWikiWidgetViews(OsfTestCase):
         # project with no home wiki content
         self.project2 = ProjectFactory(creator=self.project.creator)
         self.project2.add_contributor(self.read_only_contrib, permissions='read')
-        self.project2.update_node_wiki(name='home', content='', auth=Auth(self.project.creator))
+        WikiPage.objects.create_for_node(self.project2, 'home', '', Auth(self.project.creator))
 
     def test_show_wiki_for_contributors_when_no_wiki_or_content(self):
         assert_true(_should_show_wiki_widget(self.project, self.project.creator))
@@ -4409,7 +4444,7 @@ class TestProjectCreation(OsfTestCase):
 
     def test_title_must_be_less_than_200(self):
         payload = {
-            'title': ''.join([str(x) for x in xrange(0, 250)])
+            'title': ''.join([str(x) for x in range(0, 250)])
         }
         res = self.app.post_json(
             self.url, payload, auth=self.creator.auth, expect_errors=True)

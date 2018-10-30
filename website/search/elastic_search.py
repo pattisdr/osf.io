@@ -17,7 +17,7 @@ from django.apps import apps
 from django.core.paginator import Paginator
 from django.contrib.contenttypes.models import ContentType
 from django.db.models import Q
-from elasticsearch import (ConnectionError, Elasticsearch, NotFoundError,
+from elasticsearch2 import (ConnectionError, Elasticsearch, NotFoundError,
                            RequestError, TransportError, helpers)
 from framework.celery_tasks import app as celery_app
 from framework.database import paginated
@@ -27,8 +27,9 @@ from osf.models import BaseFileNode
 from osf.models import Institution
 from osf.models import QuickFilesNode
 from osf.models import Preprint
-from osf.models import CollectedGuidMetadata
 from osf.models import SpamStatus
+from addons.wiki.models import WikiPage
+from osf.models import CollectionSubmission
 from osf.utils.sanitize import unescape_entities
 from website import settings
 from website.filters import profile_image_url
@@ -60,7 +61,7 @@ DOC_TYPE_TO_MODEL = {
     'file': BaseFileNode,
     'institution': Institution,
     'preprint': Preprint,
-    'collectionSubmission': CollectedGuidMetadata,
+    'collectionSubmission': CollectionSubmission,
 }
 
 # Prevent tokenizing and stop word removal.
@@ -154,7 +155,7 @@ def get_aggregations(query, doc_type):
             item['key']: item['doc_count']
             for item in agg['buckets']
         }
-        for doc_type, agg in res['aggregations'].iteritems()
+        for doc_type, agg in res['aggregations'].items()
     }
     ret['total'] = res['hits']['total']
     return ret
@@ -416,7 +417,7 @@ def serialize_node(node, category):
         'extra_search_terms': clean_splitters(node.title),
     }
     if not node.is_retracted:
-        for wiki in node.get_wiki_pages_latest():
+        for wiki in WikiPage.objects.get_wiki_pages_latest(node):
             # '.' is not allowed in field names in ES2
             elastic_document['wikis'][wiki.wiki_page.page_name.replace('.', ' ')] = wiki.raw_text(node)
 
@@ -532,10 +533,13 @@ def serialize_cgm(cgm):
     return {
         'id': cgm._id,
         'abstract': getattr(obj, 'description', ''),
-        'collectedType': getattr(cgm, 'collected_type'),
         'contributors': [serialize_cgm_contributor(contrib) for contrib in contributors],
         'provider': getattr(cgm.collection.provider, '_id', None),
+        'collectedType': cgm.collected_type,
         'status': cgm.status,
+        'volume': cgm.volume,
+        'issue': cgm.issue,
+        'programArea': cgm.program_area,
         'subjects': list(cgm.subjects.values_list('text', flat=True)),
         'title': getattr(obj, 'title', ''),
         'url': getattr(obj, 'url', ''),
@@ -691,7 +695,8 @@ def update_file(file_, index=None, delete=False):
     file_guid = file_.get_guid(create=False)
     if file_guid:
         guid_url = '/{file_guid}/'.format(file_guid=file_guid._id)
-    # File URL's not provided for preprint files, because the File Detail Page is blocked
+    # File URL's not provided for preprint files, because the File Detail Page will
+    # just reroute to preprints detail
     file_doc = {
         'id': file_._id,
         'deep_url': None if isinstance(target, Preprint) else file_deep_url,
@@ -735,17 +740,17 @@ def update_institution(institution, index=None):
 
 @celery_app.task(bind=True, max_retries=5, default_retry_delay=60)
 def update_cgm_async(self, cgm_id, collection_id=None, op='update', index=None):
-    CollectedGuidMetadata = apps.get_model('osf.CollectedGuidMetadata')
+    CollectionSubmission = apps.get_model('osf.CollectionSubmission')
     if collection_id:
         try:
-            cgm = CollectedGuidMetadata.objects.get(
+            cgm = CollectionSubmission.objects.get(
                 guid___id=cgm_id,
                 collection_id=collection_id,
                 collection__provider__isnull=False,
                 collection__deleted__isnull=True,
                 collection__is_bookmark_collection=False)
 
-        except CollectedGuidMetadata.DoesNotExist:
+        except CollectionSubmission.DoesNotExist:
             logger.exception('Could not find object <_id {}> in a collection <_id {}>'.format(cgm_id, collection_id))
         else:
             if cgm and hasattr(cgm.guid.referent, 'is_public') and cgm.guid.referent.is_public:
@@ -754,7 +759,7 @@ def update_cgm_async(self, cgm_id, collection_id=None, op='update', index=None):
                 except Exception as exc:
                     self.retry(exc=exc)
     else:
-        cgms = CollectedGuidMetadata.objects.filter(
+        cgms = CollectionSubmission.objects.filter(
             guid___id=cgm_id,
             collection__provider__isnull=False,
             collection__deleted__isnull=True,
@@ -803,6 +808,9 @@ def create_index(index=None):
                     'collectedType': NOT_ANALYZED_PROPERTY,
                     'subjects': NOT_ANALYZED_PROPERTY,
                     'status': NOT_ANALYZED_PROPERTY,
+                    'issue': NOT_ANALYZED_PROPERTY,
+                    'volume': NOT_ANALYZED_PROPERTY,
+                    'programArea': NOT_ANALYZED_PROPERTY,
                     'provider': NOT_ANALYZED_PROPERTY,
                     'title': ENGLISH_ANALYZER_PROPERTY,
                     'abstract': ENGLISH_ANALYZER_PROPERTY

@@ -84,12 +84,14 @@ INSTALLED_APPS = (
     'django.contrib.staticfiles',
 
     # 3rd party
+    'django_celery_results',
     'raven.contrib.django.raven_compat',
     'webpack_loader',
     'django_nose',
     'password_reset',
     'guardian',
     'waffle',
+    'elasticsearch_metrics',
 
     # OSF
     'osf',

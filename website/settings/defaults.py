@@ -28,8 +28,8 @@ STATIC_URL_PATH = '/static'
 ASSET_HASH_PATH = os.path.join(APP_PATH, 'webpack-assets.json')
 ROOT = os.path.join(BASE_PATH, '..')
 BCRYPT_LOG_ROUNDS = 12
-# Logging level to use when DEBUG is False
 LOG_LEVEL = logging.INFO
+TEST_ENV = False
 
 with open(os.path.join(APP_PATH, 'package.json'), 'r') as fobj:
     VERSION = json.load(fobj)['version']
@@ -106,7 +106,7 @@ ALLOW_REGISTRATION = True
 ALLOW_LOGIN = True
 
 SEARCH_ENGINE = 'elastic'  # Can be 'elastic', or None
-ELASTIC_URI = 'localhost:9200'
+ELASTIC_URI = '127.0.0.1:9200'
 ELASTIC_TIMEOUT = 10
 ELASTIC_INDEX = 'website'
 ELASTIC_KWARGS = {
@@ -364,7 +364,7 @@ DATACITE_USERNAME = None
 DATACITE_PASSWORD = None
 DATACITE_URL = None
 DATACITE_PREFIX = '10.5072'  # Datacite's test DOI prefix -- update in production
-# Minting DOIs only works on Datacite's production server, so 
+# Minting DOIs only works on Datacite's production server, so
 # disable minting on staging and development environments by default
 DATACITE_MINT_DOIS = not DEV_MODE
 
@@ -439,6 +439,7 @@ class CeleryConfig:
         'scripts.analytics.run_keen_summaries',
         'scripts.analytics.run_keen_snapshots',
         'scripts.analytics.run_keen_events',
+        'scripts.clear_sessions',
     }
 
     med_pri_modules = {
@@ -507,6 +508,7 @@ class CeleryConfig:
         'scripts.approve_registrations',
         'scripts.approve_embargo_terminations',
         'scripts.triggered_mails',
+        'scripts.clear_sessions',
         'scripts.send_queued_mails',
         'scripts.analytics.run_keen_summaries',
         'scripts.analytics.run_keen_snapshots',
@@ -580,6 +582,11 @@ class CeleryConfig:
             },
             'triggered_mails': {
                 'task': 'scripts.triggered_mails',
+                'schedule': crontab(minute=0, hour=5),  # Daily 12 a.m
+                'kwargs': {'dry_run': False},
+            },
+            'clear_sessions': {
+                'task': 'scripts.clear_sessions',
                 'schedule': crontab(minute=0, hour=5),  # Daily 12 a.m
                 'kwargs': {'dry_run': False},
             },

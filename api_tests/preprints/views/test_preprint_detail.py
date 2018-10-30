@@ -4,7 +4,9 @@ import datetime
 
 from django.utils import timezone
 from rest_framework import exceptions
+from waffle.testutils import override_switch
 
+from osf import features
 from api.base.settings.defaults import API_BASE
 from api_tests import utils as test_utils
 from framework.auth.core import Auth
@@ -92,7 +94,7 @@ class TestPreprintDetail:
         assert data['relationships']['contributors'].get('data', None) is None
 
         #   test no node attached to preprint
-        assert data['relationships'].get('node') is None
+        assert data['relationships']['node'].get('data', None) is None
 
         #   test_preprint_node_deleted doesn't affect preprint
         deleted_node = ProjectFactory(creator=user, is_deleted=True)
@@ -270,6 +272,28 @@ class TestPreprintUpdate:
             expect_errors=True
         )
         assert res.status_code == 403
+
+    def test_update_original_publication_date_to_none(self, app, preprint, url):
+        # Original pub date accidentally set, need to remove
+        write_contrib = AuthUserFactory()
+        preprint.add_contributor(write_contrib, 'write', save=True)
+        preprint.original_publication_date = '2013-12-11 10:09:08.070605+00:00'
+        preprint.save()
+        update_payload = build_preprint_update_payload(
+            preprint._id, attributes={
+                'original_publication_date': None,
+            }
+        )
+
+        res = app.patch_json_api(
+            url,
+            update_payload,
+            auth=write_contrib.auth,
+        )
+
+        assert res.status_code == 200
+        preprint.reload()
+        assert preprint.original_publication_date is None
 
     def test_update_preprint_permission_write_contrib(self, app, preprint, url):
         write_contrib = AuthUserFactory()
@@ -1687,3 +1711,31 @@ class TestReviewsPreprintDetailPermissions:
     #   test_private_invisible_to_public
         res = app.get(private_url, expect_errors=True)
         assert res.status_code == 401
+
+
+@pytest.mark.django_db
+class TestPreprintDetailWithMetrics:
+    # enable the ELASTICSEARCH_METRICS switch for all tests
+    @pytest.fixture(autouse=True)
+    def enable_elasticsearch_metrics(self):
+        with override_switch(features.ELASTICSEARCH_METRICS, active=True):
+            yield
+
+    @pytest.mark.parametrize(('metric_name', 'metric_class_name'),
+    [
+        ('downloads', 'PreprintDownload'),
+        ('views', 'PreprintView'),
+    ])
+    def test_preprint_detail_with_downloads(self, app, settings, metric_name, metric_class_name):
+        preprint = PreprintFactory()
+        url = '/{}preprints/{}/?metrics[{}]=total'.format(API_BASE, preprint._id, metric_name)
+
+        with mock.patch('api.preprints.views.{}.get_count_for_preprint'.format(metric_class_name)) as mock_get_count_for_preprint:
+            mock_get_count_for_preprint.return_value = 42
+            res = app.get(url)
+
+        assert res.status_code == 200
+        data = res.json
+        assert 'metrics' in data['meta']
+        assert metric_name in data['meta']['metrics']
+        assert data['meta']['metrics'][metric_name] == 42

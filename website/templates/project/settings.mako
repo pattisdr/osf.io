@@ -16,7 +16,13 @@
 
                     % if not node['is_registration']:
                         <li><a href="#configureNodeAnchor">${node['node_type'].capitalize()}</a></li>
+                    % endif
 
+                    % if storage_flag_is_active:
+                        <li><a href="#nodeStorageLocation">Storage Location</a></li>
+                    % endif
+
+                    % if not node['is_registration']:
                         % if 'admin' in user['permissions']:
                             <li><a href="#createVolsAnchor">View-only Links</a></li>
                             <li><a href="#enableRequestAccessAnchor">Access Requests</a></li>
@@ -111,7 +117,7 @@
                                 <span id="deleteNode">
                                     <button
                                     data-toggle="modal" data-target="#nodesDelete"
-                                    data-bind="click: $root.delete.bind($root, ${node['child_exists'] | sjson, n}, '${node['node_type']}', '${node['api_url']}')"
+                                    data-bind="click: $root.delete.bind($root, ${node['child_exists'] | sjson, n}, '${node['node_type']}', ${node['is_supplemental_project'] | sjson, n}, '${node['api_url']}')"
                                     class="btn btn-danger btn-delete-node">Delete ${node['node_type']}</button>
                                     <%include file="project/nodes_delete.mako"/>
                                 </span>
@@ -121,6 +127,24 @@
                 </div>
 
             % endif
+
+        % if storage_flag_is_active:
+            <div class="panel panel-default">
+                <span id="nodeStorageLocation" class="anchor"></span>
+                <div class="panel-heading clearfix">
+                    <h3 id="nodeStorageLocation" class="panel-title">Storage Location</h3>
+                </div>
+                <div class="panel-body">
+                    <p>
+                        <b>Storage location:</b> ${node['storage_location']}
+                    </p>
+                    <div class="help-block">
+                        <p class="text-muted">Storage location cannot be changed after project is created.</p>
+                    </div>
+
+                </div>
+            </div>
+        % endif
 
         % endif  ## End Configure Project
 
@@ -418,7 +442,7 @@
                          <tbody>
                              <!-- ko foreach: {data: affiliatedInstitutions, as: 'item'} -->
                              <tr>
-                                 <td><img class="img-circle" width="50px" height="50px" data-bind="attr: {src: item.logo_path}"></td>
+                                 <td><img class="img-circle" width="50px" height="50px" data-bind="attr: {src: item.logo_path_rounded_corners}"></td>
                                  <td><span data-bind="text: item.name"></span></td>
                                  <td>
                                      % if 'admin' in user['permissions']:
@@ -440,7 +464,7 @@
                          <tbody>
                              <!-- ko foreach: {data: availableInstitutions, as: 'item'} -->
                              <tr>
-                                 <td><img class="img-circle" width="50px" height="50px" data-bind="attr: {src: item.logo_path}"></td>
+                                 <td><img class="img-circle" width="50px" height="50px" data-bind="attr: {src: item.logo_path_rounded_corners}"></td>
                                  <td><span data-bind="text: item.name"></span></td>
                                  % if 'write' in user['permissions']:
                                      <td><button
@@ -483,6 +507,7 @@
       window.contextVars.node = window.contextVars.node || {};
       window.contextVars.node.description = ${node['description'] | sjson, n };
       window.contextVars.node.nodeType = ${ node['node_type'] | sjson, n };
+      window.contextVars.node.isSupplementalProject = ${ node['is_supplemental_project'] | sjson, n };
       window.contextVars.node.institutions = ${ node['institutions'] | sjson, n };
       window.contextVars.node.requestProjectAccessEnabled = ${node['access_requests_enabled'] | sjson, n };
       window.contextVars.nodeCategories = ${ categories | sjson, n };

@@ -1410,7 +1410,7 @@ class TestFileViews(StorageTestCase):
         redirect = self.app.get(download_url, headers=headers)
 
         assert mock_get_client.called
-        assert settings.WATERBUTLER_URL in redirect.location
+        assert self.node.osfstorage_region.waterbutler_url in redirect.location
         assert redirect.status_code == 302
 
 
@@ -1422,9 +1422,10 @@ class TestPreprintFileViews(StorageTestCase):
         file = self.preprint.primary_file
         guid = file.get_guid(create=True)
         url = self.preprint.web_url_for('resolve_guid', guid=guid._id)
-        # File view for preprint file 404's
+        # File view for preprint file redirects to the preprint
         res = self.app.get(url, auth=self.user.auth, expect_errors=True)
-        assert res.status_code == 404
+        assert res.status_code == 302
+        assert self.preprint._id in res.location
 
     def test_download_file(self):
         self.preprint = PreprintFactory(creator=self.user)

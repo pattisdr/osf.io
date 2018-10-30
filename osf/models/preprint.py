@@ -44,7 +44,7 @@ from website.preprints.tasks import update_or_enqueue_on_preprint_updated
 from osf.models.base import BaseModel, GuidMixin, GuidMixinQuerySet
 from osf.models.identifiers import IdentifierMixin, Identifier
 from osf.models.mixins import TaxonomizableMixin, ContributorMixin, SpamOverrideMixin
-from addons.osfstorage.models import OsfStorageFolder, Region, BaseFileNode
+from addons.osfstorage.models import OsfStorageFolder, Region, BaseFileNode, OsfStorageFile
 
 
 from framework.sentry import log_exception
@@ -67,8 +67,9 @@ class PreprintManager(IncludeManager):
         primary_file__deleted_on__isnull=True) & ~Q(machine_state=DefaultStates.INITIAL.value) \
         & (Q(date_withdrawn__isnull=True) | Q(ever_public=True))
 
-    def preprint_permissions_query(self, user=None, allow_contribs=True):
-        if user:
+    def preprint_permissions_query(self, user=None, allow_contribs=True, public_only=False):
+        include_non_public = user and not public_only
+        if include_non_public:
             moderator_for = get_objects_for_user(user, 'view_submissions', PreprintProvider)
             admin_user_query = Q(id__in=get_objects_for_user(user, 'admin_preprint', self.filter(Q(preprintcontributor__user_id=user.id))))
             reviews_user_query = Q(is_public=True, provider__in=moderator_for)
@@ -85,10 +86,21 @@ class PreprintManager(IncludeManager):
             query = query & Q(Q(date_withdrawn__isnull=True) | Q(ever_public=True))
         return query
 
-    def can_view(self, base_queryset=None, user=None, allow_contribs=True):
+    def can_view(self, base_queryset=None, user=None, allow_contribs=True, public_only=False):
         if base_queryset is None:
             base_queryset = self
-        return base_queryset.filter(self.preprint_permissions_query(user=user, allow_contribs=allow_contribs) & Q(deleted__isnull=True)).distinct('id', 'created')
+        include_non_public = user and not public_only
+        ret = base_queryset.filter(
+            self.preprint_permissions_query(
+                user=user,
+                allow_contribs=allow_contribs,
+                public_only=public_only,
+            ) & Q(deleted__isnull=True) & ~Q(machine_state=DefaultStates.INITIAL.value)
+        )
+        # The auth subquery currently results in duplicates returned
+        # https://openscience.atlassian.net/browse/OSF-9058
+        # TODO: Remove need for .distinct using correct subqueries
+        return ret.distinct('id', 'created') if include_non_public else ret
 
 
 class Preprint(DirtyFieldsMixin, GuidMixin, IdentifierMixin, ReviewableMixin, BaseModel,
@@ -183,6 +195,10 @@ class Preprint(DirtyFieldsMixin, GuidMixin, IdentifierMixin, ReviewableMixin, Ba
             return None
 
     @property
+    def osfstorage_region(self):
+        return self.region
+
+    @property
     def contributor_email_template(self):
         return 'preprint'
 
@@ -272,8 +288,17 @@ class Preprint(DirtyFieldsMixin, GuidMixin, IdentifierMixin, ReviewableMixin, Ba
 
     @property
     def is_preprint_orphan(self):
-        if not self.primary_file_id or self.primary_file.deleted_on or self.primary_file.target != self:
+        if not self.primary_file_id:
             return True
+
+        try:
+            primary_file = self.primary_file
+        except OsfStorageFile.DoesNotExist:
+            primary_file = None
+
+        if not primary_file or primary_file.deleted_on or primary_file.target != self:
+            return True
+
         return False
 
     @property
@@ -309,6 +334,10 @@ class Preprint(DirtyFieldsMixin, GuidMixin, IdentifierMixin, ReviewableMixin, Ba
         url = self.absolute_url
         if url is not None:
             return re.sub(r'https?:', '', url).strip('/')
+
+    @property
+    def linked_nodes_self_url(self):
+        return self.absolute_api_v2_url + 'relationships/node/'
 
     @property
     def admin_contributor_ids(self):
@@ -468,7 +497,7 @@ class Preprint(DirtyFieldsMixin, GuidMixin, IdentifierMixin, ReviewableMixin, Ba
 
         if save:
             self.save()
-        update_or_enqueue_on_preprint_updated(preprint_id=self._id, saved_fields={'primary_file'})
+        update_or_enqueue_on_preprint_updated(preprint_id=self._id, saved_fields=['primary_file'])
 
     def set_published(self, published, auth, save=False):
         if not self.has_permission(auth.user, 'admin'):
@@ -527,7 +556,7 @@ class Preprint(DirtyFieldsMixin, GuidMixin, IdentifierMixin, ReviewableMixin, Ba
             )
         if save:
             self.save()
-        update_or_enqueue_on_preprint_updated(preprint_id=self._id, saved_fields={'license'})
+        update_or_enqueue_on_preprint_updated(preprint_id=self._id, saved_fields=['license'])
 
     def set_identifier_values(self, doi, save=False):
         self.set_identifier_value('doi', doi)
@@ -650,7 +679,7 @@ class Preprint(DirtyFieldsMixin, GuidMixin, IdentifierMixin, ReviewableMixin, Ba
 
     # Override Taggable
     def on_tag_added(self, tag):
-        update_or_enqueue_on_preprint_updated(preprint_id=self._id, saved_fields={'tags'})
+        update_or_enqueue_on_preprint_updated(preprint_id=self._id, saved_fields=['tags'])
 
     def remove_tag(self, tag, auth, save=True):
         if not tag:
@@ -671,7 +700,7 @@ class Preprint(DirtyFieldsMixin, GuidMixin, IdentifierMixin, ReviewableMixin, Ba
             )
             if save:
                 self.save()
-            update_or_enqueue_on_preprint_updated(preprint_id=self._id, saved_fields={'tags'})
+            update_or_enqueue_on_preprint_updated(preprint_id=self._id, saved_fields=['tags'])
             return True
 
     def set_supplemental_node(self, node, auth, save=False):
@@ -691,6 +720,26 @@ class Preprint(DirtyFieldsMixin, GuidMixin, IdentifierMixin, ReviewableMixin, Ba
             params={
                 'preprint': self._id,
                 'node': self.node._id,
+            },
+            auth=auth,
+            save=False,
+        )
+
+        if save:
+            self.save()
+
+    def unset_supplemental_node(self, auth, save=False):
+        if not self.has_permission(auth.user, 'write'):
+            raise PermissionsError('You must have write permissions to set a supplemental node.')
+
+        current_node_id = self.node._id if self.node else None
+        self.node = None
+
+        self.add_log(
+            action=PreprintLog.SUPPLEMENTAL_NODE_REMOVED,
+            params={
+                'preprint': self._id,
+                'node': current_node_id
             },
             auth=auth,
             save=False,

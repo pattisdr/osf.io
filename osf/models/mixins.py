@@ -201,10 +201,10 @@ class AddonModelMixin(models.Model):
         return self.get_addons()
 
     def get_addons(self):
-        return filter(None, [
+        return [_f for _f in [
             self.get_addon(config.short_name)
             for config in self.ADDONS_AVAILABLE
-        ])
+        ] if _f]
 
     def get_oauth_addons(self):
         # TODO: Using hasattr is a dirty hack - we should be using issubclass().
@@ -279,7 +279,7 @@ class AddonModelMixin(models.Model):
         :param dict config: Mapping between add-on names and enabled / disabled
             statuses
         """
-        for addon_name, enabled in config.iteritems():
+        for addon_name, enabled in config.items():
             if enabled:
                 self.add_addon(addon_name, auth)
             else:
@@ -688,6 +688,18 @@ class ReviewProviderMixin(GuardianMixin):
         counts.update({row['machine_state']: row['count'] for row in qs if row['machine_state'] in counts})
         return counts
 
+    def get_request_state_counts(self):
+        # import stuff here to get around circular imports
+        from osf.models import PreprintRequest
+        qs = PreprintRequest.objects.filter(target__provider__id=self.id,
+                                            target__node__isnull=False,
+                                            target__node__is_deleted=False,
+                                            target__node__is_public=True)
+        qs = qs.values('machine_state').annotate(count=models.Count('*'))
+        counts = {state.value: 0 for state in DefaultStates}
+        counts.update({row['machine_state']: row['count'] for row in qs if row['machine_state'] in counts})
+        return counts
+
     def add_to_group(self, user, group):
         # Add default notification subscription
         notification = self.notification_subscriptions.get(_id='{}_new_pending_submissions'.format(self._id))
@@ -739,13 +751,13 @@ class TaxonomizableMixin(models.Model):
         """
         AbstractNode = apps.get_model('osf.AbstractNode')
         Preprint = apps.get_model('osf.Preprint')
-        CollectedGuidMetadata = apps.get_model('osf.CollectedGuidMetadata')
+        CollectionSubmission = apps.get_model('osf.CollectionSubmission')
         if getattr(self, 'is_registration', False):
             raise PermissionsError('Registrations may not be modified.')
         if isinstance(self, (AbstractNode, Preprint)):
             if not self.has_permission(auth.user, ADMIN):
                 raise PermissionsError('Only admins can change subjects.')
-        elif isinstance(self, CollectedGuidMetadata):
+        elif isinstance(self, CollectionSubmission):
             if not self.guid.referent.has_permission(auth.user, ADMIN) and not auth.user.has_perms(self.collection.groups[ADMIN], self.collection):
                 raise PermissionsError('Only admins can change subjects.')
 
@@ -939,7 +951,7 @@ class ContributorMixin(models.Model):
             # enqueue on_node_updated/on_preprint_updated to update DOI metadata when a contributor is added
             if self.get_identifier_value('doi'):
                 request, user_id = get_request_and_user_id()
-                self.update_or_enqueue_on_resource_updated(user_id, first_save=False, saved_fields={'contributors'})
+                self.update_or_enqueue_on_resource_updated(user_id, first_save=False, saved_fields=['contributors'])
             return contrib_to_add
 
     def add_contributors(self, contributors, auth=None, log=True, save=False):
@@ -1026,15 +1038,25 @@ class ContributorMixin(models.Model):
             contributor = OSFUser.load(user_id)
             if not contributor:
                 raise ValueError('User with id {} was not found.'.format(user_id))
-            if not contributor.is_registered:
-                raise ValueError(
-                    'Cannot add unconfirmed user {} to node {} by guid. Add an unregistered contributor with fullname and email.'
-                    .format(user_id, self._id)
-                )
+
             if self.contributor_set.filter(user=contributor).exists():
                 raise ValidationValueError('{} is already a contributor.'.format(contributor.fullname))
-            contributor = self.add_contributor(contributor=contributor, auth=auth, visible=bibliographic,
-                                 permissions=permissions, send_email=send_email, save=True)
+
+            if contributor.is_registered:
+                contributor = self.add_contributor(contributor=contributor, auth=auth, visible=bibliographic,
+                                     permissions=permissions, send_email=send_email, save=True)
+            else:
+                if not full_name:
+                    raise ValueError(
+                        'Cannot add unconfirmed user {} to resource {}. You need to provide a full_name.'
+                        .format(user_id, self._id)
+                    )
+                contributor = self.add_unregistered_contributor(
+                    fullname=full_name, email=contributor.username, auth=auth,
+                    send_email=send_email, permissions=permissions,
+                    visible=bibliographic, existing_user=contributor, save=True
+                )
+
         else:
             contributor = get_user(email=email)
             if contributor and self.contributor_set.filter(user=contributor).exists():
@@ -1185,7 +1207,7 @@ class ContributorMixin(models.Model):
         # enqueue on_node_updated/on_preprint_updated to update DOI metadata when a contributor is removed
         if self.get_identifier_value('doi'):
             request, user_id = get_request_and_user_id()
-            self.update_or_enqueue_on_resource_updated(user_id, first_save=False, saved_fields={'contributors'})
+            self.update_or_enqueue_on_resource_updated(user_id, first_save=False, saved_fields=['contributors'])
         return True
 
     def remove_contributors(self, contributors, auth=None, log=True, save=False):
@@ -1237,7 +1259,7 @@ class ContributorMixin(models.Model):
         # enqueue on_node_updated/on_preprint_updated to update DOI metadata when a contributor is moved
         if self.get_identifier_value('doi'):
             request, user_id = get_request_and_user_id()
-            self.update_or_enqueue_on_resource_updated(user_id, first_save=False, saved_fields={'contributors'})
+            self.update_or_enqueue_on_resource_updated(user_id, first_save=False, saved_fields=['contributors'])
 
     # TODO: Optimize me
     def manage_contributors(self, user_dicts, auth, save=False):
@@ -1394,7 +1416,7 @@ class ContributorMixin(models.Model):
         # enqueue on_node_updated/on_preprint_updated to update DOI metadata when a contributor is hidden/made visible
         if self.get_identifier_value('doi'):
             request, user_id = get_request_and_user_id()
-            self.update_or_enqueue_on_resource_updated(user_id, first_save=False, saved_fields={'contributors'})
+            self.update_or_enqueue_on_resource_updated(user_id, first_save=False, saved_fields=['contributors'])
 
     def has_permission(self, user, permission, check_parent=True):
         """Check whether user has permission.
@@ -1505,22 +1527,11 @@ class SpamOverrideMixin(SpamMixin):
 
     def _get_spam_content(self, saved_fields):
         spam_fields = self.get_spam_fields(saved_fields)
-
         content = []
         for field in spam_fields:
-            if field == 'wiki_pages_latest':
-                newest_wiki_page = None
-                for wiki_page in self.get_wiki_pages_latest():
-                    if not newest_wiki_page:
-                        newest_wiki_page = wiki_page
-                    elif wiki_page.created > newest_wiki_page.created:
-                        newest_wiki_page = wiki_page
-                if newest_wiki_page:
-                    content.append(newest_wiki_page.raw_text(self).encode('utf-8'))
-            else:
-                content.append((getattr(self, field, None) or '').encode('utf-8'))
+            content.append((getattr(self, field, None) or '').encode('utf-8'))
         if self.all_tags.exists():
-            content.extend(map(lambda name: name.encode('utf-8'), self.all_tags.values_list('name', flat=True)))
+            content.extend([name.encode('utf-8') for name in self.all_tags.values_list('name', flat=True)])
         if not content:
             return None
         return ' '.join(content)
