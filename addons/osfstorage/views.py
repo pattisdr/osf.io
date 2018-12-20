@@ -326,7 +326,8 @@ def osfstorage_create_child(file_node, payload, **kwargs):
                     ),
                     dict(payload['metadata'], **payload['hashes'])
                 )
-                if version.identifier != old_version_number and file_node.target_content_type.model == 'abstractnode':
+                is_node = file_node.target_content_type.model == 'abstractnode'
+                if version.identifier != old_version_number and is_node and not file_node.target.is_quickfiles:
                     enqueue_postcommit_task(update_storage_usage_cache, (file_node.target._id,), {}, celery=True)
 
                 version_id = version._id
@@ -364,7 +365,7 @@ def osfstorage_delete(file_node, payload, target, **kwargs):
 
     try:
         file_node.delete(user=user)
-        if file_node.target_content_type.model == 'abstractnode':
+        if file_node.target_content_type.model == 'abstractnode' and not file_node.target.is_quickfiles:
             enqueue_postcommit_task(update_storage_usage_cache, (file_node.target._id,), {}, celery=True)
 
     except exceptions.FileNodeCheckedOutError:
