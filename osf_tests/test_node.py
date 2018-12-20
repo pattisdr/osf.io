@@ -1,6 +1,7 @@
 import datetime
 
 from django.utils import timezone
+from django.core.cache import cache
 import mock
 import pytest
 import pytz
@@ -38,6 +39,8 @@ from osf.models import (
     DraftRegistrationApproval,
 )
 
+from addons.osfstorage.models import OsfStorageFile
+from addons.osfstorage.tests.factories import FileVersionFactory
 from addons.wiki.models import WikiPage, WikiVersion
 from osf.models.node import AbstractNodeQuerySet
 from osf.models.spam import SpamStatus
@@ -704,6 +707,32 @@ class TestProject:
 
         assert linked_node in project.nodes_active
         assert deleted_linked_node not in project.nodes_active
+
+    def test_storage_usage(self, project):
+        node_settings = project.get_addon('osfstorage')
+        file_node = OsfStorageFile(name='test', target=node_settings.owner)
+        file_node.save()
+        first_version = FileVersionFactory(
+            size=1024,
+            content_type='application/json',
+            modified=timezone.now(),
+        )
+        file_node.versions.add(first_version)
+        file_node.save()
+        assert project.storage_usage == 1024
+        second_version = FileVersionFactory(
+            size=1000,
+            content_type='application/json',
+            modified=timezone.now(),
+        )
+        file_node.versions.add(second_version)
+        file_node.save()
+        # check if still cached
+        assert project.storage_usage == 1024
+        # now bust that cache
+        cache.delete('storage_usage:' + project._id)
+        assert project.storage_usage == 2024
+
 
 class TestLogging:
 

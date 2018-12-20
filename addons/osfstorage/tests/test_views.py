@@ -7,6 +7,7 @@ import datetime
 
 import pytest
 import responses
+from waffle.testutils import override_flag
 from nose.tools import *  # noqa
 from dateutil.parser import parse as parse_datetime
 from website import settings
@@ -23,7 +24,9 @@ from addons.osfstorage.tests.utils import make_payload
 from framework.auth import signing
 from website.util import rubeus, api_url_for
 from framework.auth import cas
+from django.core.cache import cache
 
+from osf import features
 from osf.models import Tag, QuickFilesNode
 from osf.models import files as models
 from addons.osfstorage.apps import osf_storage_root
@@ -31,13 +34,15 @@ from addons.osfstorage import utils
 from addons.base.views import make_auth
 from addons.osfstorage import settings as storage_settings
 from api_tests.utils import create_test_file
+from api.caching.settings import STORAGE_USAGE_KEY
+from api.caching.tasks import update_storage_usage_cache
 
 from osf_tests.factories import ProjectFactory, ApiOAuth2PersonalTokenFactory, PreprintFactory
 
 def create_record_with_version(path, node_settings, **kwargs):
     version = factories.FileVersionFactory(**kwargs)
-    node_settings.get_root().append_file(path)
-    record.versions.append(version)
+    record = node_settings.get_root().append_file(path)
+    record.versions.add(version)
     record.save()
     return record
 
@@ -431,6 +436,28 @@ class TestUploadFileHook(HookTestCase):
 
     # def test_upload_update_deleted(self):
     #     pass
+
+    def test_add_file_updates_cache(self):
+        name = 'ლ(ಠ益ಠლ).unicode'
+        parent = self.node_settings.get_root()
+        key = STORAGE_USAGE_KEY.format(node_id=self.node._id)
+        assert cache.get(key) is None
+
+        with override_flag(features.STORAGE_USAGE, active=True):
+            self.send_upload_hook(parent, payload=self.make_payload(name=name))
+        assert cache.get(key) == 123
+
+        # Don't update the cache for duplicate uploads
+        with override_flag(features.STORAGE_USAGE, active=True):
+            self.send_upload_hook(parent, payload=self.make_payload(name=name))
+        assert cache.get(key) == 123
+
+        # Do update the cache for new versions
+        payload = self.make_payload(name=name)
+        payload['metadata']['name'] = 'new hash'
+        with override_flag(features.STORAGE_USAGE, active=True):
+            self.send_upload_hook(parent, payload=payload)
+        assert cache.get(key) == 246
 
 
 @pytest.mark.django_db
@@ -856,10 +883,10 @@ class TestCreateFolder(HookTestCase):
 
 
 @pytest.mark.django_db
-class TestDeleteHook(HookTestCase):
+class DeleteHook(HookTestCase):
 
     def setUp(self):
-        super(TestDeleteHook, self).setUp()
+        super(DeleteHook, self).setUp()
         self.root_node = self.node_settings.get_root()
 
     def send_hook(self, view_name, view_kwargs, payload, target, method='get', **kwargs):
@@ -883,6 +910,10 @@ class TestDeleteHook(HookTestCase):
             method='delete',
             **kwargs
         )
+
+
+@pytest.mark.django_db
+class TestDeleteHookNode(DeleteHook):
 
     def test_delete(self):
         file = self.root_node.append_file('Newfile')
@@ -942,7 +973,27 @@ class TestDeleteHook(HookTestCase):
 
 
 @pytest.mark.django_db
-class TestDeleteHookPreprint(TestDeleteHook):
+class TestDeleteHookProjectOnly(DeleteHook):
+
+    def test_delete_reduces_cache_size(self):
+        key = STORAGE_USAGE_KEY.format(node_id=self.node._id)
+
+        file = create_record_with_version('new file', self.node_settings, size=123)
+        assert self.node.storage_usage is None  # sets "storage_usage" cache
+        assert self.node.storage_usage == 123
+
+        with override_flag(name=features.STORAGE_USAGE, active=True):
+            resp = self.delete(file)
+
+        assert_equal(resp.status_code, 200)
+        assert_equal(resp.json, {'status': 'success'})
+
+        assert cache.get(key) == 0
+        assert_is(self.node.storage_usage, 0)
+
+
+@pytest.mark.django_db
+class TestDeleteHookPreprint(TestDeleteHookNode):
 
     def setUp(self):
         super(TestDeleteHookPreprint, self).setUp()
