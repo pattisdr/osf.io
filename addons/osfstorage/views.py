@@ -14,7 +14,9 @@ from framework.auth import Auth
 from framework.sessions import get_session
 from framework.exceptions import HTTPError
 from framework.auth.decorators import must_be_signed, must_be_logged_in
+from framework.postcommit_tasks.handlers import enqueue_postcommit_task
 
+from api.caching.tasks import update_storage_usage_cache
 from osf.exceptions import InvalidTagError, TagNotFoundError
 from osf.models import FileVersion, OSFUser
 from osf.utils.requests import check_select_for_update
@@ -312,6 +314,8 @@ def osfstorage_create_child(file_node, payload, **kwargs):
     if not is_folder:
         try:
             if file_node.checkout is None or file_node.checkout._id == user._id:
+
+                old_version_number = getattr(file_node.get_version(), 'identifier', None)
                 version = file_node.create_version(
                     user,
                     dict(payload['settings'], **dict(
@@ -322,6 +326,9 @@ def osfstorage_create_child(file_node, payload, **kwargs):
                     ),
                     dict(payload['metadata'], **payload['hashes'])
                 )
+                if version.identifier != old_version_number and file_node.target_content_type.model == 'abstractnode':
+                    enqueue_postcommit_task(update_storage_usage_cache, (file_node.target._id,), {}, celery=True)
+
                 version_id = version._id
                 archive_exists = version.archive is not None
             else:
@@ -357,6 +364,8 @@ def osfstorage_delete(file_node, payload, target, **kwargs):
 
     try:
         file_node.delete(user=user)
+        if file_node.target_content_type.model == 'abstractnode':
+            enqueue_postcommit_task(update_storage_usage_cache, (file_node.target._id,), {}, celery=True)
 
     except exceptions.FileNodeCheckedOutError:
         raise HTTPError(httplib.FORBIDDEN)

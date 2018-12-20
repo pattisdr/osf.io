@@ -3,6 +3,11 @@ import urlparse
 import requests
 import logging
 
+from django.apps import apps
+from django.core.cache import cache
+from django.db import models
+
+from api.caching import settings as cache_settings
 from framework.celery_tasks import app
 from website import settings
 
@@ -94,3 +99,17 @@ def ban_url(instance):
                     logger.info('Banning {} succeeded'.format(
                         url_to_ban,
                     ))
+
+
+@app.task(max_retries=5, default_retry_delay=10)
+def update_storage_usage_cache(node_id):
+        Node = apps.get_model('osf.Node')
+
+        storage_usage_total = Node.load(node_id).files.all().annotate(
+            models.Sum('versions__size'),
+        ).values_list(
+            'versions__size__sum', flat=True,
+        ).aggregate(sum=models.Sum('versions__size__sum'))['sum'] or 0
+
+        key = cache_settings.STORAGE_USAGE_KEY.format(node_id=node_id)
+        cache.set(key, storage_usage_total, cache_settings.NEVER_TIMEOUT)
