@@ -333,10 +333,14 @@ def osfstorage_create_child(file_node, payload, **kwargs):
             ))
         except KeyError:
             raise HTTPError(httplib.BAD_REQUEST)
+        current_version = file_node.get_version()
+        new_version = file_node.create_version(user, location, metadata)
 
-        version = file_node.create_version(user, location, metadata)
-        version_id = version._id
-        archive_exists = version.archive is not None
+        if not current_version or not current_version.is_duplicate(new_version):
+            update_storage_usage(file_node.target)
+
+        version_id = new_version._id
+        archive_exists = new_version.archive is not None
     else:
         version_id = None
         archive_exists = False
