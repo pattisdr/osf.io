@@ -35,7 +35,6 @@ from addons.base.views import make_auth
 from addons.osfstorage import settings as storage_settings
 from api_tests.utils import create_test_file
 from api.caching.settings import STORAGE_USAGE_KEY
-from api.caching.tasks import update_storage_usage_cache
 
 from osf_tests.factories import ProjectFactory, ApiOAuth2PersonalTokenFactory, PreprintFactory
 

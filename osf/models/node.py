@@ -28,7 +28,6 @@ from include import IncludeManager
 from framework import status
 from framework.auth import oauth_scopes
 from framework.celery_tasks.handlers import enqueue_task, get_task_from_queue
-from framework.postcommit_tasks.handlers import enqueue_postcommit_task
 from framework.exceptions import PermissionsError, HTTPError
 from framework.sentry import log_exception
 from osf.models.contributor import (Contributor, get_contributor_permissions)
@@ -63,7 +62,7 @@ from osf.utils.requests import get_headers_from_request
 from osf.utils.permissions import ADMIN, CREATOR_PERMISSIONS, DEFAULT_CONTRIBUTOR_PERMISSIONS, expand_permissions
 from website.util import api_url_for, api_v2_url, web_url_for
 from .base import BaseModel, GuidMixin, GuidMixinQuerySet
-from api.caching.tasks import update_storage_usage_cache
+from api.caching.tasks import update_storage_usage
 from api.caching import settings as cache_settings
 
 
@@ -2225,7 +2224,7 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         if storage_usage_total:
             return storage_usage_total
         else:
-            enqueue_postcommit_task(update_storage_usage_cache, (self._id,), {}, celery=True)
+            update_storage_usage(self)
 
         return storage_usage_total
 

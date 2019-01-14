@@ -6,6 +6,7 @@ import logging
 from django.apps import apps
 from django.core.cache import cache
 from django.db import models
+from framework.postcommit_tasks.handlers import enqueue_postcommit_task
 
 from api.caching import settings as cache_settings
 from framework.celery_tasks import app
@@ -102,14 +103,21 @@ def ban_url(instance):
 
 
 @app.task(max_retries=5, default_retry_delay=10)
-def update_storage_usage_cache(node_id):
-        Node = apps.get_model('osf.Node')
+def update_storage_usage_cache(target_id):
+    AbstractNode = apps.get_model('osf.AbstractNode')
 
-        storage_usage_total = Node.load(node_id).files.all().annotate(
-            models.Sum('versions__size'),
-        ).values_list(
-            'versions__size__sum', flat=True,
-        ).aggregate(sum=models.Sum('versions__size__sum'))['sum'] or 0
+    storage_usage_total = AbstractNode.objects.get(guids___id=target_id).files.annotate(
+        models.Sum('versions__size'),
+    ).values_list(
+        'versions__size__sum', flat=True,
+    ).aggregate(sum=models.Sum('versions__size__sum'))['sum'] or 0
 
-        key = cache_settings.STORAGE_USAGE_KEY.format(node_id=node_id)
-        cache.set(key, storage_usage_total, cache_settings.NEVER_TIMEOUT)
+    key = cache_settings.STORAGE_USAGE_KEY.format(node_id=target_id)
+    cache.set(key, storage_usage_total, cache_settings.NEVER_TIMEOUT)
+
+
+def update_storage_usage(target):
+    Preprint = apps.get_model('osf.preprint')
+
+    if not isinstance(target, Preprint) and not target.is_quickfiles:
+        enqueue_postcommit_task(update_storage_usage_cache, (target._id,), {}, celery=True)
