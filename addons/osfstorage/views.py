@@ -14,9 +14,8 @@ from framework.auth import Auth
 from framework.sessions import get_session
 from framework.exceptions import HTTPError
 from framework.auth.decorators import must_be_signed, must_be_logged_in
-from framework.postcommit_tasks.handlers import enqueue_postcommit_task
 
-from api.caching.tasks import update_storage_usage_cache
+from api.caching.tasks import update_storage_usage
 from osf.exceptions import InvalidTagError, TagNotFoundError
 from osf.models import FileVersion, OSFUser
 from osf.utils.requests import check_select_for_update
@@ -124,13 +123,16 @@ def osfstorage_get_revisions(file_node, payload, target, **kwargs):
 
 @decorators.waterbutler_opt_hook
 def osfstorage_copy_hook(source, destination, name=None, **kwargs):
-    return source.copy_under(destination, name=name).serialize(), httplib.CREATED
-
+    ret = source.copy_under(destination, name=name).serialize(), httplib.CREATED
+    update_storage_usage(destination.target)
+    return ret
 
 @decorators.waterbutler_opt_hook
 def osfstorage_move_hook(source, destination, name=None, **kwargs):
+    source_target = source.target
+
     try:
-        return source.move_under(destination, name=name).serialize(), httplib.OK
+        ret = source.move_under(destination, name=name).serialize(), httplib.OK
     except exceptions.FileNodeCheckedOutError:
         raise HTTPError(httplib.METHOD_NOT_ALLOWED, data={
             'message_long': 'Cannot move file as it is checked out.'
@@ -140,6 +142,10 @@ def osfstorage_move_hook(source, destination, name=None, **kwargs):
             'message_long': 'Cannot move file as it is the primary file of preprint.'
         })
 
+    # once the move is complete recalculate storage for both nodes.
+    update_storage_usage(source_target)
+    update_storage_usage(destination.target)
+    return ret
 
 @must_be_signed
 @decorators.autoload_filenode(default_root=True)
@@ -311,33 +317,26 @@ def osfstorage_create_child(file_node, payload, **kwargs):
             )
         })
 
+    if file_node.checkout and file_node.checkout._id != user._id:
+        raise HTTPError(httplib.FORBIDDEN, data={
+            'message_long': 'File cannot be updated due to checkout status.'
+        })
+
     if not is_folder:
         try:
-            if file_node.checkout is None or file_node.checkout._id == user._id:
-
-                old_version_number = getattr(file_node.get_version(), 'identifier', None)
-                version = file_node.create_version(
-                    user,
-                    dict(payload['settings'], **dict(
-                        payload['worker'], **{
-                            'object': payload['metadata']['name'],
-                            'service': payload['metadata']['provider'],
-                        })
-                    ),
-                    dict(payload['metadata'], **payload['hashes'])
-                )
-                is_node = file_node.target_content_type.model == 'abstractnode'
-                if version.identifier != old_version_number and is_node and not file_node.target.is_quickfiles:
-                    enqueue_postcommit_task(update_storage_usage_cache, (file_node.target._id,), {}, celery=True)
-
-                version_id = version._id
-                archive_exists = version.archive is not None
-            else:
-                raise HTTPError(httplib.FORBIDDEN, data={
-                    'message_long': 'File cannot be updated due to checkout status.'
-                })
+            metadata = dict(payload['metadata'], **payload['hashes'])
+            location = dict(payload['settings'], **dict(
+                payload['worker'], **{
+                    'object': payload['metadata']['name'],
+                    'service': payload['metadata']['provider'],
+                }
+            ))
         except KeyError:
             raise HTTPError(httplib.BAD_REQUEST)
+
+        version = file_node.create_version(user, location, metadata)
+        version_id = version._id
+        archive_exists = version.archive is not None
     else:
         version_id = None
         archive_exists = False
@@ -365,15 +364,14 @@ def osfstorage_delete(file_node, payload, target, **kwargs):
 
     try:
         file_node.delete(user=user)
-        if file_node.target_content_type.model == 'abstractnode' and not file_node.target.is_quickfiles:
-            enqueue_postcommit_task(update_storage_usage_cache, (file_node.target._id,), {}, celery=True)
-
     except exceptions.FileNodeCheckedOutError:
         raise HTTPError(httplib.FORBIDDEN)
     except exceptions.FileNodeIsPrimaryFile:
         raise HTTPError(httplib.FORBIDDEN, data={
             'message_long': 'Cannot delete file as it is the primary file of preprint.'
         })
+
+    update_storage_usage(file_node.target)
 
     return {'status': 'success'}
 
