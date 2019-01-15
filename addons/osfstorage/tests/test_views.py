@@ -978,7 +978,6 @@ class TestDeleteHookProjectOnly(DeleteHook):
         key = STORAGE_USAGE_KEY.format(target_id=self.node._id)
 
         file = create_record_with_version('new file', self.node_settings, size=123)
-        assert self.node.storage_usage is None  # sets "storage_usage" cache
         assert self.node.storage_usage == 123
 
         with override_flag(name=features.STORAGE_USAGE, active=True):
@@ -1257,8 +1256,87 @@ class TestMoveHookPreprint(TestMoveHook):
 
 
 @pytest.mark.django_db
+class TestMoveHookProjectsOnly(TestMoveHook):
+
+    def test_move_hook_updates_cache_intra_target(self):
+        """
+        Moving within a single target shouldn't update the cache because net storage usage hasn't changed
+        """
+
+        file = create_record_with_version('new file', self.node_settings, size=123)
+        folder = self.root_node.append_folder('Nina Simone')
+
+        with override_flag(features.STORAGE_USAGE, active=True):
+            res = self.send_hook(
+                'osfstorage_move_hook',
+                {'guid': self.root_node.target._id},
+                payload={
+                    'source': file._id,
+                    'target': self.root_node._id,
+                    'user': self.user._id,
+                    'destination': {
+                        'parent': folder._id,
+                        'target': folder.target._id,
+                        'name': folder.name,
+                    }
+                },
+                target=self.node,
+                method='post_json',)
+
+        # Cache should stay untouched because net storage usage hasn't changed
+        key = STORAGE_USAGE_KEY.format(target_id=self.project._id)
+        assert cache.get(key) is None
+
+        assert_equal(res.status_code, 200)
+
+    def test_move_hook_updates_cache_inter_target(self):
+        """
+        Moving from one target to another should update both targets
+        """
+
+        other_target = ProjectFactory()
+        other_root = other_target.get_addon('osfstorage').get_root()
+
+        file = create_record_with_version('new file', self.node_settings, size=123)
+        folder = other_root.append_folder('Nina Simone')
+
+        assert self.project.storage_usage == 123
+        assert other_target.storage_usage == 0
+
+        with override_flag(features.STORAGE_USAGE, active=True):
+            res = self.send_hook(
+                'osfstorage_move_hook',
+                {'guid': self.root_node.target._id},
+                payload={
+                    'source': file._id,
+                    'target': self.root_node._id,
+                    'user': self.user._id,
+                    'destination': {
+                        'parent': folder._id,
+                        'target': folder.target._id,
+                        'name': folder.name,
+                    }
+                },
+                target=self.node,
+                method='post_json',)
+
+        # both caches are updated
+        source_key = STORAGE_USAGE_KEY.format(target_id=self.project._id)
+        assert cache.get(source_key) == 0
+
+        destination = STORAGE_USAGE_KEY.format(target_id=other_target._id)
+        assert cache.get(destination) == 123
+
+        assert_equal(res.status_code, 200)
+
+
+@pytest.mark.django_db
 @pytest.mark.enable_quickfiles_creation
 class TestCopyHook(HookTestCase):
+
+    def setUp(self):
+        super(TestCopyHook, self).setUp()
+        self.root_node = self.node_settings.get_root()
 
     @pytest.mark.enable_implicit_clean
     def test_can_copy_file_out_of_quickfiles_node(self):
@@ -1283,6 +1361,49 @@ class TestCopyHook(HookTestCase):
             method='post_json',
         )
         assert_equal(res.status_code, 201)
+
+    @pytest.mark.enable_implicit_clean
+    def test_copy_hook_updates_cache(self):
+        """
+        Whether intra or inter copying the storage usage cache only has to re-calculate the destination, because if it's
+        a inter-copy the source hasn't changed, but if it's a intra the source IS the destination.
+       """
+
+        other_target = ProjectFactory()
+        other_root = other_target.get_addon('osfstorage').get_root()
+
+        file = create_record_with_version('new file', self.node_settings, size=123)
+        folder = other_root.append_folder('Nina Simone')
+
+        assert self.project.storage_usage == 123
+        assert other_target.storage_usage == 0
+
+        with override_flag(features.STORAGE_USAGE, active=True):
+            res = self.send_hook(
+                'osfstorage_copy_hook',
+                {'guid': self.root_node.target._id},
+                payload={
+                    'source': file._id,
+                    'target': self.root_node._id,
+                    'user': self.user._id,
+                    'destination': {
+                        'parent': folder._id,
+                        'target': folder.target._id,
+                        'name': folder.name,
+                    }
+                },
+                target=self.node,
+                method='post_json',)
+
+        # both caches are updated
+        source_key = STORAGE_USAGE_KEY.format(target_id=self.project._id)
+        assert cache.get(source_key) == 123
+
+        destination = STORAGE_USAGE_KEY.format(target_id=other_target._id)
+        assert cache.get(destination) == 123
+
+        assert_equal(res.status_code, 201)
+
 
 
 @pytest.mark.django_db

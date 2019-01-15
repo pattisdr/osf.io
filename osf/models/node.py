@@ -2224,9 +2224,9 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
         if storage_usage_total:
             return storage_usage_total
         else:
-            update_storage_usage(self)
+            update_storage_usage(self)  # sets cache
+            return cache.get(key)
 
-        return storage_usage_total
 
 class Node(AbstractNode):
     """

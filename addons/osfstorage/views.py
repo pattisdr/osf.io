@@ -142,9 +142,11 @@ def osfstorage_move_hook(source, destination, name=None, **kwargs):
             'message_long': 'Cannot move file as it is the primary file of preprint.'
         })
 
-    # once the move is complete recalculate storage for both nodes.
-    update_storage_usage(source_target)
-    update_storage_usage(destination.target)
+    # once the move is complete recalculate storage for both targets if it's a inter-target move.
+    if source_target != destination.target:
+        update_storage_usage(destination.target)
+        update_storage_usage(source_target)
+
     return ret
 
 @must_be_signed
