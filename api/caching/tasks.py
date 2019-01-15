@@ -106,11 +106,9 @@ def ban_url(instance):
 def update_storage_usage_cache(target_id):
     AbstractNode = apps.get_model('osf.AbstractNode')
 
-    storage_usage_total = AbstractNode.objects.get(guids___id=target_id).files.annotate(
-        models.Sum('versions__size'),
-    ).values_list(
-        'versions__size__sum', flat=True,
-    ).aggregate(sum=models.Sum('versions__size__sum'))['sum'] or 0
+    storage_usage_total = AbstractNode.objects.get(
+        guids___id=target_id,
+    ).files.aggregate(sum=models.Sum('versions__size'))['sum'] or 0
 
     key = cache_settings.STORAGE_USAGE_KEY.format(target_id=target_id)
     cache.set(key, storage_usage_total, cache_settings.NEVER_TIMEOUT)
