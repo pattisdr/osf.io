@@ -112,7 +112,7 @@ def update_storage_usage_cache(target_id):
         'versions__size__sum', flat=True,
     ).aggregate(sum=models.Sum('versions__size__sum'))['sum'] or 0
 
-    key = cache_settings.STORAGE_USAGE_KEY.format(node_id=target_id)
+    key = cache_settings.STORAGE_USAGE_KEY.format(target_id=target_id)
     cache.set(key, storage_usage_total, cache_settings.NEVER_TIMEOUT)
 
 

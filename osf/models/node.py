@@ -2218,7 +2218,7 @@ class AbstractNode(DirtyFieldsMixin, TypedModel, AddonModelMixin, IdentifierMixi
 
     @property
     def storage_usage(self):
-        key = cache_settings.STORAGE_USAGE_KEY.format(node_id=self._id)
+        key = cache_settings.STORAGE_USAGE_KEY.format(target_id=self._id)
 
         storage_usage_total = cache.get(key)
         if storage_usage_total:

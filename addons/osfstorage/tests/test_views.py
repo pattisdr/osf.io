@@ -439,7 +439,7 @@ class TestUploadFileHook(HookTestCase):
     def test_add_file_updates_cache(self):
         name = 'ლ(ಠ益ಠლ).unicode'
         parent = self.node_settings.get_root()
-        key = STORAGE_USAGE_KEY.format(node_id=self.node._id)
+        key = STORAGE_USAGE_KEY.format(target_id=self.node._id)
         assert cache.get(key) is None
 
         with override_flag(features.STORAGE_USAGE, active=True):
@@ -975,7 +975,7 @@ class TestDeleteHookNode(DeleteHook):
 class TestDeleteHookProjectOnly(DeleteHook):
 
     def test_delete_reduces_cache_size(self):
-        key = STORAGE_USAGE_KEY.format(node_id=self.node._id)
+        key = STORAGE_USAGE_KEY.format(target_id=self.node._id)
 
         file = create_record_with_version('new file', self.node_settings, size=123)
         assert self.node.storage_usage is None  # sets "storage_usage" cache
