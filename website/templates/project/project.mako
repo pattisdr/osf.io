@@ -218,7 +218,6 @@
                       <span data-bind="if: hasArk()" class="scripted">| ARK <span data-bind="text: ark"></span></span>
                   </p>
                 </span>
-                % if not waffle.switch_is_active(features.DISABLE_DATACITE_DOIS):
                 <span data-bind="if: canCreateIdentifiers()" class="scripted">
                   <!-- ko if: idCreationInProgress() -->
                     <p>
@@ -233,7 +232,6 @@
                   </p>
                   <!-- /ko -->
                 </span>
-                % endif
                 <p>
                     Category: <span data-bind="css: icon"></span>
                     <span id="nodeCategoryEditable">${node['category']}</span>
