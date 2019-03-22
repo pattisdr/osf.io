@@ -763,6 +763,8 @@ class OSFUser(DirtyFieldsMixin, GuidMixin, BaseModel, AbstractBaseUser, Permissi
             merging_user_file.move_under(primary_quickfiles_root)
             merging_user_file.save()
 
+        self._merge_users_preprints(user)
+
         # finalize the merge
 
         remove_sessions_for_user(user)
@@ -776,6 +778,11 @@ class OSFUser(DirtyFieldsMixin, GuidMixin, BaseModel, AbstractBaseUser, Permissi
         user.merged_by = self
 
         user.save()
+
+    def _merge_users_preprints(self, user):
+        from osf.models.preprint import Preprint, PreprintContributor
+        Preprint.objects.filter(creator=user).update(creator=self)
+        PreprintContributor.objects.filter(user=user).update(user=self)
 
     def disable_account(self):
         """

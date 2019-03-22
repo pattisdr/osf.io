@@ -76,6 +76,12 @@ def auth(user):
 @pytest.mark.enable_quickfiles_creation
 class TestOSFUser:
 
+    @pytest.fixture()
+    def preprint(self, user):
+        preprint = PreprintFactory(creator=user)
+        preprint.save()
+        return preprint
+
     def test_create(self):
         name, email = fake.name(), fake_email()
         user = OSFUser.create(
@@ -218,6 +224,24 @@ class TestOSFUser:
         assert project.has_permission(user, 'admin') is True
         assert project.get_visible(user) is True
         assert project.is_contributor(user2) is False
+
+    def test_merge_preprints(self, user, preprint):
+        contrib_not_creator = PreprintFactory()
+        contrib_not_creator.add_contributor(user)
+        user2 = AuthUserFactory()
+        user2.merge_user(user)
+
+        qs = user.preprints.all()
+        assert qs.count() == 0
+
+        qs = user2.preprints.all()
+        assert qs.count() == 2
+
+        qs = user2.preprints.filter(creator=user2)
+        preprint.refresh_from_db()
+        assert qs.count() == 1
+        assert qs.last()._id == preprint._id
+        assert qs.last().creator == preprint.creator
 
     def test_cant_create_user_without_username(self):
         u = OSFUser()  # No username given
