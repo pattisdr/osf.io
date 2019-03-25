@@ -781,8 +781,21 @@ class OSFUser(DirtyFieldsMixin, GuidMixin, BaseModel, AbstractBaseUser, Permissi
 
     def _merge_users_preprints(self, user):
         from osf.models.preprint import Preprint, PreprintContributor
-        Preprint.objects.filter(creator=user).update(creator=self)
-        PreprintContributor.objects.filter(user=user).update(user=self)
+
+        preprints = Preprint.objects.filter(creator=user)
+        for preprint in preprints:
+            preprint.creator = self
+            preprint.save()
+
+        preprint_contributors = PreprintContributor.objects.filter(user=user)
+
+        # If both users are already contribs we will violate unique constraint so just remove old contrib.
+        for preprint_contributor in preprint_contributors:
+            if self in preprint_contributor.preprint.contributors.all():
+                preprint_contributor.delete()
+            else:
+                preprint_contributor.user = self
+                preprint_contributor.save()
 
     def disable_account(self):
         """

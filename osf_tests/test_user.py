@@ -76,12 +76,6 @@ def auth(user):
 @pytest.mark.enable_quickfiles_creation
 class TestOSFUser:
 
-    @pytest.fixture()
-    def preprint(self, user):
-        preprint = PreprintFactory(creator=user)
-        preprint.save()
-        return preprint
-
     def test_create(self):
         name, email = fake.name(), fake_email()
         user = OSFUser.create(
@@ -225,23 +219,33 @@ class TestOSFUser:
         assert project.get_visible(user) is True
         assert project.is_contributor(user2) is False
 
-    def test_merge_preprints(self, user, preprint):
+    def test_merge_preprints(self, user):
+        user2 = AuthUserFactory()
+
+        user_is_creator = PreprintFactory(creator=user2)
+
         contrib_not_creator = PreprintFactory()
         contrib_not_creator.add_contributor(user)
-        user2 = AuthUserFactory()
+
+        # if not handled well this can throw an IntegrityError
+        both_users_are_contribs = PreprintFactory()
+        both_users_are_contribs.add_contributor(user)
+        both_users_are_contribs.add_contributor(user2)
+
         user2.merge_user(user)
 
         qs = user.preprints.all()
         assert qs.count() == 0
 
         qs = user2.preprints.all()
-        assert qs.count() == 2
+        assert qs.count() == 3
 
         qs = user2.preprints.filter(creator=user2)
-        preprint.refresh_from_db()
         assert qs.count() == 1
-        assert qs.last()._id == preprint._id
-        assert qs.last().creator == preprint.creator
+
+        user_is_creator.reload()
+        assert qs.last()._id == user_is_creator._id
+        assert qs.last().creator == user_is_creator.creator
 
     def test_cant_create_user_without_username(self):
         u = OSFUser()  # No username given
