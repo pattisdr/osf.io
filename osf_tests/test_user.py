@@ -231,7 +231,7 @@ class TestOSFUser:
         both_users_are_contribs = PreprintFactory()
         both_users_are_contribs.add_contributor(user)
         both_users_are_contribs.add_contributor(user2)
-        both_users_are_contribs.set_permission(user2, 'admin')
+        both_users_are_contribs.add_permission(user2, 'admin')
         user.merge_user(user2)
 
         qs = user2.preprints.all()

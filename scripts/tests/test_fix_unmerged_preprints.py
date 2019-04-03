@@ -1,5 +1,6 @@
 import pytest
 
+from osf.models import PreprintContributor
 from osf_tests.factories import AuthUserFactory, PreprintFactory
 from scripts.remove_after_use.fix_unmerged_preprints import main as fix_unmerged_preprints
 
@@ -24,7 +25,7 @@ class TestFixUnmergedPreprints:
     @pytest.fixture()
     def preprint_with_contributor(self, mergee):
         preprint = PreprintFactory()
-        preprint.add_contributor(mergee)
+        preprint.add_contributor(mergee, permissions='write', visible=False, save=True)
         preprint.save()
         return preprint
 
@@ -48,6 +49,14 @@ class TestFixUnmergedPreprints:
         assert merger in preprint_with_contributor.contributors.all()
         assert preprint_with_contributor.creator != merger
         assert preprint_with_contributor.creator in preprint_with_contributor.contributors.all()
+
+        contrib_obj = PreprintContributor.objects.get(user=merger, preprint=preprint_mergee_creator)
+        assert contrib_obj.visible
+        assert contrib_obj.permission == 'admin'
+
+        contrib_obj = PreprintContributor.objects.get(user=merger, preprint=preprint_with_contributor)
+        assert not contrib_obj.visible
+        assert contrib_obj.permission == 'write'
 
     def test_integrity_error(self, merger, mergee, preprint_mergee_creator, preprint_with_contributor, preprint_with_merger_and_mergee):
         """
