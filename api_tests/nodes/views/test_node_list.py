@@ -74,7 +74,6 @@ class TestNodeList:
         ids = [each['id'] for each in res.json['data']]
         assert public_project._id in ids
         assert private_project._id not in ids
-        assert private_project.title == 'hello'
 
     #   test_return_public_node_list_logged_in_user
         res = app.get(url, auth=non_contrib)
