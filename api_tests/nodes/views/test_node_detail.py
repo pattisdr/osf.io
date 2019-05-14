@@ -1561,7 +1561,7 @@ class TestNodeTags:
         project_public.add_system_tag('systag', save=True)
         res = app.get(url_public)
         assert res.status_code == 200
-        assert len(res.json['data']['attributes']['tags']) == 0
+        assert len(res.json['data']['attributes']['tags']) == 100
 
     def test_contributor_can_add_tag_to_public_project(
             self, app, user, project_public, payload_public, url_public):
