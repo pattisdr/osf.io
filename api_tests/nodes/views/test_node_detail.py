@@ -1602,6 +1602,10 @@ class TestNodeTags:
             assert len(reload_res.json['data']['attributes']['tags']) == 1
             assert reload_res.json['data']['attributes']['tags'][0] == 'new-tag'
 
+            res = app.get('/{}nodes/'.format(API_BASE), auth=user.auth)
+            assert res.status_code == 200
+            assert len(res.json['data']) == 1
+
     def test_partial_update_project_does_not_clear_tags(
             self, app, user_admin, project_private, payload_private, url_private):
         res = app.patch_json_api(
