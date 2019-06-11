@@ -6,15 +6,11 @@
 require('css/add-project-plugin.css');
 var $ = require('jquery');
 var m = require('mithril');
+var Cookie = require('js-cookie');
 var $osf = require('js/osfHelpers');
 var mHelpers = require('js/mithrilHelpers');
 var institutionComponents = require('js/components/institution');
 var SelectableInstitution = institutionComponents.SelectableInstitution;
-
-// XHR configuration to get apiserver connection to work
-var xhrconfig = function (xhr) {
-    xhr.withCredentials = true;
-};
 
 
 var AddProject = {
@@ -38,9 +34,13 @@ var AddProject = {
         self.showMore = m.prop(false);
         self.newProjectName = m.prop('');
         self.newProjectDesc = m.prop('');
+        self.newProjectStorageLocation = m.prop(window.contextVars.storageRegions[0]); // first storage region is default
+        self.storageRegions = m.prop(window.contextVars.storageRegions);
+        self.storageFlagIsActive = m.prop(window.contextVars.storageFlagIsActive);
         self.newProjectCategory = m.prop(self.defaultCat);
         self.newProjectTemplate = m.prop('');
         self.newProjectInheritContribs = m.prop(false);
+        self.newProjectInheritTags = m.prop(false);
         self.institutions = options.institutions || window.contextVars.currentUser.institutions || [];
         self.checkedInstitutions = {};
         self.institutions.map(
@@ -79,6 +79,9 @@ var AddProject = {
 
 
         self.add = function _add () {
+            if (! self.isValid()) {
+                return;
+            }
             if (self.isAdding()) {
                 return;
             }
@@ -87,9 +90,9 @@ var AddProject = {
             var data;
             self.viewState('processing');
             if(self.options.parentID) {
-                url = $osf.apiV2Url('nodes/' + self.options.parentID + '/children/', { query : {'inherit_contributors' : self.newProjectInheritContribs()}});
+                url = $osf.apiV2Url('nodes/' + self.options.parentID + '/children/', { query : {'inherit_contributors' : self.newProjectInheritContribs(), 'version': '2.2', 'region': self.newProjectStorageLocation()._id}});
             } else {
-                url = $osf.apiV2Url('nodes/', { query : {}});
+                url = $osf.apiV2Url('nodes/', { query : {'version': '2.2', 'region': self.newProjectStorageLocation()._id}});
             }
             data = {
                     'data' : {
@@ -101,6 +104,10 @@ var AddProject = {
                         }
                     }
                 };
+
+            if(self.newProjectInheritTags()){
+                data.data.attributes.tags = window.contextVars.node.tags;
+            }
 
             if (self.newProjectTemplate()) {
                 data.data.attributes.template_from = self.newProjectTemplate();
@@ -116,10 +123,10 @@ var AddProject = {
                 self.viewState('error');
                 self.isAdding(false);
             };
-            var request = m.request({method : 'POST', url : url, data : data, config : xhrconfig});
+            var request = m.request({method : 'POST', url : url, data : data, config : mHelpers.apiV2Config()});
             if (self.institutions.length > 0) {
                 request.then(function (result) {
-                    var newNodeApiUrl = $osf.apiV2Url('nodes/' + result.data.id + '/relationships/institutions/');
+                    var newNodeApiUrl = $osf.apiV2Url('nodes/' + result.data.id + '/relationships/institutions/', {query: {'version': '2.2'}});
                     var data = {
                         data: self.institutions.filter(
                             function (inst) {
@@ -132,7 +139,7 @@ var AddProject = {
                         )
                     };
                     if (data.data.length > 0){
-                        m.request({method: 'POST', url: newNodeApiUrl, data: data, config: xhrconfig}).then(
+                        m.request({method: 'POST', url: newNodeApiUrl, data: data, config: mHelpers.apiV2Config()}).then(
                             function(){},
                             function(){
                                 self.viewState('instError');
@@ -176,12 +183,12 @@ var AddProject = {
                             m('label[for="projectName].f-w-lg.text-bigger', 'Title'),
                             m('input[type="text"].form-control.project-name', {
                                 onkeyup: function(ev){
-                                    if (ev.which === 13) {
-                                         ctrl.add();
-                                    }
                                     var val = ev.target.value;
-                                    ctrl.newProjectName(val);
                                     ctrl.isValid(val.trim().length > 0);
+                                    if (ev.which === 13) {
+                                        ctrl.add();
+                                    }
+                                    ctrl.newProjectName(val);
                                 },
                                 onchange: function(ev) {
                                     //  This will not be reliably running!
@@ -220,6 +227,16 @@ var AddProject = {
                                 }
                             ))),
                         ]): '',
+                        ctrl.storageFlagIsActive() ? m('.form-group.m-v-sm', [
+                            m('row',
+                                m('f-w-lg.text-bigger', 'Storage location'),
+                                m.component(SelectStorageLocation, {
+                                    value: ctrl.newProjectStorageLocation,
+                                    locations: ctrl.storageRegions
+                                })
+                            )
+                            ]
+                        ) : '',
                         ctrl.options.parentID !== null && options.contributors.length && options.currentUserCanEdit ? m('.form-group.m-v-sm', [
                             m('label.f-w-md',
 
@@ -230,9 +247,32 @@ var AddProject = {
                                     onchange : function() {
                                         ctrl.newProjectInheritContribs(this.checked);
                                     }
-                                }), ' Add contributors from ', m('b', options.parentTitle)
+                                }), ' Add contributors from ', m('b', options.parentTitle),
+                                m('br'),
+                                m('i', ' Admins of ', m('b', options.parentTitle), ' will have read access to this component.')
+                            ),
+                            m('br'),
+                            m('label.f-w-md',
+
+                                m('input', {
+                                    type: 'checkbox',
+                                    name: 'inherit_tags',
+                                    onchange : function() {
+                                        ctrl.newProjectInheritTags(this.checked);
+                                    }
+                                }), ' Add tags from ', m('b', options.parentTitle)
                             )
                         ]) : '',
+                        ctrl.options.parentID !== null ? m('.span', [
+                                m('label.f-w-lg.text-bigger', 'License'),
+                                m('p',
+                                    m('i', ' This component will inherit the same license as ',
+                                        m('b', options.parentTitle),
+                                        '. ',
+                                        m('a[target="_blank"][href="https://openscience.zendesk.com/hc/en-us/articles/360019737854"]', 'Learn more.' )
+                                    )
+                                )
+                        ]): '',
                         m('.text-muted.pointer', { onclick : function(){
                             ctrl.showMore(!ctrl.showMore());
                             $osf.trackClick(options.trackingCategory, options.trackingAction, 'show-more-or-less');
@@ -256,22 +296,34 @@ var AddProject = {
                             ]),
                             ctrl.options.parentID !== null ? [
                                 m('label.f-w-lg.text-bigger','Category'),
-                                m('select.form-control', {
-                                    onchange : function(event) {
-                                        ctrl.newProjectCategory(this.value);
-                                        $osf.trackClick(options.trackingCategory, options.trackingAction, 'select-project-category');
-                                    }},
-                                    [
+                                m('i', ' (for descriptive purposes)'),
+                                m('div.dropdown.dropup.generic-dropdown.category-list', [
+                                    m('button[data-toggle="dropdown"]', {
+                                        className: 'btn btn-default dropdown-toggle',
+                                        type: 'button'
+                                      }, [
+                                        m('i', { className : mHelpers.getIcon(ctrl.newProjectCategory()) }),
+                                        m('span.text-capitalize', ctrl.newProjectCategory() || 'Uncategorized'),
+                                        m('i.fa.fa-sort')
+                                      ]),
+                                    m('ul.dropdown-menu', [
                                         mHelpers.unwrap(ctrl.options.categoryList).map(function(cat){
-                                            return m('option', {
-                                                type: 'option',
-                                                name: 'projectCategory',
-                                                value: cat.value,
-                                                selected: ctrl.newProjectCategory() === cat.value
-                                            }, cat.display_name|| m('i.text-muted', '(Empty category)'));
-
+                                            return m('li',
+                                                m('a', {
+                                                        onclick : function(){
+                                                              ctrl.newProjectCategory(cat.value);
+                                                              $osf.trackClick(options.trackingCategory, options.trackingAction, 'select-project-category');
+                                                            }
+                                                  }, [
+                                                    m('i', { className : mHelpers.getIcon(cat.value) }),
+                                                    m('span', cat.display_name || '(Empty category)')
+                                                  ]
+                                                )
+                                            );
                                         })
-                                    ])
+                                    ]),
+                                ])
+
                             ] : '',
                              ctrl.options.parentID === null ? m('.form-group.m-v-md', [
                                 m('label[for="projectTemplate].f-w-lg.text-bigger', 'Template (optional)'),
@@ -422,6 +474,36 @@ var Select2Template = {
                     ctrl.userProjects().map(function(node){
                         if(node.id === id) {
                             ctrl.value(node.id);
+                        }
+                    });
+                    m.endComputation();
+                });
+            }
+        };
+    }
+};
+
+var SelectStorageLocation = {
+    view: function(ctrl, options) {
+        return m('select.p-t-sm', {config: SelectStorageLocation.config(options)},
+            [
+            options.locations().map(function(region) {
+                var args = {value: region._id};
+                return m('option', args, region.name);
+            })
+        ]);
+    },
+    config: function(ctrl) {
+        return function (element, isInitialized) {
+            var $el = $(element);
+            if (!isInitialized) {
+                $el.select2({allowClear: true, width: '100%'}).on('change', function () {
+                    var id = $el.select2('val');
+                    m.startComputation();
+                    //Set the value to the selected option
+                    ctrl.locations().map(function (location) {
+                        if (location._id === id) {
+                            ctrl.value(location);
                         }
                     });
                     m.endComputation();

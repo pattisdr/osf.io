@@ -4,7 +4,7 @@ from collections import namedtuple
 
 from framework.sessions import session
 
-Status = namedtuple('Status', ['message', 'jumbotron', 'css_class', 'dismissible', 'trust'])  # trust=True displays msg as raw HTML
+Status = namedtuple('Status', ['message', 'jumbotron', 'css_class', 'dismissible', 'trust', 'id', 'extra'])  # trust=True displays msg as raw HTML
 
 #: Status_type => bootstrap css class
 TYPE_MAP = {
@@ -17,7 +17,7 @@ TYPE_MAP = {
     'default': 'default',
 }
 
-def push_status_message(message, kind='warning', dismissible=True, trust=True, jumbotron=False):
+def push_status_message(message, kind='warning', dismissible=True, trust=True, jumbotron=False, id=None, extra=None):
     """
     Push a status message that will be displayed as a banner on the next page loaded by the user.
 
@@ -33,7 +33,7 @@ def push_status_message(message, kind='warning', dismissible=True, trust=True, j
         statuses = session.data.get('status')
     except RuntimeError as e:
         exception_message = getattr(e, 'message', None)
-        if exception_message == 'working outside of request context':
+        if 'Working outside of request context.' in exception_message:
             # Working outside of request context, so should be a DRF issue. Status messages are not appropriate there.
             # If it's any kind of notification, then it doesn't make sense to send back to the API routes.
             if kind == 'error':
@@ -46,23 +46,33 @@ def push_status_message(message, kind='warning', dismissible=True, trust=True, j
             raise
     if not statuses:
         statuses = []
+    if not extra:
+        extra = {}
     css_class = TYPE_MAP.get(kind, 'warning')
     statuses.append(Status(message=message,
                            jumbotron=jumbotron,
                            css_class=css_class,
                            dismissible=dismissible,
+                           id=id,
+                           extra=extra,
                            trust=trust))
     session.data['status'] = statuses
+    session.save()
 
 def pop_status_messages(level=0):
     messages = session.data.get('status')
+    for message in messages or []:
+        if len(message) == 5:
+            message += [None, None]  # Make sure all status's have enough arguments
     session.status_prev = messages
     if 'status' in session.data:
         del session.data['status']
+        session.save()
     return messages
 
 def pop_previous_status_messages(level=0):
     messages = session.data.get('status_prev')
     if 'status_prev' in session.data:
         del session.data['status_prev']
+        session.save()
     return messages

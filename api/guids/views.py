@@ -4,13 +4,13 @@ from rest_framework.exceptions import NotFound
 from rest_framework import permissions as drf_permissions
 from rest_framework import generics
 
-from framework.guid.model import Guid
 from framework.auth.oauth_scopes import CoreScopes
 from api.base.exceptions import EndpointNotImplementedError
 from api.base import permissions as base_permissions
 from api.base.views import JSONAPIBaseView
 from api.base.utils import get_object_or_error, is_truthy
 from api.guids.serializers import GuidSerializer
+from osf.models import Guid
 
 
 class GuidDetail(JSONAPIBaseView, generics.RetrieveAPIView):
@@ -39,11 +39,12 @@ class GuidDetail(JSONAPIBaseView, generics.RetrieveAPIView):
 
     @staticmethod
     def should_resolve(request):
-        resolve = request.query_params.get('resolve')
+        query_params = getattr(request, 'query_params', request.GET)
+        resolve = query_params.get('resolve')
         return resolve is None or is_truthy(resolve)
 
     def get_serializer_class(self):
-        if not self.should_resolve(self.request):
+        if not self.should_resolve(self.request) or self.kwargs.get('is_embedded', False):
             return self.serializer_class
         return None
 
@@ -51,7 +52,8 @@ class GuidDetail(JSONAPIBaseView, generics.RetrieveAPIView):
         return get_object_or_error(
             Guid,
             self.kwargs['guids'],
-            display_name='guid'
+            self.request,
+            display_name='guid',
         )
 
     def get(self, request, **kwargs):
@@ -60,7 +62,8 @@ class GuidDetail(JSONAPIBaseView, generics.RetrieveAPIView):
 
         url = self.get_redirect_url(**kwargs)
         if url:
-            if self.request.query_params:
+            query_params = getattr(request, 'query_params', request.GET)
+            if query_params:
                 url = furl.furl(url).add(query_params=self.request.query_params).url
             return http.HttpResponseRedirect(url)
         raise NotFound

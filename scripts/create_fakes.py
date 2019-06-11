@@ -26,24 +26,29 @@ Examples:
 ...will create a project with a series of components, 4 levels deep.
     python -m scripts.create_fakes -u fred@cos --components '[1, [1, 1]]' --nprojects 1
 ...will create a project with two top level components, and one with a depth of 2 components.
+    python -m scripts.create_fakes -u fred@cos --nprojects 3 --preprint True
+...will create 3 preprints with the default provider osf
+    python -m scripts.create_fakes -u fred@cos --nprojects 3 --preprint True --preprintprovider osf,test_provider
+...will create 3 preprints with the providers osf and test_provider
 
 """
 from __future__ import print_function, absolute_import
 
 import ast
 import sys
+import mock
 import argparse
 import logging
 
+import django
+import pytz
 from faker import Factory
 from faker.providers import BaseProvider
-from modularodm.query.querydialect import DefaultQueryDialect as Q
+django.setup()
 
 from framework.auth import Auth
-from framework.auth import utils
-from framework.auth.core import generate_verification_key
-from tests.factories import UserFactory, ProjectFactory, NodeFactory, RegistrationFactory
-from website import models
+from osf_tests.factories import UserFactory, ProjectFactory, NodeFactory, RegistrationFactory, PreprintFactory, PreprintProviderFactory, fake_email
+from osf import models
 from website.app import init_app
 
 
@@ -164,7 +169,7 @@ class Sciencer(BaseProvider):
         words = cls.science_words(nb_words)
         words[0] = words[0].title()
 
-        return " ".join(words) + '.'
+        return ' '.join(words) + '.'
 
     def science_sentences(cls, nb=3):
         """
@@ -190,7 +195,7 @@ class Sciencer(BaseProvider):
         if variable_nb_sentences:
             nb_sentences = cls.randomize_nb_elements(nb_sentences)
 
-        return " ".join(cls.science_sentences(nb_sentences))
+        return ' '.join(cls.science_sentences(nb_sentences))
 
     def science_paragraphs(cls, nb=3):
         """
@@ -247,25 +252,26 @@ class Sciencer(BaseProvider):
                     size += len(paragraph)
                 text.pop()
 
-        return "".join(text)
+        return ''.join(text)
 
 
 logger = logging.getLogger('create_fakes')
-logging.basicConfig(level=logging.ERROR)
+SILENT_LOGGERS = [
+    'factory',
+    'website.mails',
+]
+for logger_name in SILENT_LOGGERS:
+    logging.getLogger(logger_name).setLevel(logging.CRITICAL)
 fake = Factory.create()
 fake.add_provider(Sciencer)
 
 
 def create_fake_user():
-    email = fake.email()
+    email = fake_email()
     name = fake.name()
-    parsed = utils.impute_names(name)
     user = UserFactory(username=email, fullname=name,
-                       is_registered=True, is_claimed=True,
-                       verification_key=generate_verification_key(),
-                       date_registered=fake.date_time(),
-                       emails=[email],
-                       **parsed
+                       is_registered=True, emails=[email],
+                       date_registered=fake.date_time(tzinfo=pytz.UTC),
                    )
     user.set_password('faker123')
     user.save()
@@ -279,48 +285,70 @@ def parse_args():
     parser.add_argument('--nusers', dest='n_users', type=int, default=3)
     parser.add_argument('--nprojects', dest='n_projects', type=int, default=3)
     parser.add_argument('-c', '--components', dest='n_components', type=evaluate_argument, default='0')
-    parser.add_argument('-p', '--privacy', dest="privacy", type=str, default='private', choices=['public', 'private'])
+    parser.add_argument('-p', '--privacy', dest='privacy', type=str, default='private', choices=['public', 'private'])
     parser.add_argument('-n', '--name', dest='name', type=str, default=None)
     parser.add_argument('-t', '--tags', dest='n_tags', type=int, default=5)
     parser.add_argument('--presentation', dest='presentation_name', type=str, default=None)
     parser.add_argument('-r', '--registration', dest='is_registration', type=bool, default=False)
+    parser.add_argument('-pre', '--preprint', dest='is_preprint', type=bool, default=False)
+    parser.add_argument('-preprovider', '--preprintprovider', dest='preprint_provider', type=str, default=None)
     return parser.parse_args()
 
 def evaluate_argument(string):
     return ast.literal_eval(string)
 
 
-def create_fake_project(creator, n_users, privacy, n_components, name, n_tags, presentation_name, is_registration):
+def create_fake_project(creator, n_users, privacy, n_components, name, n_tags, presentation_name, is_registration, is_preprint, preprint_provider):
     auth = Auth(user=creator)
     project_title = name if name else fake.science_sentence()
-    if not is_registration:
-        project = ProjectFactory(title=project_title, description=fake.science_paragraph(), creator=creator)
-    else:
+    if is_preprint:
+        provider = None
+        if preprint_provider:
+            try:
+                provider = models.PreprintProvider.objects.get(_id=provider)
+            except models.PreprintProvider.DoesNotExist:
+                pass
+        if not provider:
+            provider = PreprintProviderFactory(name=fake.science_word())
+        privacy = 'public'
+        mock_change_identifier = mock.patch('website.identifiers.client.EzidClient.update_identifier')
+        mock_change_identifier.start()
+        mock_change_identifier_preprints = mock.patch('website.identifiers.client.CrossRefClient.update_identifier')
+        mock_change_identifier_preprints.start()
+        project = PreprintFactory(title=project_title, description=fake.science_paragraph(), creator=creator, provider=provider)
+        node = project.node
+    elif is_registration:
         project = RegistrationFactory(title=project_title, description=fake.science_paragraph(), creator=creator)
-    project.set_privacy(privacy)
+        node = project
+    else:
+        project = ProjectFactory(title=project_title, description=fake.science_paragraph(), creator=creator)
+        node = project
+
+    node.set_privacy(privacy)
     for _ in range(n_users):
         contrib = create_fake_user()
-        project.add_contributor(contrib, auth=auth)
+        node.add_contributor(contrib, auth=auth)
     if isinstance(n_components, int):
         for _ in range(n_components):
-            NodeFactory(project=project, title=fake.science_sentence(), description=fake.science_paragraph(),
+            NodeFactory(parent=node, title=fake.science_sentence(), description=fake.science_paragraph(),
                         creator=creator)
     elif isinstance(n_components, list):
-        render_generations_from_node_structure_list(project, creator, n_components)
+        render_generations_from_node_structure_list(node, creator, n_components)
     for _ in range(n_tags):
-        project.add_tag(fake.science_word(), auth=auth)
+        node.add_tag(fake.science_word(), auth=auth)
     if presentation_name is not None:
-        project.add_tag(presentation_name, auth=auth)
-        project.add_tag('poster', auth=auth)
+        node.add_tag(presentation_name, auth=auth)
+        node.add_tag('poster', auth=auth)
 
+    node.save()
     project.save()
-    logger.info('Created project: {0}'.format(project.title))
+    logger.info('Created project: {0}'.format(node.title))
     return project
 
 
 def render_generations_from_parent(parent, creator, num_generations):
     current_gen = parent
-    for generation in xrange(0, num_generations):
+    for generation in range(0, num_generations):
         next_gen = NodeFactory(
             parent=current_gen,
             creator=creator,
@@ -343,11 +371,11 @@ def render_generations_from_node_structure_list(parent, creator, node_structure_
 
 def main():
     args = parse_args()
-    creator = models.User.find(Q('username', 'eq', args.user))[0]
+    creator = models.OSFUser.objects.get(username=args.user)
     for i in range(args.n_projects):
         name = args.name + str(i) if args.name else ''
         create_fake_project(creator, args.n_users, args.privacy, args.n_components, name, args.n_tags,
-                            args.presentation_name, args.is_registration)
+                            args.presentation_name, args.is_registration, args.is_preprint, args.preprint_provider)
     print('Created {n} fake projects.'.format(n=args.n_projects))
     sys.exit(0)
 

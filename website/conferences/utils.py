@@ -1,41 +1,24 @@
 # -*- coding: utf-8 -*-
-
 import requests
-from modularodm import Q
-from modularodm.exceptions import ModularOdmException
 
 from framework.auth import Auth
-
-from website import util
+from addons.wiki.models import WikiPage
 from website import settings
-from website.project import new_node
-from website.models import Node, MailRecord
+from osf.models import MailRecord
+from api.base.utils import waterbutler_api_url_for
+from osf.exceptions import NodeStateError
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 
 
-def record_message(message, created):
-    record = MailRecord(
+def record_message(message, node_created, user_created):
+    record = MailRecord.objects.create(
         data=message.raw,
-        records=created,
     )
+    if user_created:
+        record.users_created.add(user_created)
+    record.nodes_created.add(node_created)
     record.save()
-
-
-def get_or_create_node(title, user):
-    """Get or create node by title and creating user.
-
-    :param str title: Node title
-    :param User user: User creating node
-    :return: Tuple of (node, created)
-    """
-    try:
-        node = Node.find_one(
-            Q('title', 'iexact', title)
-            & Q('contributors', 'eq', user._id)
-        )
-        return node, False
-    except ModularOdmException:
-        node = new_node('project', title, user)
-        return node, True
 
 
 def provision_node(conference, message, node, user):
@@ -46,18 +29,24 @@ def provision_node(conference, message, node, user):
     :param User user:
     """
     auth = Auth(user=user)
+    try:
+        wiki = WikiPage.objects.create_for_node(node, 'home', message.text, auth)
+    except NodeStateError:
+        wiki = WikiPage.objects.get_for_node(node, 'home')
+        wiki.update(user, message.text)
 
-    node.update_node_wiki('home', message.text, auth)
-    node.add_contributors(prepare_contributors(conference.admins), log=False)
+    if conference.admins.exists():
+        node.add_contributors(prepare_contributors(conference.admins.all()), log=False)
 
     if not message.is_spam and conference.public_projects:
         node.set_privacy('public', meeting_creation=True, auth=auth)
 
     node.add_tag(message.conference_name, auth=auth)
     node.add_tag(message.conference_category, auth=auth)
-    node.system_tags.extend(['emailed', message.conference_name, message.conference_category])
+    for systag in ['emailed', message.conference_name, message.conference_category]:
+        node.add_system_tag(systag, save=False)
     if message.is_spam:
-        node.system_tags.append('spam')
+        node.add_system_tag('spam', save=False)
 
     node.save()
 
@@ -75,9 +64,9 @@ def prepare_contributors(admins):
 
 def upload_attachment(user, node, attachment):
     attachment.seek(0)
-    name = '/' + (attachment.filename or settings.MISSING_FILE_NAME)
+    name = (attachment.filename or settings.MISSING_FILE_NAME)
     content = attachment.read()
-    upload_url = util.waterbutler_url_for('upload', 'osfstorage', name, node, user=user)
+    upload_url = waterbutler_api_url_for(node._id, 'osfstorage', name=name, base_url=node.osfstorage_region.waterbutler_url, cookie=user.get_or_create_cookie(), _internal=True)
 
     requests.put(
         upload_url,
@@ -88,3 +77,11 @@ def upload_attachment(user, node, attachment):
 def upload_attachments(user, node, attachments):
     for attachment in attachments:
         upload_attachment(user, node, attachment)
+
+
+def is_valid_email(email):
+    try:
+        validate_email(email)
+        return True
+    except ValidationError:
+        return False

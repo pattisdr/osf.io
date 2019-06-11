@@ -1,37 +1,49 @@
-# -*- coding: utf-8 -*-
-from __future__ import absolute_import
-
+import sys
+import time
 import logging
 import datetime
 
-from dateutil import relativedelta
+from django.db import transaction
+from django.utils import timezone
 
-from website.models import Session
+from framework.celery_tasks import app as celery_app
+from website.app import setup_django
+setup_django()
+from osf.models import Session
+
+from scripts.utils import add_file_logger
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARN)
+logging.basicConfig(level=logging.INFO)
 
 
-def clear_sessions(max_date, dry_run=False):
-    """Remove all sessions last modified before `max_date`.
-    """
-    session_collection = Session._storage[0].store
-    query = {'date_modified': {'$lt': max_date}}
+SESSION_AGE_THRESHOLD = 30
+
+
+def main(dry_run=True):
+    old_sessions = Session.objects.filter(modified__lt=timezone.now() - datetime.timedelta(days=SESSION_AGE_THRESHOLD))
+
     if dry_run:
-        logger.warn('Dry run mode')
-    logger.warn(
-        'Removing {0} stale sessions'.format(
-            session_collection.find(query).count()
-        )
-    )
+        logger.warn('Dry run mode, will delete sessions and then abort the transaction')
+    logger.info('Preparing to delete Session objects older than {} days'.format(SESSION_AGE_THRESHOLD))
+
+    with transaction.atomic():
+        start = time.time()
+        sessions_deleted = old_sessions.delete()[1]['osf.Session']
+        end = time.time()
+
+        logger.info('Deleting {} Session objects took {} seconds'.format(sessions_deleted, end - start))
+
+        if dry_run:
+            raise Exception('Dry run, aborting the transaction!')
+
+
+@celery_app.task(name='scripts.clear_sessions')
+def run_main(dry_run=True):
     if not dry_run:
-        session_collection.remove(query)
+        add_file_logger(logger, __file__)
+    main(dry_run=dry_run)
 
 
-def clear_sessions_relative(months=1, dry_run=False):
-    """Remove all sessions last modified over `months` months ago.
-    """
-    logger.warn('Clearing sessions older than {0} months'.format(months))
-    now = datetime.datetime.utcnow()
-    delta = relativedelta.relativedelta(months=months)
-    clear_sessions(now - delta, dry_run=dry_run)
+if __name__ == '__main__':
+    run_main(dry_run='--dry' in sys.argv)

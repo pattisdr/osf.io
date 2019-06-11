@@ -1,28 +1,41 @@
 import collections
 import re
+from urlparse import urlparse
 
 import furl
 from django.core.urlresolvers import resolve, reverse, NoReverseMatch
 from django.core.exceptions import ImproperlyConfigured
-from django.http.request import QueryDict
-from rest_framework import exceptions
+from distutils.version import StrictVersion
+
+from rest_framework import exceptions, permissions
 from rest_framework import serializers as ser
 from rest_framework.fields import SkipField
 from rest_framework.fields import get_attribute as get_nested_attributes
+from rest_framework.mixins import RetrieveModelMixin
 
 from api.base import utils
-from api.base.exceptions import InvalidQueryStringError
-from api.base.exceptions import Conflict
-from api.base.exceptions import JSONAPIException
-from api.base.exceptions import TargetNotSupportedError
-from api.base.exceptions import RelationshipPostMakesNoChanges
+from osf.utils import permissions as osf_permissions
+from osf.utils import sanitize
+from osf.utils import functional
+from api.base import exceptions as api_exceptions
 from api.base.settings import BULK_SETTINGS
-from api.base.utils import absolute_reverse, extend_querystring_params
 from framework.auth import core as auth_core
+from osf.models import AbstractNode, MaintenanceState, Preprint
 from website import settings
-from website import util as website_utils
-from website.models import Node
-from website.util.sanitize import strip_html
+from website.project.model import has_anonymous_link
+
+
+def get_meta_type(serializer_class, request):
+    meta = getattr(serializer_class, 'Meta', None)
+    if meta is None:
+        return None
+    resource_type = getattr(meta, 'type_', None)
+    if resource_type is not None:
+        return resource_type
+    try:
+        return meta.get_type(request)
+    except AttributeError:
+        return None
 
 
 def format_relationship_links(related_link=None, self_link=None, rel_meta=None, self_meta=None):
@@ -38,52 +51,62 @@ def format_relationship_links(related_link=None, self_link=None, rel_meta=None, 
         ret['links'].update({
             'related': {
                 'href': related_link or {},
-                'meta': rel_meta or {}
-            }
+                'meta': rel_meta or {},
+            },
         })
 
     if self_link:
         ret['links'].update({
             'self': {
                 'href': self_link or {},
-                'meta': self_meta or {}
-            }
+                'meta': self_meta or {},
+            },
         })
 
     return ret
 
 
 def is_anonymized(request):
+    if hasattr(request, '_is_anonymized'):
+        return request._is_anonymized
     private_key = request.query_params.get('view_only', None)
-    return website_utils.check_private_key_for_anonymized_link(private_key)
+    request._is_anonymized = osf_permissions.check_private_key_for_anonymized_link(private_key)
+    return request._is_anonymized
 
 
-class HideIfRegistration(ser.Field):
+class ConditionalField(ser.Field):
     """
-    If node is a registration, this field will return None.
+    Skips the inner field based on `should_show` or `should_hide`; override whichever makes the logic more readable.
+    If you'd prefer to return `None` rather skipping the field, override `should_be_none` as well.
     """
 
     def __init__(self, field, **kwargs):
-        super(HideIfRegistration, self).__init__(**kwargs)
-        self.field = field
+        super(ConditionalField, self).__init__(**kwargs)
+        self.field = getattr(field, 'child_relation', field)
+        # source is intentionally field.source and not self.field.source
         self.source = field.source
-        self.required = field.required
-        self.read_only = field.read_only
+        self.required = self.field.required
+        self.read_only = self.field.read_only
+
+    def should_show(self, instance):
+        return not self.should_hide(instance)
+
+    def should_hide(self, instance):
+        raise NotImplementedError()
+
+    def should_be_none(self, instance):
+        return False
 
     def get_attribute(self, instance):
-        if instance.is_registration:
-            if isinstance(self.field, RelationshipField):
-                raise SkipField
-            else:
+        if not self.should_show(instance):
+            if self.should_be_none(instance):
                 return None
+            raise SkipField
         return self.field.get_attribute(instance)
 
     def bind(self, field_name, parent):
-        super(HideIfRegistration, self).bind(field_name, parent)
+        super(ConditionalField, self).bind(field_name, parent)
         self.field.bind(field_name, self)
-
-    def to_internal_value(self, data):
-        return self.field.to_internal_value(data)
 
     def to_representation(self, value):
         if getattr(self.field.root, 'child', None):
@@ -99,62 +122,183 @@ class HideIfRegistration(ser.Field):
             self.field.parent = self.field.root
         return self.field.to_esi_representation(value, envelope)
 
+    def to_internal_value(self, data):
+        return self.field.to_internal_value(data)
 
-class HideIfDisabled(ser.Field):
+
+class ShowIfVersion(ConditionalField):
+    """
+    Skips the field if the specified request version is not after a feature's earliest supported version,
+    or not before the feature's latest supported version.
+    """
+
+    def __init__(self, field, min_version=None, max_version=None, **kwargs):
+        super(ShowIfVersion, self).__init__(field, **kwargs)
+        self.min_version = min_version
+        self.max_version = max_version
+        self.help_text = 'This field is deprecated as of version {}'.format(self.max_version) or kwargs.get('help_text')
+
+    def should_hide(self, instance):
+        request = self.context.get('request')
+        return request and utils.is_deprecated(request.version, self.min_version, self.max_version)
+
+
+class ShowIfCurrentUser(ConditionalField):
+
+    def should_show(self, instance):
+        request = self.context.get('request')
+        return request and request.user == instance
+
+
+class ShowIfAdminScopeOrAnonymous(ConditionalField):
+
+    def should_show(self, instance):
+        request = self.context.get('request')
+        has_admin_scope = instance.has_admin_scope if hasattr(instance, 'has_admin_scope') else utils.has_admin_scope(request)
+        return request and (request.user.is_anonymous or has_admin_scope)
+
+
+class HideIfRegistration(ConditionalField):
+    """
+    If node is a registration, this field will return None.
+    """
+
+    def should_hide(self, instance):
+        return instance.is_registration
+
+    def should_be_none(self, instance):
+        return not isinstance(self.field, RelationshipField)
+
+
+class HideIfDisabled(ConditionalField):
     """
     If the user is disabled, returns None for attribute fields, or skips
     if a RelationshipField.
     """
 
-    def __init__(self, field, **kwargs):
-        super(HideIfDisabled, self).__init__(**kwargs)
-        self.field = field
-        self.source = field.source
-        self.required = field.required
-        self.read_only = field.read_only
+    def should_hide(self, instance):
+        return instance.is_disabled
 
-    def get_attribute(self, instance):
-        if instance.is_disabled:
-            if isinstance(self.field, RelationshipField):
-                raise SkipField
-            else:
-                return None
-        return self.field.get_attribute(instance)
-
-    def bind(self, field_name, parent):
-        super(HideIfDisabled, self).bind(field_name, parent)
-        self.field.bind(field_name, self)
-
-    def to_internal_value(self, data):
-        return self.field.to_internal_value(data)
-
-    def to_representation(self, value):
-        if getattr(self.field.root, 'child', None):
-            self.field.parent = self.field.root.child
-        else:
-            self.field.parent = self.field.root
-        return self.field.to_representation(value)
-
-    def to_esi_representation(self, value, envelope='data'):
-        if getattr(self.field.root, 'child', None):
-            self.field.parent = self.field.root.child
-        else:
-            self.field.parent = self.field.root
-        return self.field.to_esi_representation(value, envelope)
+    def should_be_none(self, instance):
+        return not isinstance(self.field, RelationshipField)
 
 
-class HideIfWithdrawal(HideIfRegistration):
+class HideIfPreprint(ConditionalField):
+    """
+    If object is a preprint or related to a preprint, hide the field.
+    """
+
+    def should_hide(self, instance):
+        if getattr(instance, 'node', False) and isinstance(getattr(instance, 'node', False), Preprint):
+            # Sometimes a "node" might be a preprint object where node/preprint code is shared
+            return True
+
+        return isinstance(instance, Preprint) \
+            or isinstance(getattr(instance, 'target', None), Preprint) \
+            or isinstance(getattr(instance, 'preprint', False), Preprint)
+
+    def should_be_none(self, instance):
+        return not isinstance(self.field, RelationshipField)
+
+
+class NoneIfWithdrawal(ConditionalField):
+    """
+    If preprint is withdrawn, this field (attribute or relationship) should return None instead of hidden.
+    """
+
+    def should_hide(self, instance):
+        return instance.is_retracted
+
+    def should_be_none(self, instance):
+        return True
+
+
+class HideIfWithdrawal(ConditionalField):
     """
     If registration is withdrawn, this field will return None.
     """
 
-    def get_attribute(self, instance):
-        if instance.is_retracted:
-            if isinstance(self.field, RelationshipField):
-                raise SkipField
-            else:
-                return None
-        return self.field.get_attribute(instance)
+    def should_hide(self, instance):
+        return instance.is_retracted
+
+    def should_be_none(self, instance):
+        return not isinstance(self.field, RelationshipField)
+
+
+class HideIfNotWithdrawal(ConditionalField):
+
+    def should_hide(self, instance):
+        return not instance.is_retracted
+
+
+class HideIfWikiDisabled(ConditionalField):
+    """
+    If wiki is disabled, don't show relationship field, only available after 2.7
+    """
+
+    def should_hide(self, instance):
+        request = self.context.get('request')
+        has_wiki_addon = instance.has_wiki_addon if hasattr(instance, 'has_wiki_addon') else instance.has_addon('wiki')
+        return not utils.is_deprecated(request.version, min_version='2.8') and not has_wiki_addon
+
+
+class HideIfNotNodePointerLog(ConditionalField):
+    """
+    This field will not be shown if the log is not a pointer log for a node
+    """
+    def should_hide(self, instance):
+        pointer_param = instance.params.get('pointer', False)
+        if pointer_param:
+            node = AbstractNode.load(pointer_param['id'])
+            if node:
+                return node.type != 'osf.node'
+        return True
+
+
+class HideIfNotRegistrationPointerLog(ConditionalField):
+    """
+    This field will not be shown if the log is not a pointer log for a registration
+    """
+
+    def should_hide(self, instance):
+        pointer_param = instance.params.get('pointer', False)
+        if pointer_param:
+            node = AbstractNode.load(pointer_param['id'])
+            if node:
+                return node.type != 'osf.registration'
+        return True
+
+
+class HideIfProviderCommentsAnonymous(ConditionalField):
+    """
+    If the action's provider has anonymous comments and the user does not have `view_actions`
+    permission on the provider, hide the field.
+    """
+
+    def should_hide(self, instance):
+        request = self.context.get('request')
+        auth = utils.get_user_auth(request)
+        if auth.logged_in:
+            provider = instance.target.provider
+            if provider.reviews_comments_anonymous is False or auth.user.has_perm('view_actions', provider):
+                return False
+        return True
+
+
+class HideIfProviderCommentsPrivate(ConditionalField):
+    """
+    If the action's provider has private comments and the user does not have `view_actions`
+    permission on the provider, hide the field.
+    """
+
+    def should_hide(self, instance):
+        request = self.context.get('request')
+        auth = utils.get_user_auth(request)
+        if auth.logged_in:
+            provider = instance.target.provider
+            if provider.reviews_comments_private is False or auth.user.has_perm('view_actions', provider):
+                return False
+        return True
 
 
 class AllowMissing(ser.Field):
@@ -183,13 +327,13 @@ class AllowMissing(ser.Field):
         return self.field.to_internal_value(data)
 
 
-def _url_val(val, obj, serializer, **kwargs):
+def _url_val(val, obj, serializer, request, **kwargs):
     """Function applied by `HyperlinksField` to get the correct value in the
     schema.
     """
     url = None
     if isinstance(val, Link):  # If a Link is passed, get the url value
-        url = val.resolve_url(obj, **kwargs)
+        url = val.resolve_url(obj, request)
     elif isinstance(val, basestring):  # if a string is passed, it's a method of the serializer
         if getattr(serializer, 'field', None):
             serializer = serializer.parent
@@ -201,6 +345,21 @@ def _url_val(val, obj, serializer, **kwargs):
         raise SkipField
     else:
         return url
+
+
+class VersionedDateTimeField(ser.DateTimeField):
+    """
+    Custom DateTimeField that forces dates into the ISO-8601 format with timezone information in version 2.2.
+    """
+
+    def to_representation(self, value):
+        request = self.context.get('request')
+        if request:
+            if StrictVersion(request.version) >= '2.2':
+                self.format = '%Y-%m-%dT%H:%M:%S.%fZ'
+            else:
+                self.format = '%Y-%m-%dT%H:%M:%S.%f' if value.microsecond else '%Y-%m-%dT%H:%M:%S'
+        return super(VersionedDateTimeField, self).to_representation(value)
 
 
 class IDField(ser.CharField):
@@ -219,7 +378,7 @@ class IDField(ser.CharField):
             if request.method in utils.UPDATE_METHODS and not utils.is_bulk_request(request):
                 id_field = self.get_id(self.root.instance)
                 if id_field != data:
-                    raise Conflict(detail=('The id you used in the URL, "{}", does not match the id you used in the json body\'s id field, "{}". The object "{}" exists, otherwise you\'d get a 404, so most likely you need to change the id field to match.'.format(id_field, data, id_field)))
+                    raise api_exceptions.Conflict(detail=('The id you used in the URL, "{}", does not match the id you used in the json body\'s id field, "{}". The object "{}" exists, otherwise you\'d get a 404, so most likely you need to change the id field to match.'.format(id_field, data, id_field)))
         return super(IDField, self).to_internal_value(data)
 
     def get_id(self, obj):
@@ -240,13 +399,14 @@ class TypeField(ser.CharField):
 
     # Overrides CharField
     def to_internal_value(self, data):
+        request = self.context.get('request', None)
         if isinstance(self.root, JSONAPIListSerializer):
-            type_ = self.root.child.Meta.type_
+            type_ = get_meta_type(self.root.child, request)
         else:
-            type_ = self.root.Meta.type_
+            type_ = get_meta_type(self.root, request)
 
         if type_ != data:
-            raise Conflict(detail=('This resource has a type of "{}", but you set the json body\'s type field to "{}". You probably need to change the type field to match the resource\'s type.'.format(type_, data)))
+            raise api_exceptions.Conflict(detail=('This resource has a type of "{}", but you set the json body\'s type field to "{}". You probably need to change the type field to match the resource\'s type.'.format(type_, data)))
         return super(TypeField, self).to_internal_value(data)
 
 
@@ -263,7 +423,7 @@ class TargetTypeField(ser.CharField):
 
     def to_internal_value(self, data):
         if self.target_type != data:
-            raise Conflict(detail=('The target resource has a type of "{}", but you set the json body\'s type field to "{}".  You probably need to change the type field to match the target resource\'s type.'.format(self.target_type, data)))
+            raise api_exceptions.Conflict(detail=('The target resource has a type of "{}", but you set the json body\'s type field to "{}".  You probably need to change the type field to match the target resource\'s type.'.format(self.target_type, data)))
         return super(TargetTypeField, self).to_internal_value(data)
 
 
@@ -275,6 +435,19 @@ class JSONAPIListField(ser.ListField):
         return super(JSONAPIListField, self).to_internal_value(data)
 
 
+class ValuesListField(JSONAPIListField):
+    """
+    JSONAPIListField that uses a values_list with flat=True to return just
+    an array of the specified field (attr_name) for optimization purposes.
+    """
+    def __init__(self, **kwargs):
+        self.attr_name = kwargs.pop('attr_name')
+        super(ValuesListField, self).__init__(**kwargs)
+
+    def to_representation(self, val):
+        return val.values_list(self.attr_name, flat=True)
+
+
 class AuthorizedCharField(ser.CharField):
     """
     Passes auth of the logged-in user to the object's method
@@ -284,8 +457,7 @@ class AuthorizedCharField(ser.CharField):
         content = AuthorizedCharField(source='get_content')
     """
 
-    def __init__(self, source=None, **kwargs):
-        assert source is not None, 'The `source` argument is required.'
+    def __init__(self, source, **kwargs):
         self.source = source
         super(AuthorizedCharField, self).__init__(source=self.source, **kwargs)
 
@@ -295,6 +467,33 @@ class AuthorizedCharField(ser.CharField):
         field_source_method = getattr(obj, self.source)
         return field_source_method(auth=auth)
 
+class AnonymizedRegexField(AuthorizedCharField):
+    r"""
+    Performs a regex replace on the content of the authorized object's
+    source field when an anonymous view is requested.
+
+    Example:
+        content = AnonymizedRegexField(source='get_content', regex='\[@[^\]]*\]\([^\) ]*\)', replace='@A User')
+    """
+
+    def __init__(self, source, regex, replace, **kwargs):
+        self.source = source
+        self.regex = regex
+        self.replace = replace
+        super(AnonymizedRegexField, self).__init__(source=self.source, **kwargs)
+
+    def get_attribute(self, obj):
+        value = super(AnonymizedRegexField, self).get_attribute(obj)
+
+        if value:
+            user = self.context['request'].user
+            auth = auth_core.Auth(user)
+            if 'view_only' in self.context['request'].query_params:
+                auth.private_key = self.context['request'].query_params['view_only']
+                if has_anonymous_link(obj.node, auth):
+                    value = re.sub(self.regex, self.replace, value)
+
+        return value
 
 class RelationshipField(ser.HyperlinkedIdentityField):
     """
@@ -303,29 +502,28 @@ class RelationshipField(ser.HyperlinkedIdentityField):
 
         children = RelationshipField(
             related_view='nodes:node-children',
-            related_view_kwargs={'node_id': '<pk>'},
+            related_view_kwargs={'node_id': '<_id>'},
             self_view='nodes:node-node-children-relationship',
-            self_view_kwargs={'node_id': '<pk>'},
+            self_view_kwargs={'node_id': '<_id>'},
             related_meta={'count': 'get_node_count'}
         )
 
     The lookup field must be surrounded in angular brackets to find the attribute on the target. Otherwise, the lookup
-    field will be returned verbatim. ::
+    field is assumed to be a method on the serializer. ::
 
-        wiki_home = RelationshipField(
-            related_view='addon:addon-detail',
-            related_view_kwargs={'node_id': '<_id>', 'provider': 'wiki'},
+        root = RelationshipField(
+            related_view='nodes:node-detail',
+            related_view_kwargs={'node_id': '<root._id>'}
         )
 
-    '_id' is enclosed in angular brackets, but 'wiki' is not. 'id' will be looked up on the target, but 'wiki' will not.
-     The serialized result would be '/nodes/abc12/addons/wiki'.
-
-    Field can handle nested attributes: ::
-
-        wiki_home = RelationshipField(
-            related_view='wiki:wiki-detail',
-            related_view_kwargs={'node_id': '<_id>', 'wiki_id': '<wiki_pages_current.home>'}
+        region = RegionRelationshipField(
+            related_view='regions:region-detail',
+            related_view_kwargs={'region_id': 'get_region_id'},
+            read_only=False
         )
+
+    'root._id' is enclosed in angular brackets, but 'get_region_id' is not.
+    'root._id' will be looked up on the target, but 'get_region_id' will be executed on the serializer.
 
     Field can handle a filter_key, which operates as the source field (but
     is named differently to not interfere with HyperLinkedIdentifyField's source
@@ -345,13 +543,15 @@ class RelationshipField(ser.HyperlinkedIdentityField):
     replies = RelationshipField(
         self_view='nodes:node-comments',
         self_view_kwargs={'node_id': '<node._id>'},
-        filter={'target': '<pk>'})
+        filter={'target': '<_id>'})
     )
     """
     json_api_link = True  # serializes to a links object
 
-    def __init__(self, related_view=None, related_view_kwargs=None, self_view=None, self_view_kwargs=None,
-                 self_meta=None, related_meta=None, always_embed=False, filter=None, filter_key=None, **kwargs):
+    def __init__(
+        self, related_view=None, related_view_kwargs=None, self_view=None, self_view_kwargs=None,
+        self_meta=None, related_meta=None, always_embed=False, filter=None, filter_key=None, required=False, **kwargs
+    ):
         related_view = related_view
         self_view = self_view
         related_kwargs = related_view_kwargs
@@ -368,8 +568,10 @@ class RelationshipField(ser.HyperlinkedIdentityField):
         if related_view:
             assert related_kwargs is not None, 'Must provide related view kwargs.'
             if not callable(related_kwargs):
-                assert isinstance(related_kwargs,
-                                  dict), "Related view kwargs must have format {'lookup_url_kwarg: lookup_field}."
+                assert isinstance(
+                    related_kwargs,
+                    dict,
+                ), "Related view kwargs must have format {'lookup_url_kwarg: lookup_field}."
         if self_view:
             assert self_kwargs is not None, 'Must provide self view kwargs.'
             assert isinstance(self_kwargs, dict), "Self view kwargs must have format {'lookup_url_kwarg: lookup_field}."
@@ -380,10 +582,20 @@ class RelationshipField(ser.HyperlinkedIdentityField):
         else:
             view_name = self_view
             lookup_kwargs = self_kwargs
-
+        if kwargs.get('lookup_url_kwarg', None):
+            lookup_kwargs = kwargs.pop('lookup_url_kwarg')
         super(RelationshipField, self).__init__(view_name, lookup_url_kwarg=lookup_kwargs, **kwargs)
 
-    def resolve(self, resource, field_name):
+        # Allow a RelationshipField to be modified if explicitly set so
+        if kwargs.get('read_only') is not None:
+            self.read_only = kwargs['read_only']
+
+        # Allow a RelationshipField to be required
+        if required:
+            assert not self.read_only, 'May not set both `read_only` and `required`'
+            self.required = required
+
+    def resolve(self, resource, field_name, request):
         """
         Resolves the view when embedding.
         """
@@ -391,16 +603,17 @@ class RelationshipField(ser.HyperlinkedIdentityField):
         if callable(lookup_url_kwarg):
             lookup_url_kwarg = lookup_url_kwarg(getattr(resource, field_name))
 
-        kwargs = {attr_name: self.lookup_attribute(resource, attr) for (attr_name, attr) in
-                  lookup_url_kwarg.items()}
+        kwargs = {attr_name: self.lookup_attribute(resource, attr) for (attr_name, attr) in lookup_url_kwarg.items()}
+        kwargs.update({'version': request.parser_context['kwargs']['version']})
+
         view = self.view_name
         if callable(self.view_name):
             view = view(getattr(resource, field_name))
         return resolve(
             reverse(
                 view,
-                kwargs=kwargs
-            )
+                kwargs=kwargs,
+            ),
         )
 
     def process_related_counts_parameters(self, params, value):
@@ -426,10 +639,11 @@ class RelationshipField(ser.HyperlinkedIdentityField):
             hidden = fetched_field and isinstance(fetched_field, HideIfWithdrawal) and getattr(value, 'is_retracted', False)
 
             if not hidden and count_field not in countable_fields:
-                raise InvalidQueryStringError(
+                raise api_exceptions.InvalidQueryStringError(
                     detail="Acceptable values for the related_counts query param are 'true', 'false', or any of the relationship fields; got '{0}'".format(
-                        params),
-                    parameter='related_counts'
+                        params,
+                    ),
+                    parameter='related_counts',
                 )
         return field_counts_requested
 
@@ -447,15 +661,21 @@ class RelationshipField(ser.HyperlinkedIdentityField):
                 field_counts_requested = self.process_related_counts_parameters(show_related_counts, value)
 
                 if utils.is_truthy(show_related_counts):
-                    meta[key] = website_utils.rapply(meta_data[key], _url_val, obj=value, serializer=self.parent)
+                    meta[key] = functional.rapply(meta_data[key], _url_val, obj=value, serializer=self.parent, request=self.context['request'])
                 elif utils.is_falsy(show_related_counts):
                     continue
                 elif self.field_name in field_counts_requested:
-                    meta[key] = website_utils.rapply(meta_data[key], _url_val, obj=value, serializer=self.parent)
+                    meta[key] = functional.rapply(meta_data[key], _url_val, obj=value, serializer=self.parent, request=self.context['request'])
                 else:
                     continue
+            elif key == 'projects_in_common':
+                if not utils.get_user_auth(self.context['request']).user:
+                    continue
+                if not self.context['request'].query_params.get('show_projects_in_common', False):
+                    continue
+                meta[key] = functional.rapply(meta_data[key], _url_val, obj=value, serializer=self.parent, request=self.context['request'])
             else:
-                meta[key] = website_utils.rapply(meta_data[key], _url_val, obj=value, serializer=self.parent)
+                meta[key] = functional.rapply(meta_data[key], _url_val, obj=value, serializer=self.parent, request=self.context['request'])
         return meta
 
     def lookup_attribute(self, obj, lookup_field):
@@ -472,7 +692,7 @@ class RelationshipField(ser.HyperlinkedIdentityField):
             # nested attributes in relationship fields.
             try:
                 return_val = get_nested_attributes(obj, source_attrs)
-            except KeyError:
+            except (KeyError, AttributeError):
                 return None
             return return_val
 
@@ -486,11 +706,14 @@ class RelationshipField(ser.HyperlinkedIdentityField):
             kwargs_dict = kwargs_dict(obj)
 
         kwargs_retrieval = {}
+
         for lookup_url_kwarg, lookup_field in kwargs_dict.items():
-            try:
+
+            if _tpl(lookup_field):
                 lookup_value = self.lookup_attribute(obj, lookup_field)
-            except AttributeError as exc:
-                raise AssertionError(exc)
+            else:
+                lookup_value = _url_val(lookup_field, obj, self.parent, self.context['request'])
+
             if lookup_value is None:
                 return None
             kwargs_retrieval[lookup_url_kwarg] = lookup_value
@@ -509,14 +732,27 @@ class RelationshipField(ser.HyperlinkedIdentityField):
                 else:
                     if callable(view):
                         view = view(getattr(obj, self.field_name))
+                    if request.parser_context['kwargs'].get('version', False):
+                        kwargs.update({'version': request.parser_context['kwargs']['version']})
                     url = self.reverse(view, kwargs=kwargs, request=request, format=format)
                     if self.filter:
-                        formatted_filter = self.format_filter(obj)
-                        if formatted_filter:
-                            url = '{}?filter{}'.format(url, formatted_filter)
+                        formatted_filters = self.format_filter(obj)
+                        if formatted_filters:
+                            for filter in formatted_filters:
+                                url = utils.extend_querystring_params(
+                                    url,
+                                    {'filter[{}]'.format(filter['field_name']): filter['value']},
+                                )
                         else:
                             url = None
+
+                    if url:
+                        url = utils.extend_querystring_if_key_exists(
+                            url, self.context['request'],
+                            'view_only',
+                        )
                     urls[view_name] = url
+
         if not urls['self'] and not urls['related']:
             urls = None
         return urls
@@ -534,12 +770,17 @@ class RelationshipField(ser.HyperlinkedIdentityField):
                 query_dict = dict(format=['jsonapi', ], envelope=[envelope, ])
                 if 'view_only' in self.parent.context['request'].query_params.keys():
                     query_dict.update(view_only=[self.parent.context['request'].query_params['view_only']])
-                esi_url = extend_querystring_params(href, query_dict)
+                esi_url = utils.extend_querystring_params(href, query_dict)
                 return '<esi:include src="{}"/>'.format(esi_url)
 
     def format_filter(self, obj):
-        qd = QueryDict(mutable=True)
+        """ Take filters specified in self.filter and format them in a way that can be easily parametrized
+
+        :param obj: RelationshipField object
+        :return: list of dictionaries with 'field_name' and 'value' for each filter
+        """
         filter_fields = self.filter.keys()
+        filters = []
         for field_name in filter_fields:
             try:
                 # check if serializer method passed in
@@ -550,10 +791,11 @@ class RelationshipField(ser.HyperlinkedIdentityField):
                 value = serializer_method(obj)
             if not value:
                 continue
-            qd.update({'[{}]'.format(field_name): value})
-        if not qd.keys():
-            return None
-        return qd.urlencode(safe=['[', ']'])
+            filters.append({'field_name': field_name, 'value': value})
+        return filters if filters else None
+
+    def to_internal_value(self, data):
+        return data
 
     # Overrides HyperlinkedIdentityField
     def to_representation(self, value):
@@ -598,20 +840,65 @@ class RelationshipField(ser.HyperlinkedIdentityField):
             raise ImproperlyConfigured(msg % self.view_name)
 
         if url is None:
-            raise SkipField
+            # Prior to 2.9, empty relationships were omitted from the response.
+            # This conflicts with the JSON-API spec and was fixed in 2.9.
+            if StrictVersion(request.version) < StrictVersion('2.9'):
+                raise SkipField
+            else:
+                return {'data': None}
 
         related_url = url['related']
+        related_path = urlparse(related_url).path if related_url else None
         related_meta = self.get_meta_information(self.related_meta, value)
         self_url = url['self']
         self_meta = self.get_meta_information(self.self_meta, value)
-        return format_relationship_links(related_url, self_url, related_meta, self_meta)
+        relationship = format_relationship_links(related_url, self_url, related_meta, self_meta)
+        if related_url and (len(related_path.split('/')) & 1) == 1:
+            resolved_url = resolve(related_path)
+            related_class = resolved_url.func.view_class
+            if issubclass(related_class, RetrieveModelMixin):
+                related_type = resolved_url.namespace
+                try:
+                    # TODO: change kwargs to preprint_provider_id and registration_id
+                    if related_type == 'preprint_providers':
+                        related_id = resolved_url.kwargs['provider_id']
+                    elif related_type == 'registrations':
+                        related_id = resolved_url.kwargs['node_id']
+                    else:
+                        related_id = resolved_url.kwargs[related_type[:-1] + '_id']
+                except KeyError:
+                    return relationship
+                relationship['data'] = {'id': related_id, 'type': related_type}
+        return relationship
 
 
-class FileCommentRelationshipField(RelationshipField):
+class TypedRelationshipField(RelationshipField):
+    """ Overrides get_url to inject a typed namespace.
+
+        Assumption: Namespaces for each type MUST be the same as the dasharized JSONAPI-type
+    """
+
+    def get_url(self, obj, view_name, request, format):
+        if len(view_name.split(':')) == 2:
+            untyped_view = view_name
+            view_parts = view_name.split(':')
+            request = self.context.get('request', None)
+            if isinstance(self.root, JSONAPIListSerializer):
+                view_parts.insert(1, get_meta_type(self.root.child, request).replace('_', '-'))
+            else:
+                view_parts.insert(1, get_meta_type(self.root, request).replace('_', '-'))
+            self.view_name = view_name = ':'.join(view_parts)
+            for k, v in self.views.items():
+                if v == untyped_view:
+                    self.views[k] = view_name
+        return super(TypedRelationshipField, self).get_url(obj, view_name, request, format)
+
+
+class FileRelationshipField(RelationshipField):
     def get_url(self, obj, view_name, request, format):
         if obj.kind == 'folder':
             raise SkipField
-        return super(FileCommentRelationshipField, self).get_url(obj, view_name, request, format)
+        return super(FileRelationshipField, self).get_url(obj, view_name, request, format)
 
 
 class TargetField(ser.Field):
@@ -628,16 +915,20 @@ class TargetField(ser.Field):
     view_map = {
         'node': {
             'view': 'nodes:node-detail',
-            'lookup_kwarg': 'node_id'
+            'lookup_kwarg': 'node_id',
+        },
+        'preprint': {
+            'view': 'preprints:preprint-detail',
+            'lookup_kwarg': 'preprint_id',
         },
         'comment': {
             'view': 'comments:comment-detail',
-            'lookup_kwarg': 'comment_id'
+            'lookup_kwarg': 'comment_id',
         },
         'nodewikipage': {
             'view': None,
-            'lookup_kwarg': None
-        }
+            'lookup_kwarg': None,
+        },
     }
 
     def __init__(self, **kwargs):
@@ -645,32 +936,34 @@ class TargetField(ser.Field):
         self.link_type = kwargs.pop('link_type', 'url')
         super(TargetField, self).__init__(read_only=True, **kwargs)
 
-    def resolve(self, resource, field_name):
+    def resolve(self, resource, field_name, request):
         """
         Resolves the view for target node or target comment when embedding.
         """
         view_info = self.view_map.get(resource.target.referent._name, None)
         if not view_info:
-            raise TargetNotSupportedError('{} is not a supported target type'.format(
-                resource.target._name
+            raise api_exceptions.TargetNotSupportedError('{} is not a supported target type'.format(
+                resource.target._name,
             ))
         if not view_info['view']:
             return None, None, None
         embed_value = resource.target._id
 
-        kwargs = {view_info['lookup_kwarg']: embed_value}
         return resolve(
             reverse(
                 view_info['view'],
-                kwargs=kwargs
-            )
+                kwargs={
+                    view_info['lookup_kwarg']: embed_value,
+                    'version': request.parser_context['kwargs']['version'],
+                },
+            ),
         )
 
     def to_esi_representation(self, value, envelope='data'):
         href = value.get_absolute_url()
 
         if href:
-            esi_url = extend_querystring_params(href, dict(envelope=[envelope, ], format=['jsonapi', ]))
+            esi_url = utils.extend_querystring_params(href, dict(envelope=[envelope, ], format=['jsonapi', ]))
             return '<esi:include src="{}"/>'.format(esi_url)
         return self.to_representation(value)
 
@@ -681,8 +974,9 @@ class TargetField(ser.Field):
         If no meta information, self.link_type is equal to a string containing link's URL.  Otherwise,
         the link is represented as a links object with 'href' and 'meta' members.
         """
-        meta = website_utils.rapply(self.meta, _url_val, obj=value, serializer=self.parent)
-        return {'links': {self.link_type: {'href': value.referent.get_absolute_url(), 'meta': meta}}}
+        meta = functional.rapply(self.meta, _url_val, obj=value, serializer=self.parent, request=self.context['request'])
+        obj = getattr(value, 'referent', value)
+        return {'links': {self.link_type: {'href': obj.get_absolute_url(), 'meta': meta}}}
 
 
 class LinksField(ser.Field):
@@ -695,15 +989,15 @@ class LinksField(ser.Field):
         links = LinksField({
             'html': 'absolute_url',
             'children': {
-                'related': Link('nodes:node-children', node_id='<pk>'),
+                'related': Link('nodes:node-children', node_id='<_id>'),
                 'count': 'get_node_count'
             },
             'contributors': {
-                'related': Link('nodes:node-contributors', node_id='<pk>'),
+                'related': Link('nodes:node-contributors', node_id='<_id>'),
                 'count': 'get_contrib_count'
             },
             'registrations': {
-                'related': Link('nodes:node-registrations', node_id='<pk>'),
+                'related': Link('nodes:node-registrations', node_id='<_id>'),
                 'count': 'get_registration_count'
             },
         })
@@ -718,17 +1012,30 @@ class LinksField(ser.Field):
         # not just the field attribute.
         return obj
 
+    def extend_absolute_info_url(self, obj):
+        return utils.extend_querystring_if_key_exists(obj.get_absolute_info_url(), self.context['request'], 'view_only')
+
+    def extend_absolute_url(self, obj):
+        return utils.extend_querystring_if_key_exists(obj.get_absolute_url(), self.context['request'], 'view_only')
+
     def to_representation(self, obj):
         ret = {}
-        for name, value in self.links.iteritems():
+        for name, value in self.links.items():
             try:
-                url = _url_val(value, obj=obj, serializer=self.parent)
+                url = _url_val(value, obj=obj, serializer=self.parent, request=self.context['request'])
             except SkipField:
                 continue
             else:
                 ret[name] = url
         if hasattr(obj, 'get_absolute_url') and 'self' not in self.links:
-            ret['self'] = obj.get_absolute_url()
+            ret['self'] = self.extend_absolute_url(obj)
+
+        if 'info' in ret:
+            if hasattr(obj, 'get_absolute_info_url'):
+                ret['info'] = self.extend_absolute_info_url(obj)
+            else:
+                ret['info'] = utils.extend_querystring_if_key_exists(ret['info'], self.context['request'], 'view_only')
+
         return ret
 
 
@@ -758,7 +1065,8 @@ def _get_attr_from_tpl(attr_tpl, obj):
                 '{attr_name!r} is not a valid '
                 'attribute of {obj!r}'.format(
                     attr_name=attr_name, obj=obj,
-                ))
+                ),
+            )
     else:
         return attr_tpl
 
@@ -777,8 +1085,9 @@ class Link(object):
         self.reverse_kwargs = kw
         self.query_kwargs = query_kwargs or {}
 
-    def resolve_url(self, obj):
+    def resolve_url(self, obj, request):
         kwarg_values = {key: _get_attr_from_tpl(attr_tpl, obj) for key, attr_tpl in self.kwargs.items()}
+        kwarg_values.update({'version': request.parser_context['kwargs']['version']})
         arg_values = [_get_attr_from_tpl(attr_tpl, obj) for attr_tpl in self.args]
         query_kwarg_values = {key: _get_attr_from_tpl(attr_tpl, obj) for key, attr_tpl in self.query_kwargs.items()}
         # Presumably, if you have are expecting a value but the value is empty, then the link is invalid.
@@ -803,14 +1112,24 @@ class WaterbutlerLink(Link):
         self.must_be_file = must_be_file
         self.must_be_folder = must_be_folder
 
-    def resolve_url(self, obj):
+    def resolve_url(self, obj, request):
         """Reverse URL lookup for WaterButler routes
         """
         if self.must_be_folder is True and not obj.path.endswith('/'):
             raise SkipField
         if self.must_be_file is True and obj.path.endswith('/'):
             raise SkipField
-        url = website_utils.waterbutler_api_url_for(obj.node._id, obj.provider, obj.path, **self.kwargs)
+
+        if 'view_only' not in self.kwargs:
+            view_only = request.query_params.get('view_only', False)
+            if view_only:
+                self.kwargs['view_only'] = view_only
+
+        base_url = None
+        if hasattr(obj.target, 'osfstorage_region'):
+            base_url = obj.target.osfstorage_region.waterbutler_url
+
+        url = utils.waterbutler_api_url_for(obj.target._id, obj.provider, obj.path, base_url=base_url, **self.kwargs)
         if not url:
             raise SkipField
         else:
@@ -856,6 +1175,10 @@ class JSONAPIListSerializer(ser.ListSerializer):
 
     # Overrides ListSerializer which doesn't support multiple update by default
     def update(self, instance, validated_data):
+
+        # avoiding circular import
+        from api.nodes.serializers import ContributorIDField
+
         # if PATCH request, the child serializer's partial attribute needs to be True
         if self.context['request'].method == 'PATCH':
             self.child.partial = True
@@ -866,8 +1189,12 @@ class JSONAPIListSerializer(ser.ListSerializer):
                 raise exceptions.ValidationError({'non_field_errors': 'Could not find all objects to update.'})
 
         id_lookup = self.child.fields['id'].source
-        instance_mapping = {getattr(item, id_lookup): item for item in instance}
         data_mapping = {item.get(id_lookup): item for item in validated_data}
+
+        if isinstance(self.child.fields['id'], ContributorIDField):
+            instance_mapping = {self.child.fields['id'].get_id(item): item for item in instance}
+        else:
+            instance_mapping = {getattr(item, id_lookup): item for item in instance}
 
         ret = {'data': []}
 
@@ -888,8 +1215,10 @@ class JSONAPIListSerializer(ser.ListSerializer):
         num_items = len(data)
 
         if num_items > bulk_limit:
-            raise JSONAPIException(source={'pointer': '/data'},
-                                   detail='Bulk operation limit is {}, got {}.'.format(bulk_limit, num_items))
+            raise api_exceptions.JSONAPIException(
+                source={'pointer': '/data'},
+                detail='Bulk operation limit is {}, got {}.'.format(bulk_limit, num_items),
+            )
 
         return super(JSONAPIListSerializer, self).run_validation(data)
 
@@ -904,7 +1233,7 @@ class JSONAPIListSerializer(ser.ListSerializer):
         ret = super(JSONAPIListSerializer, self).is_valid(**kwargs)
 
         if clean_html is True:
-            self._validated_data = website_utils.rapply(self.validated_data, strip_html)
+            self._validated_data = functional.rapply(self.validated_data, sanitize.strip_html)
 
         for data in self._validated_data:
             data.pop('type', None)
@@ -912,12 +1241,38 @@ class JSONAPIListSerializer(ser.ListSerializer):
         return ret
 
 
-class JSONAPISerializer(ser.Serializer):
+class SparseFieldsetMixin(object):
+    def parse_sparse_fields(self, allow_unsafe=False, **kwargs):
+        request = kwargs.get('context', {}).get('request', None)
+        if request and (allow_unsafe or request.method in permissions.SAFE_METHODS):
+            sparse_fieldset_query_param = 'fields[{}]'.format(get_meta_type(self, request))
+            if sparse_fieldset_query_param in request.query_params:
+                fieldset = request.query_params[sparse_fieldset_query_param].split(',')
+                for field_name in self.fields.fields.copy().keys():
+                    if field_name in ('id', 'links', 'type'):
+                        # MUST return these fields
+                        continue
+                    if field_name not in fieldset:
+                        self.fields.pop(field_name)
+
+class BaseAPISerializer(ser.Serializer, SparseFieldsetMixin):
+
+    def __init__(self, *args, **kwargs):
+        self.parse_sparse_fields(**kwargs)
+        super(BaseAPISerializer, self).__init__(*args, **kwargs)
+        self.model_field_names = [
+            name if field.source == '*' else field.source
+            for name, field in self.fields.items()
+        ]
+
+
+class JSONAPISerializer(BaseAPISerializer):
     """Base serializer. Requires that a `type_` option is set on `class Meta`. Also
     allows for enveloping of both single resources and collections.  Looks to nest fields
     according to JSON API spec. Relational fields must set json_api_link=True flag.
     Self/html links must be nested under "links".
     """
+    writeable_method_fields = frozenset([])
 
     # Don't serialize relationships that use these views
     # when viewing thru an anonymous VOL
@@ -929,7 +1284,7 @@ class JSONAPISerializer(ser.Serializer):
     # overrides Serializer
     @classmethod
     def many_init(cls, *args, **kwargs):
-        kwargs['child'] = cls()
+        kwargs['child'] = cls(*args, **kwargs)
         return JSONAPIListSerializer(*args, **kwargs)
 
     def invalid_embeds(self, fields, embeds):
@@ -938,7 +1293,8 @@ class JSONAPISerializer(ser.Serializer):
             if getattr(field, 'field', None):
                 fields_check[index] = field.field
         invalid_embeds = set(embeds.keys()) - set(
-            [f.field_name for f in fields_check if getattr(f, 'json_api_link', False)])
+            [f.field_name for f in fields_check if getattr(f, 'json_api_link', False)],
+        )
         return invalid_embeds
 
     def to_esi_representation(self, data, envelope='data'):
@@ -947,10 +1303,32 @@ class JSONAPISerializer(ser.Serializer):
         href = self.get_absolute_url(data)
         if href and href != '{}':
             esi_url = furl.furl(href).add(args=dict(self.context['request'].query_params)).remove(
-                args=query_params_blacklist).remove(args=['envelope']).add(args={'envelope': envelope}).url
+                args=query_params_blacklist,
+            ).remove(args=['envelope']).add(args={'envelope': envelope}).url
             return '<esi:include src="{}"/>'.format(esi_url)
         # failsafe, let python do it if something bad happened in the ESI construction
         return super(JSONAPISerializer, self).to_representation(data)
+
+    def run_validation(self, *args, **kwargs):
+        # Overrides construtor for validated_data to allow writes to a SerializerMethodField
+        # Validation for writeable SMFs is expected to happen in the model
+        _validated_data = super(JSONAPISerializer, self).run_validation(*args, **kwargs)
+        for field in self.writeable_method_fields:
+            if field in self.initial_data:
+                _validated_data[field] = self.initial_data[field]
+        return _validated_data
+
+    def get_unwrapped_field(self, field):
+        """
+        Returns the lowest nested field. If no nesting, returns the original field.
+        :param field, highest field
+
+        Assumes nested structures like the following:
+        - field, field.field, field.child_relation, field.field.child_relation, etc.
+        """
+        while hasattr(field, 'field'):
+            field = field.field
+        return getattr(field, 'child_relation', field)
 
     # overrides Serializer
     def to_representation(self, obj, envelope='data'):
@@ -960,9 +1338,10 @@ class JSONAPISerializer(ser.Serializer):
         :param envelope: Key for resource object.
         """
         ret = {}
-        meta = getattr(self, 'Meta', None)
-        type_ = getattr(meta, 'type_', None)
-        assert type_ is not None, 'Must define Meta.type_'
+        request = self.context.get('request')
+        type_ = get_meta_type(self, request)
+        assert type_ is not None, 'Must define Meta.type_ or Meta.get_type()'
+        self.parse_sparse_fields(allow_unsafe=True, context=self.context)
 
         data = {
             'id': '',
@@ -986,30 +1365,51 @@ class JSONAPISerializer(ser.Serializer):
             existing = set(self.fields.keys())
             to_be_removed = existing - allowed
 
-        fields = [field for field in self.fields.values() if
-                  not field.write_only and field.field_name not in to_be_removed]
+        fields = [
+            field for field in self.fields.values() if
+            not field.write_only and field.field_name not in to_be_removed
+        ]
 
         invalid_embeds = self.invalid_embeds(fields, embeds)
         invalid_embeds = invalid_embeds - to_be_removed
         if invalid_embeds:
-            raise InvalidQueryStringError(parameter='embed',
-                                          detail='The following fields are not embeddable: {}'.format(
-                                              ', '.join(invalid_embeds)))
+            raise api_exceptions.InvalidQueryStringError(
+                parameter='embed',
+                detail='The following fields are not embeddable: {}'.format(
+                    ', '.join(invalid_embeds),
+                ),
+            )
 
         for field in fields:
+            nested_field = self.get_unwrapped_field(field)
             try:
-                attribute = field.get_attribute(obj)
+                if hasattr(field, 'child_relation'):
+                    attribute = field.child_relation.get_attribute(obj)
+                else:
+                    attribute = field.get_attribute(obj)
             except SkipField:
                 continue
-
-            nested_field = getattr(field, 'field', None)
             if attribute is None:
                 # We skip `to_representation` for `None` values so that
                 # fields do not have to explicitly deal with that case.
-                data['attributes'][field.field_name] = None
+                if isinstance(nested_field, RelationshipField):
+                    # if this is a RelationshipField, serialize as a null relationship
+                    data['relationships'][field.field_name] = {'data': None}
+                else:
+                    # otherwise, serialize as an null attribute
+                    data['attributes'][field.field_name] = None
             else:
                 try:
-                    representation = field.to_representation(attribute)
+                    if hasattr(field, 'child_relation'):
+                        if hasattr(attribute, 'all'):
+                            representation = field.child_relation.to_representation(attribute.all())
+                        else:
+                            representation = field.child_relation.to_representation(attribute)
+                    else:
+                        if hasattr(attribute, 'all'):
+                            representation = field.to_representation(attribute.all())
+                        else:
+                            representation = field.to_representation(attribute)
                 except SkipField:
                     continue
                 if getattr(field, 'json_api_link', False) or getattr(nested_field, 'json_api_link', False):
@@ -1033,9 +1433,11 @@ class JSONAPISerializer(ser.Serializer):
                         else:
                             data['embeds'][field.field_name] = {'error': 'This field is not embeddable.'}
                     try:
-                        if not (is_anonymous and
-                                    hasattr(field, 'view_name') and
-                                        field.view_name in self.views_to_hide_if_anonymous):
+                        if not (
+                            is_anonymous and
+                            hasattr(field, 'view_name') and
+                                field.view_name in self.views_to_hide_if_anonymous
+                        ):
                             data['relationships'][field.field_name] = representation
                     except SkipField:
                         continue
@@ -1058,13 +1460,21 @@ class JSONAPISerializer(ser.Serializer):
                 ret['meta'] = {'anonymous': True}
         else:
             ret = data
+
+        additional_meta = self.get_meta(obj)
+        if additional_meta:
+            meta_obj = ret.setdefault('meta', {})
+            meta_obj.update(additional_meta)
         return ret
 
     def get_absolute_url(self, obj):
         raise NotImplementedError()
 
+    def get_meta(self, obj):
+        return None
+
     def get_absolute_html_url(self, obj):
-        return obj.absolute_url
+        return utils.extend_querystring_if_key_exists(obj.absolute_url, self.context['request'], 'view_only')
 
     # overrides Serializer: Add HTML-sanitization similar to that used by APIv1 front-end views
     def is_valid(self, clean_html=True, **kwargs):
@@ -1088,10 +1498,10 @@ class JSONAPISerializer(ser.Serializer):
         return ret
 
     def sanitize_data(self):
-        return website_utils.rapply(self.validated_data, strip_html)
+        return functional.rapply(self.validated_data, sanitize.strip_html)
 
 
-class JSONAPIRelationshipSerializer(ser.Serializer):
+class JSONAPIRelationshipSerializer(BaseAPISerializer):
     """Base Relationship serializer. Requires that a `type_` option is set on `class Meta`.
     Provides a simplified serialization of the relationship, allowing for simple update request
     bodies.
@@ -1100,9 +1510,9 @@ class JSONAPIRelationshipSerializer(ser.Serializer):
     type = TypeField(required=False, allow_null=True)
 
     def to_representation(self, obj):
-        meta = getattr(self, 'Meta', None)
-        type_ = getattr(meta, 'type_', None)
-        assert type_ is not None, 'Must define Meta.type_'
+        request = self.context.get('request')
+        type_ = get_meta_type(self, request)
+        assert type_ is not None, 'Must define Meta.type_ or Meta.get_type()'
         relation_id_field = self.fields['id']
         attribute = relation_id_field.get_attribute(obj)
         relationship = relation_id_field.to_representation(attribute)
@@ -1153,7 +1563,7 @@ def relationship_diff(current_items, new_items):
 
     return {
         'add': {k: new_items[k] for k in (set(new_items.keys()) - set(current_items.keys()))},
-        'remove': {k: current_items[k] for k in (set(current_items.keys()) - set(new_items.keys()))}
+        'remove': {k: current_items[k] for k in (set(current_items.keys()) - set(new_items.keys()))},
     }
 
 
@@ -1173,25 +1583,50 @@ class AddonAccountSerializer(JSONAPISerializer):
     def get_absolute_url(self, obj):
         kwargs = self.context['request'].parser_context['kwargs']
         kwargs.update({'account_id': obj._id})
-        return absolute_reverse(
+        return utils.absolute_reverse(
             'users:user-external_account-detail',
-            kwargs=kwargs
+            kwargs=kwargs,
         )
         return obj.get_absolute_url()
 
 
 class LinkedNode(JSONAPIRelationshipSerializer):
-    id = ser.CharField(source='node._id', required=False, allow_null=True)
+    id = ser.CharField(source='_id', required=False, allow_null=True)
 
     class Meta:
-        type_ = 'linked_nodes'
+        @staticmethod
+        def get_type(request):
+            if StrictVersion(request.version) < StrictVersion('2.13'):
+                return 'linked_nodes'
+            return 'nodes'
 
 
-class LinkedNodesRelationshipSerializer(ser.Serializer):
+class LinkedRegistration(JSONAPIRelationshipSerializer):
+    id = ser.CharField(source='_id', required=False, allow_null=True)
 
+    class Meta:
+        @staticmethod
+        def get_type(request):
+            if StrictVersion(request.version) < StrictVersion('2.13'):
+                return 'linked_registrations'
+            return 'registrations'
+
+
+class LinkedPreprint(LinkedNode):
+    class Meta:
+        @staticmethod
+        def get_type(request):
+            if StrictVersion(request.version) < StrictVersion('2.13'):
+                return 'linked_preprints'
+            return 'preprints'
+
+
+class LinkedNodesRelationshipSerializer(BaseAPISerializer):
     data = ser.ListField(child=LinkedNode())
-    links = LinksField({'self': 'get_self_url',
-                        'html': 'get_related_url'})
+    links = LinksField({
+        'self': 'get_self_url',
+        'html': 'get_related_url',
+    })
 
     def get_self_url(self, obj):
         return obj['self'].linked_nodes_self_url
@@ -1200,17 +1635,21 @@ class LinkedNodesRelationshipSerializer(ser.Serializer):
         return obj['self'].linked_nodes_related_url
 
     class Meta:
-        type_ = 'linked_nodes'
+        @staticmethod
+        def get_type(request):
+            if StrictVersion(request.version) < StrictVersion('2.13'):
+                return 'linked_nodes'
+            return 'nodes'
 
     def get_pointers_to_add_remove(self, pointers, new_pointers):
         diff = relationship_diff(
-            current_items={pointer.node._id: pointer for pointer in pointers},
-            new_items={val['node']['_id']: val for val in new_pointers}
+            current_items={pointer._id: pointer for pointer in pointers},
+            new_items={val['_id']: val for val in new_pointers},
         )
 
         nodes_to_add = []
         for node_id in diff['add']:
-            node = Node.load(node_id)
+            node = AbstractNode.load(node_id) or Preprint.load(node_id)
             if not node:
                 raise exceptions.NotFound(detail='Node with id "{}" was not found'.format(node_id))
             nodes_to_add.append(node)
@@ -1219,11 +1658,12 @@ class LinkedNodesRelationshipSerializer(ser.Serializer):
 
     def make_instance_obj(self, obj):
         # Convenience method to format instance based on view's get_object
-        return {'data': [
-            pointer for pointer in
-            obj.nodes_pointer
-            if not pointer.node.is_deleted and not pointer.node.is_collection
-        ], 'self': obj}
+        return {
+            'data': [
+                pointer for pointer in
+                obj.linked_nodes.filter(is_deleted=False, type='osf.node')
+            ], 'self': obj,
+        }
 
     def update(self, instance, validated_data):
         collection = instance['self']
@@ -1246,9 +1686,115 @@ class LinkedNodesRelationshipSerializer(ser.Serializer):
         add, remove = self.get_pointers_to_add_remove(pointers=instance['data'], new_pointers=validated_data['data'])
 
         if not len(add):
-            raise RelationshipPostMakesNoChanges
+            raise api_exceptions.RelationshipPostMakesNoChanges
 
         for node in add:
             collection.add_pointer(node, auth)
 
         return self.make_instance_obj(collection)
+
+
+class LinkedRegistrationsRelationshipSerializer(BaseAPISerializer):
+    data = ser.ListField(child=LinkedRegistration())
+    links = LinksField({
+        'self': 'get_self_url',
+        'html': 'get_related_url',
+    })
+
+    def get_self_url(self, obj):
+        return obj['self'].linked_registrations_self_url
+
+    def get_related_url(self, obj):
+        return obj['self'].linked_registrations_related_url
+
+    class Meta:
+        @staticmethod
+        def get_type(request):
+            if StrictVersion(request.version) < StrictVersion('2.13'):
+                return 'linked_registrations'
+            return 'registrations'
+
+    def get_pointers_to_add_remove(self, pointers, new_pointers):
+        diff = relationship_diff(
+            current_items={pointer._id: pointer for pointer in pointers},
+            new_items={val['_id']: val for val in new_pointers},
+        )
+
+        nodes_to_add = []
+        for node_id in diff['add']:
+            node = AbstractNode.load(node_id)
+            if not node:
+                raise exceptions.NotFound(detail='Node with id "{}" was not found'.format(node_id))
+            nodes_to_add.append(node)
+
+        return nodes_to_add, diff['remove'].values()
+
+    def make_instance_obj(self, obj):
+        # Convenience method to format instance based on view's get_object
+        return {
+            'data': [
+                pointer for pointer in
+                obj.linked_nodes.filter(is_deleted=False, type='osf.registration')
+            ], 'self': obj,
+        }
+
+    def update(self, instance, validated_data):
+        collection = instance['self']
+        auth = utils.get_user_auth(self.context['request'])
+
+        add, remove = self.get_pointers_to_add_remove(pointers=instance['data'], new_pointers=validated_data['data'])
+
+        for pointer in remove:
+            collection.rm_pointer(pointer, auth)
+        for node in add:
+            collection.add_pointer(node, auth)
+
+        return self.make_instance_obj(collection)
+
+    def create(self, validated_data):
+        instance = self.context['view'].get_object()
+        auth = utils.get_user_auth(self.context['request'])
+        collection = instance['self']
+
+        add, remove = self.get_pointers_to_add_remove(pointers=instance['data'], new_pointers=validated_data['data'])
+
+        if not len(add):
+            raise api_exceptions.RelationshipPostMakesNoChanges
+
+        for node in add:
+            collection.add_pointer(node, auth)
+
+        return self.make_instance_obj(collection)
+
+
+class LinkedPreprintsRelationshipSerializer(LinkedNodesRelationshipSerializer):
+    data = ser.ListField(child=LinkedPreprint())
+
+    def get_self_url(self, obj):
+        return obj['self'].linked_preprints_self_url
+
+    def get_related_url(self, obj):
+        return obj['self'].linked_preprints_related_url
+
+    class Meta:
+        @staticmethod
+        def get_type(request):
+            if StrictVersion(request.version) < StrictVersion('2.13'):
+                return 'linked_preprints'
+            return 'preprints'
+
+    def make_instance_obj(self, obj):
+        # Convenience method to format instance based on view's get_object
+        return {
+            'data': [
+                pointer for pointer in
+                obj.linked_nodes.filter(deleted__isnull=True, type='osf.preprint')
+            ], 'self': obj,
+        }
+
+
+class MaintenanceStateSerializer(ser.ModelSerializer):
+
+    class Meta:
+        model = MaintenanceState
+        fields = ('level', 'message', 'start', 'end')

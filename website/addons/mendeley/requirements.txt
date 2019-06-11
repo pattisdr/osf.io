@@ -1,1 +1,0 @@
-git+https://github.com/lyndsysimon/mendeley-python-sdk.git@add_folders

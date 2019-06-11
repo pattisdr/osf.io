@@ -1,359 +1,562 @@
-from nose.tools import *  # flake8: noqa
-
-from website.project.model import ensure_schemas
-from website.models import MetaSchema
-from website.project.metadata.schemas import LATEST_SCHEMA_VERSION
-from website.project.metadata.utils import create_jsonschema_from_metaschema
-from modularodm import Q
-from website.util import permissions
-from website.settings import PREREG_ADMIN_TAG
+import pytest
+from django.utils import timezone
 
 from api.base.settings.defaults import API_BASE
-
-from tests.base import ApiTestCase
-from tests.factories import (
+from django.contrib.auth.models import Permission
+from osf.models import RegistrationSchema
+from osf_tests.factories import (
     ProjectFactory,
     RegistrationFactory,
+    RegistrationProviderFactory,
     AuthUserFactory,
     CollectionFactory,
-    DraftRegistrationFactory
+    DraftRegistrationFactory,
 )
-
-class DraftRegistrationTestCase(ApiTestCase):
-
-    def setUp(self):
-        super(DraftRegistrationTestCase, self).setUp()
-        self.user = AuthUserFactory()
-        self.read_only_user = AuthUserFactory()
-        self.read_write_user = AuthUserFactory()
-        self.non_contributor = AuthUserFactory()
-
-        self.public_project = ProjectFactory(is_public=True, creator=self.user)
-        self.public_project.add_contributor(self.read_only_user, permissions=[permissions.READ])
-        self.public_project.add_contributor(self.read_write_user, permissions=[permissions.WRITE])
-        self.public_project.save()
-
-    def prereg_metadata(self, draft):
-        test_metadata = {}
-        json_schema = create_jsonschema_from_metaschema(draft.registration_schema.schema)
-
-        for key, value in json_schema['properties'].iteritems():
-            response = 'Test response'
-            if value['properties']['value'].get('enum'):
-                response = value['properties']['value']['enum'][0]
-
-            if value['properties']['value'].get('properties'):
-                response = {'question': {'value': 'Test Response'}}
-
-            test_metadata[key] = {'value': response}
-        return test_metadata
+from osf.utils import permissions
+from website.project.metadata.schemas import LATEST_SCHEMA_VERSION
+from website.project.metadata.utils import create_jsonschema_from_metaschema
 
 
+@pytest.mark.django_db
+class DraftRegistrationTestCase:
+
+    @pytest.fixture()
+    def user(self):
+        return AuthUserFactory()
+
+    @pytest.fixture()
+    def user_write_contrib(self):
+        return AuthUserFactory()
+
+    @pytest.fixture()
+    def user_read_contrib(self):
+        return AuthUserFactory()
+
+    @pytest.fixture()
+    def user_non_contrib(self):
+        return AuthUserFactory()
+
+    @pytest.fixture()
+    def project_public(self, user, user_write_contrib, user_read_contrib):
+        project_public = ProjectFactory(is_public=True, creator=user)
+        project_public.add_contributor(
+            user_write_contrib,
+            permissions=[permissions.WRITE])
+        project_public.add_contributor(
+            user_read_contrib,
+            permissions=[permissions.READ])
+        project_public.save()
+        return project_public
+
+    @pytest.fixture()
+    def prereg_metadata(self):
+        def metadata(draft):
+            test_metadata = {}
+            json_schema = create_jsonschema_from_metaschema(
+                draft.registration_schema.schema)
+
+            for key, value in json_schema['properties'].items():
+                response = 'Test response'
+                items = value['properties']['value'].get('items')
+                enum = value['properties']['value'].get('enum')
+                if items:  # multiselect
+                    response = [items['enum'][0]]
+                elif enum:  # singleselect
+                    response = enum[0]
+                elif value['properties']['value'].get('properties'):
+                    response = {'question': {'value': 'Test Response'}}
+
+                test_metadata[key] = {'value': response}
+            return test_metadata
+        return metadata
+
+
+@pytest.mark.django_db
 class TestDraftRegistrationList(DraftRegistrationTestCase):
 
-    def setUp(self):
-        super(TestDraftRegistrationList, self).setUp()
-        ensure_schemas()
-        self.schema = MetaSchema.find_one(
-            Q('name', 'eq', 'Open-Ended Registration') &
-            Q('schema_version', 'eq', LATEST_SCHEMA_VERSION)
+    @pytest.fixture()
+    def schema(self):
+        return RegistrationSchema.objects.get(
+            name='Open-Ended Registration',
+            schema_version=LATEST_SCHEMA_VERSION)
+
+    @pytest.fixture()
+    def draft_registration(self, user, project_public, schema):
+        return DraftRegistrationFactory(
+            initiator=user,
+            registration_schema=schema,
+            branched_from=project_public
         )
 
-        self.draft_registration = DraftRegistrationFactory(
-            initiator=self.user,
-            registration_schema=self.schema,
-            branched_from=self.public_project
-        )
+    @pytest.fixture()
+    def url_draft_registrations(self, project_public):
+        return '/{}nodes/{}/draft_registrations/'.format(
+            API_BASE, project_public._id)
 
-        self.url = '/{}nodes/{}/draft_registrations/'.format(API_BASE, self.public_project._id)
-
-    def test_admin_can_view_draft_list(self):
-        res = self.app.get(self.url, auth=self.user.auth)
-        assert_equal(res.status_code, 200)
+    def test_admin_can_view_draft_list(
+            self, app, user, draft_registration,
+            schema, url_draft_registrations):
+        res = app.get(url_draft_registrations, auth=user.auth)
+        assert res.status_code == 200
         data = res.json['data']
-        assert_equal(len(data), 1)
-        assert_equal(data[0]['attributes']['registration_supplement'], self.schema._id)
-        assert_equal(data[0]['id'], self.draft_registration._id)
-        assert_equal(data[0]['attributes']['registration_metadata'], {})
+        assert len(data) == 1
 
-    def test_read_only_contributor_cannot_view_draft_list(self):
-        res = self.app.get(self.url, auth=self.read_only_user.auth, expect_errors=True)
-        assert_equal(res.status_code, 403)
+        assert schema._id in data[0]['relationships']['registration_schema']['links']['related']['href']
+        assert data[0]['id'] == draft_registration._id
+        assert data[0]['attributes']['registration_metadata'] == {}
 
-    def test_read_write_contributor_cannot_view_draft_list(self):
-        res = self.app.get(self.url, auth=self.read_write_user.auth, expect_errors=True)
-        assert_equal(res.status_code, 403)
+    def test_cannot_view_draft_list(
+            self, app, user_write_contrib,
+            user_read_contrib, user_non_contrib,
+            url_draft_registrations):
 
-    def test_logged_in_non_contributor_cannot_view_draft_list(self):
-        res = self.app.get(self.url, auth=self.non_contributor.auth, expect_errors=True)
-        assert_equal(res.status_code, 403)
+        #   test_read_only_contributor_cannot_view_draft_list
+        res = app.get(
+            url_draft_registrations,
+            auth=user_read_contrib.auth,
+            expect_errors=True)
+        assert res.status_code == 403
 
-    def test_unauthenticated_user_cannot_view_draft_list(self):
-        res = self.app.get(self.url, expect_errors=True)
-        assert_equal(res.status_code, 401)
+    #   test_read_write_contributor_cannot_view_draft_list
+        res = app.get(
+            url_draft_registrations,
+            auth=user_write_contrib.auth,
+            expect_errors=True)
+        assert res.status_code == 403
 
-    def test_draft_with_registered_node_does_not_show_up_in_draft_list(self):
-        reg = RegistrationFactory(project = self.public_project)
-        self.draft_registration.registered_node = reg
-        self.draft_registration.save()
-        res = self.app.get(self.url, auth=self.user.auth)
-        assert_equal(res.status_code, 200)
+    #   test_logged_in_non_contributor_cannot_view_draft_list
+        res = app.get(
+            url_draft_registrations,
+            auth=user_non_contrib.auth,
+            expect_errors=True)
+        assert res.status_code == 403
+
+    #   test_unauthenticated_user_cannot_view_draft_list
+        res = app.get(url_draft_registrations, expect_errors=True)
+        assert res.status_code == 401
+
+    def test_deleted_draft_registration_does_not_show_up_in_draft_list(
+            self, app, user, draft_registration, url_draft_registrations):
+        draft_registration.deleted = timezone.now()
+        draft_registration.save()
+        res = app.get(url_draft_registrations, auth=user.auth)
+        assert res.status_code == 200
         data = res.json['data']
-        assert_equal(len(data), 0)
+        assert len(data) == 0
 
-    def test_draft_with_deleted_registered_node_shows_up_in_draft_list(self):
-        reg = RegistrationFactory(project=self.public_project)
-        self.draft_registration.registered_node = reg
-        self.draft_registration.save()
+    def test_draft_with_registered_node_does_not_show_up_in_draft_list(
+            self, app, user, project_public, draft_registration, url_draft_registrations):
+        reg = RegistrationFactory(project=project_public)
+        draft_registration.registered_node = reg
+        draft_registration.save()
+        res = app.get(url_draft_registrations, auth=user.auth)
+        assert res.status_code == 200
+        data = res.json['data']
+        assert len(data) == 0
+
+    def test_draft_with_deleted_registered_node_shows_up_in_draft_list(
+            self, app, user, project_public,
+            draft_registration, schema,
+            url_draft_registrations):
+        reg = RegistrationFactory(project=project_public)
+        draft_registration.registered_node = reg
+        draft_registration.save()
         reg.is_deleted = True
         reg.save()
-        res = self.app.get(self.url, auth=self.user.auth)
-        assert_equal(res.status_code, 200)
+        res = app.get(url_draft_registrations, auth=user.auth)
+        assert res.status_code == 200
         data = res.json['data']
-        assert_equal(len(data), 1)
-        assert_equal(data[0]['attributes']['registration_supplement'], self.schema._id)
-        assert_equal(data[0]['id'], self.draft_registration._id)
-        assert_equal(data[0]['attributes']['registration_metadata'], {})
+        assert len(data) == 1
+        assert schema._id in data[0]['relationships']['registration_schema']['links']['related']['href']
+        assert data[0]['id'] == draft_registration._id
+        assert data[0]['attributes']['registration_metadata'] == {}
 
 
+@pytest.mark.django_db
+@pytest.mark.enable_quickfiles_creation
 class TestDraftRegistrationCreate(DraftRegistrationTestCase):
-    def setUp(self):
-        super(TestDraftRegistrationCreate, self).setUp()
-        self.url = '/{}nodes/{}/draft_registrations/'.format(API_BASE, self.public_project._id)
-        ensure_schemas()
-        self.open_ended_metaschema = MetaSchema.find_one(
-            Q('name', 'eq', 'Open-Ended Registration') &
-            Q('schema_version', 'eq', LATEST_SCHEMA_VERSION)
-        )
 
-        self.payload = {
-            "data": {
-                "type": "draft_registrations",
-                "attributes": {
-                    "registration_supplement": self.open_ended_metaschema._id
+    @pytest.fixture()
+    def provider(self):
+        return RegistrationProviderFactory(_id='osf')
+
+    @pytest.fixture()
+    def metaschema_open_ended(self):
+        return RegistrationSchema.objects.get(
+            name='Open-Ended Registration',
+            schema_version=LATEST_SCHEMA_VERSION)
+
+    @pytest.fixture()
+    def payload(self, metaschema_open_ended, provider):
+        return {
+            'data': {
+                'type': 'draft_registrations',
+                'attributes': {},
+                'relationships': {
+                    'registration_schema': {
+                        'data': {
+                            'type': 'registration_schema',
+                            'id': metaschema_open_ended._id
+                        }
+                    },
+                    'provider': {
+                        'data': {
+                            'type': 'registration-providers',
+                            'id': provider._id,
+                        }
+                    }
                 }
             }
         }
 
-    def test_type_is_draft_registrations(self):
+    @pytest.fixture()
+    def url_draft_registrations(self, project_public):
+        return '/{}nodes/{}/draft_registrations/'.format(
+            API_BASE, project_public._id)
+
+    def test_type_is_draft_registrations(
+            self, app, user, metaschema_open_ended,
+            url_draft_registrations):
         draft_data = {
-            "data": {
-                "type": "nodes",
-                "attributes": {
-                    "registration_supplement": self.open_ended_metaschema._id
+            'data': {
+                'type': 'nodes',
+                'attributes': {},
+                'relationships': {
+                    'registration_schema': {
+                        'data': {
+                            'type': 'registration_schema',
+                            'id': metaschema_open_ended._id
+                        }
+
+                    }
                 }
             }
         }
-        res = self.app.post_json_api(self.url, draft_data, auth=self.user.auth, expect_errors=True)
-        assert_equal(res.status_code, 409)
+        res = app.post_json_api(
+            url_draft_registrations,
+            draft_data, auth=user.auth,
+            expect_errors=True)
+        assert res.status_code == 409
 
-    def test_admin_can_create_draft(self):
-        url = '/{}nodes/{}/draft_registrations/?embed=branched_from&embed=initiator'.format(API_BASE, self.public_project._id)
-        res = self.app.post_json_api(url, self.payload, auth=self.user.auth)
-        assert_equal(res.status_code, 201)
+    def test_admin_can_create_draft(
+            self, app, user, project_public,
+            payload, metaschema_open_ended):
+        url = '/{}nodes/{}/draft_registrations/?embed=branched_from&embed=initiator'.format(
+            API_BASE, project_public._id)
+        res = app.post_json_api(url, payload, auth=user.auth)
+        assert res.status_code == 201
         data = res.json['data']
-        assert_equal(data['attributes']['registration_supplement'], self.open_ended_metaschema._id)
-        assert_equal(data['attributes']['registration_metadata'], {})
-        assert_equal(data['embeds']['branched_from']['data']['id'], self.public_project._id)
-        assert_equal(data['embeds']['initiator']['data']['id'], self.user._id)
+        assert metaschema_open_ended._id in data['relationships']['registration_schema']['links']['related']['href']
+        assert data['attributes']['registration_metadata'] == {}
+        assert data['embeds']['branched_from']['data']['id'] == project_public._id
+        assert data['embeds']['initiator']['data']['id'] == user._id
 
-    def test_write_only_contributor_cannot_create_draft(self):
-        assert_in(self.read_write_user._id, self.public_project.contributors)
-        res = self.app.post_json_api(self.url, self.payload, auth=self.read_write_user.auth, expect_errors=True)
-        assert_equal(res.status_code, 403)
+    def test_cannot_create_draft(
+            self, app, user_write_contrib,
+            user_read_contrib, user_non_contrib,
+            project_public, payload,
+            url_draft_registrations):
 
-    def test_read_only_contributor_cannot_create_draft(self):
-        assert_in(self.read_only_user._id, self.public_project.contributors)
-        res = self.app.post_json_api(self.url, self.payload, auth=self.read_only_user.auth, expect_errors=True)
-        assert_equal(res.status_code, 403)
+        #   test_write_only_contributor_cannot_create_draft
+        assert user_write_contrib in project_public.contributors.all()
+        res = app.post_json_api(
+            url_draft_registrations,
+            payload,
+            auth=user_write_contrib.auth,
+            expect_errors=True)
+        assert res.status_code == 403
 
-    def test_non_authenticated_user_cannot_create_draft(self):
-        res = self.app.post_json_api(self.url, self.payload, expect_errors=True)
-        assert_equal(res.status_code, 401)
+    #   test_read_only_contributor_cannot_create_draft
+        assert user_read_contrib in project_public.contributors.all()
+        res = app.post_json_api(
+            url_draft_registrations,
+            payload,
+            auth=user_read_contrib.auth,
+            expect_errors=True)
+        assert res.status_code == 403
 
-    def test_logged_in_non_contributor_cannot_create_draft(self):
-        res = self.app.post_json_api(self.url, self.payload, auth=self.non_contributor.auth, expect_errors=True)
-        assert_equal(res.status_code, 403)
+    #   test_non_authenticated_user_cannot_create_draft
+        res = app.post_json_api(
+            url_draft_registrations,
+            payload, expect_errors=True)
+        assert res.status_code == 401
 
-    def test_registration_supplement_not_found(self):
+    #   test_logged_in_non_contributor_cannot_create_draft
+        res = app.post_json_api(
+            url_draft_registrations,
+            payload,
+            auth=user_non_contrib.auth,
+            expect_errors=True)
+        assert res.status_code == 403
+
+    def test_registration_supplement_errors(
+            self, app, user, provider, url_draft_registrations):
+
+        #   test_registration_supplement_not_found
         draft_data = {
-            "data": {
-                "type": "draft_registrations",
-                "attributes": {
-                    "registration_supplement": "Invalid schema"
+            'data': {
+                'type': 'draft_registrations',
+                'attributes': {},
+                'relationships': {
+                    'registration_schema': {
+                        'data': {
+                            'type': 'registration_schema',
+                            'id': 'Invalid schema'
+                        }
+                    },
+                    'provider': {
+                        'data': {
+                            'type': 'registration-providers',
+                            'id': provider._id,
+                        }
+                    }
                 }
             }
         }
-        res = self.app.post_json_api(self.url, draft_data, auth=self.user.auth, expect_errors=True)
-        assert_equal(res.status_code, 404)
+        res = app.post_json_api(
+            url_draft_registrations,
+            draft_data, auth=user.auth,
+            expect_errors=True)
+        assert res.status_code == 404
 
-    def test_registration_supplement_must_be_active_metaschema(self):
-        schema =  MetaSchema.find_one(
-            Q('name', 'eq', 'Open-Ended Registration') &
-            Q('schema_version', 'eq', 1)
-        )
+    #   test_registration_supplement_must_be_active_metaschema
+        schema = RegistrationSchema.objects.get(
+            name='Election Research Preacceptance Competition', active=False)
         draft_data = {
-            "data": {
-                "type": "draft_registrations",
-                "attributes": {
-                    "registration_supplement": schema._id
+            'data': {
+                'type': 'draft_registrations',
+                'attributes': {},
+                'relationships': {
+                    'registration_schema': {
+                        'data': {
+                            'type': 'registration_schema',
+                            'id': schema._id
+                        }
+                    },
+                    'provider': {
+                        'data': {
+                            'type': 'registration-providers',
+                            'id': provider._id,
+                        }
+                    }
                 }
             }
         }
-        res = self.app.post_json_api(self.url, draft_data, auth=self.user.auth, expect_errors=True)
-        assert_equal(res.status_code, 400)
-        assert_equal(res.json['errors'][0]['detail'], 'Registration supplement must be an active schema.')
+        res = app.post_json_api(
+            url_draft_registrations,
+            draft_data, auth=user.auth,
+            expect_errors=True)
+        assert res.status_code == 400
+        assert res.json['errors'][0]['detail'] == 'Registration supplement must be an active schema.'
 
-    def test_cannot_create_draft_from_a_registration(self):
-        registration = RegistrationFactory(project=self.public_project, creator=self.user)
-        url = '/{}nodes/{}/draft_registrations/'.format(API_BASE, registration._id)
-        res = self.app.post_json_api(url, self.payload, auth=self.user.auth, expect_errors=True)
-        assert_equal(res.status_code, 404)
+    def test_cannot_create_draft_errors(
+            self, app, user, project_public, payload):
 
-    def test_registration_supplement_must_be_supplied(self):
-        draft_data = {
-            "data": {
-                "type": "draft_registrations",
-                "attributes": {
-                }
-            }
-        }
-        res = self.app.post_json_api(self.url, draft_data, auth=self.user.auth, expect_errors=True)
-        errors = res.json['errors'][0]
-        assert_equal(res.status_code, 400)
-        assert_equal(errors['detail'], 'This field is required.')
-        assert_equal(errors['source']['pointer'], '/data/attributes/registration_supplement')
+        #   test_cannot_create_draft_from_a_registration
+        registration = RegistrationFactory(
+            project=project_public, creator=user)
+        url = '/{}nodes/{}/draft_registrations/'.format(
+            API_BASE, registration._id)
+        res = app.post_json_api(
+            url, payload, auth=user.auth,
+            expect_errors=True)
+        assert res.status_code == 404
 
-    def test_cannot_create_draft_from_deleted_node(self):
-        self.public_project.is_deleted = True
-        self.public_project.save()
-        res = self.app.post_json_api(self.url, self.payload, auth=self.user.auth, expect_errors=True)
-        assert_equal(res.status_code, 410)
-        assert_equal(res.json['errors'][0]['detail'], 'The requested node is no longer available.')
+    #   test_cannot_create_draft_from_deleted_node
+        project = ProjectFactory(is_public=True, creator=user)
+        project.is_deleted = True
+        project.save()
+        url_project = '/{}nodes/{}/draft_registrations/'.format(
+            API_BASE, project._id)
+        res = app.post_json_api(
+            url_project, payload,
+            auth=user.auth, expect_errors=True)
+        assert res.status_code == 410
+        assert res.json['errors'][0]['detail'] == 'The requested node is no longer available.'
 
-    def test_cannot_create_draft_from_collection(self):
-        collection = CollectionFactory(creator=self.user)
-        url = '/{}nodes/{}/draft_registrations/'.format(API_BASE, collection._id)
-        res = self.app.post_json_api(url, self.payload, auth=self.user.auth, expect_errors=True)
-        assert_equal(res.status_code, 404)
+    #   test_cannot_create_draft_from_collection
+        collection = CollectionFactory(creator=user)
+        url = '/{}nodes/{}/draft_registrations/'.format(
+            API_BASE, collection._id)
+        res = app.post_json_api(
+            url, payload, auth=user.auth,
+            expect_errors=True)
+        assert res.status_code == 404
 
-    def test_required_metaschema_questions_not_required_on_post(self):
-        prereg_schema = MetaSchema.find_one(
-            Q('name', 'eq', 'Prereg Challenge') &
-            Q('schema_version', 'eq', LATEST_SCHEMA_VERSION)
-        )
+    def test_required_metaschema_questions_not_required_on_post(
+            self, app, user, provider, project_public, prereg_metadata):
+        prereg_schema = RegistrationSchema.objects.get(
+            name='Prereg Challenge',
+            schema_version=LATEST_SCHEMA_VERSION)
 
         prereg_draft_registration = DraftRegistrationFactory(
-            initiator=self.user,
-            registration_schema=prereg_schema._id,
-            branched_from=self.public_project
+            initiator=user,
+            registration_schema=prereg_schema,
+            branched_from=project_public
         )
 
-        url = '/{}nodes/{}/draft_registrations/?embed=initiator&embed=branched_from'.format(API_BASE, self.public_project._id)
+        url = '/{}nodes/{}/draft_registrations/?embed=initiator&embed=branched_from'.format(
+            API_BASE, project_public._id)
 
-        registration_metadata = self.prereg_metadata(prereg_draft_registration)
+        registration_metadata = prereg_metadata(prereg_draft_registration)
         del registration_metadata['q1']
         prereg_draft_registration.registration_metadata = registration_metadata
         prereg_draft_registration.save()
 
         payload = {
-            "data": {
-                "type": "draft_registrations",
-                "attributes": {
-                    "registration_supplement": prereg_schema._id,
-                    "registration_metadata": registration_metadata
+            'data': {
+                'type': 'draft_registrations',
+                'attributes': {
+                    'registration_metadata': registration_metadata
+                },
+                'relationships': {
+                    'registration_schema': {
+                        'data': {
+                            'type': 'registration_schema',
+                            'id': prereg_schema._id
+                        }
+                    },
+                    'provider': {
+                        'data': {
+                            'type': 'registration-providers',
+                            'id': provider._id,
+                        }
+                    }
                 }
             }
         }
-        res = self.app.post_json_api(url, payload, auth=self.user.auth, expect_errors=True)
-        assert_equal(res.status_code, 201)
+        res = app.post_json_api(
+            url, payload, auth=user.auth,
+            expect_errors=True)
+        assert res.status_code == 201
         data = res.json['data']
-        assert_equal(res.json['data']['attributes']['registration_metadata']['q2']['value'], 'Test response')
-        assert_equal(data['attributes']['registration_supplement'], prereg_schema._id)
-        assert_equal(data['embeds']['branched_from']['data']['id'], self.public_project._id)
-        assert_equal(data['embeds']['initiator']['data']['id'], self.user._id)
+        assert res.json['data']['attributes']['registration_metadata']['q2']['value'] == 'Test response'
+        assert prereg_schema._id in data['relationships']['registration_schema']['links']['related']['href']
+        assert data['embeds']['branched_from']['data']['id'] == project_public._id
+        assert data['embeds']['initiator']['data']['id'] == user._id
 
-    def test_registration_metadata_must_be_a_dictionary(self):
-        self.payload['data']['attributes']['registration_metadata'] = 'Registration data'
-
-        res = self.app.post_json_api(self.url, self.payload, auth=self.user.auth, expect_errors=True)
+    def test_registration_supplement_must_be_supplied(
+            self, app, user, url_draft_registrations):
+        draft_data = {
+            'data': {
+                'type': 'draft_registrations',
+                'attributes': {
+                }
+            }
+        }
+        res = app.post_json_api(
+            url_draft_registrations,
+            draft_data, auth=user.auth,
+            expect_errors=True)
         errors = res.json['errors'][0]
-        assert_equal(res.status_code, 400)
-        assert_equal(errors['source']['pointer'], '/data/attributes/registration_metadata')
-        assert_equal(errors['detail'], 'Expected a dictionary of items but got type "unicode".')
+        assert res.status_code == 400
+        assert errors['detail'] == 'This field is required.'
+        assert errors['source']['pointer'] == '/data/relationships/registration_schema'
 
-    def test_registration_metadata_question_values_must_be_dictionaries(self):
-        ensure_schemas()
-        self.schema = MetaSchema.find_one(
-            Q('name', 'eq', 'OSF-Standard Pre-Data Collection Registration') &
-            Q('schema_version', 'eq', LATEST_SCHEMA_VERSION)
-        )
-        self.payload['data']['attributes']['registration_supplement'] = self.schema._id
-        self.payload['data']['attributes']['registration_metadata'] = {}
-        self.payload['data']['attributes']['registration_metadata']['datacompletion'] = 'No, data collection has not begun'
+    def test_registration_metadata_must_be_a_dictionary(
+            self, app, user, payload, url_draft_registrations):
+        payload['data']['attributes']['registration_metadata'] = 'Registration data'
 
-        res = self.app.post_json_api(self.url, self.payload, auth=self.user.auth, expect_errors=True)
+        res = app.post_json_api(
+            url_draft_registrations,
+            payload, auth=user.auth,
+            expect_errors=True)
         errors = res.json['errors'][0]
-        assert_equal(res.status_code, 400)
-        assert_equal(errors['detail'], "u'No, data collection has not begun' is not of type 'object'")
+        assert res.status_code == 400
+        assert errors['source']['pointer'] == '/data/attributes/registration_metadata'
+        assert errors['detail'] == 'Expected a dictionary of items but got type "unicode".'
 
-    def test_registration_metadata_question_keys_must_be_value(self):
-        ensure_schemas()
-        self.schema = MetaSchema.find_one(
-            Q('name', 'eq', 'OSF-Standard Pre-Data Collection Registration') &
-            Q('schema_version', 'eq', LATEST_SCHEMA_VERSION)
-        )
-        self.payload['data']['attributes']['registration_supplement'] = self.schema._id
-        self.payload['data']['attributes']['registration_metadata'] = {}
-        self.payload['data']['attributes']['registration_metadata']['datacompletion'] = {
-            "incorrect_key": "No, data collection has not begun"
+    def test_registration_metadata_question_values_must_be_dictionaries(
+            self, app, user, payload, url_draft_registrations):
+        schema = RegistrationSchema.objects.get(
+            name='OSF-Standard Pre-Data Collection Registration',
+            schema_version=LATEST_SCHEMA_VERSION)
+        payload['data']['relationships']['registration_schema']['data']['id'] = schema._id
+        payload['data']['attributes']['registration_metadata'] = {}
+        payload['data']['attributes']['registration_metadata']['datacompletion'] = 'No, data collection has not begun'
+
+        res = app.post_json_api(
+            url_draft_registrations,
+            payload, auth=user.auth,
+            expect_errors=True)
+        errors = res.json['errors'][0]
+        assert res.status_code == 400
+        assert errors['detail'] == 'For your registration your response to the \'Has data collection begun for this project?\' field' \
+                                   ' is invalid, your response must be one of the provided options.'
+
+    def test_registration_metadata_question_keys_must_be_value(
+            self, app, user, payload, url_draft_registrations):
+        schema = RegistrationSchema.objects.get(
+            name='OSF-Standard Pre-Data Collection Registration',
+            schema_version=LATEST_SCHEMA_VERSION)
+
+        payload['data']['relationships']['registration_schema']['data']['id'] = schema._id
+        payload['data']['attributes']['registration_metadata'] = {}
+        payload['data']['attributes']['registration_metadata']['datacompletion'] = {
+            'incorrect_key': 'No, data collection has not begun'}
+
+        res = app.post_json_api(
+            url_draft_registrations,
+            payload, auth=user.auth,
+            expect_errors=True)
+        errors = res.json['errors'][0]
+        assert res.status_code == 400
+        assert errors['detail'] == 'For your registration your response to the \'Has data collection begun for this project?\' ' \
+                                   'field is invalid, your response must be one of the provided options.'
+
+    def test_question_in_registration_metadata_must_be_in_schema(
+            self, app, user, payload, url_draft_registrations):
+        schema = RegistrationSchema.objects.get(
+            name='OSF-Standard Pre-Data Collection Registration',
+            schema_version=LATEST_SCHEMA_VERSION)
+
+        payload['data']['relationships']['registration_schema']['data']['id'] = schema._id
+        payload['data']['attributes']['registration_metadata'] = {}
+        payload['data']['attributes']['registration_metadata']['q11'] = {
+            'value': 'No, data collection has not begun'
         }
 
-        res = self.app.post_json_api(self.url, self.payload, auth=self.user.auth, expect_errors=True)
+        res = app.post_json_api(
+            url_draft_registrations,
+            payload, auth=user.auth,
+            expect_errors=True)
         errors = res.json['errors'][0]
-        assert_equal(res.status_code, 400)
-        assert_equal(errors['detail'], "Additional properties are not allowed (u'incorrect_key' was unexpected)")
+        assert res.status_code == 400
+        assert errors['detail'] == 'For your registration the \'datacompletion\' field is extraneous and not' \
+                                   ' permitted in your response.'
 
-    def test_question_in_registration_metadata_must_be_in_schema(self):
-        ensure_schemas()
-        self.schema = MetaSchema.find_one(
-            Q('name', 'eq', 'OSF-Standard Pre-Data Collection Registration') &
-            Q('schema_version', 'eq', LATEST_SCHEMA_VERSION)
-        )
-        self.payload['data']['attributes']['registration_supplement'] = self.schema._id
-        self.payload['data']['attributes']['registration_metadata'] = {}
-        self.payload['data']['attributes']['registration_metadata']['q11'] = {
-            "value": "No, data collection has not begun"
-        }
+    def test_multiple_choice_question_value_must_match_value_in_schema(
+            self, app, user, payload, url_draft_registrations):
+        schema = RegistrationSchema.objects.get(
+            name='OSF-Standard Pre-Data Collection Registration',
+            schema_version=LATEST_SCHEMA_VERSION)
 
-        res = self.app.post_json_api(self.url, self.payload, auth=self.user.auth, expect_errors=True)
+        payload['data']['relationships']['registration_schema']['data']['id'] = schema._id
+        payload['data']['attributes']['registration_metadata'] = {}
+        payload['data']['attributes']['registration_metadata']['datacompletion'] = {
+            'value': 'Nope, data collection has not begun'}
+
+        res = app.post_json_api(
+            url_draft_registrations,
+            payload, auth=user.auth,
+            expect_errors=True)
         errors = res.json['errors'][0]
-        assert_equal(res.status_code, 400)
-        assert_equal(errors['detail'], "Additional properties are not allowed (u'q11' was unexpected)")
+        assert res.status_code == 400
+        assert errors['detail'] == 'For your registration your response to the \'Has data collection begun for this project?\'' \
+                                   ' field is invalid, your response must be one of the provided options.'
 
-    def test_multiple_choice_question_value_must_match_value_in_schema(self):
-        ensure_schemas()
-        self.schema = MetaSchema.find_one(
-            Q('name', 'eq', 'OSF-Standard Pre-Data Collection Registration') &
-            Q('schema_version', 'eq', LATEST_SCHEMA_VERSION)
-        )
-
-        self.payload['data']['attributes']['registration_supplement'] = self.schema._id
-        self.payload['data']['attributes']['registration_metadata'] = {}
-        self.payload['data']['attributes']['registration_metadata']['datacompletion'] = {
-            "value": "Nope, data collection has not begun"
-        }
-
-        res = self.app.post_json_api(self.url, self.payload, auth=self.user.auth, expect_errors=True)
-        errors = res.json['errors'][0]
-        assert_equal(res.status_code, 400)
-        assert_equal(errors['detail'], "u'Nope, data collection has not begun' is not one of [u'No, data collection has not begun', u'Yes, data collection is underway or complete']")
-
-    def test_reviewer_cannot_create_draft_registration(self):
+    def test_reviewer_cannot_create_draft_registration(
+            self, app, user_read_contrib, project_public,
+            payload, url_draft_registrations):
         user = AuthUserFactory()
-        user.system_tags.append(PREREG_ADMIN_TAG)
+        administer_permission = Permission.objects.get(
+            codename='administer_prereg')
+        user.user_permissions.add(administer_permission)
         user.save()
 
-        assert_in(self.read_only_user._id, self.public_project.contributors)
-        res = self.app.post_json_api(self.url, self.payload, auth=user.auth, expect_errors=True)
-        assert_equal(res.status_code, 403)
+        assert user_read_contrib in project_public.contributors.all()
+        res = app.post_json_api(
+            url_draft_registrations,
+            payload, auth=user.auth,
+            expect_errors=True)
+        assert res.status_code == 403

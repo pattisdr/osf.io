@@ -8,11 +8,13 @@ var bootbox = require('bootbox');
 var Raven = require('raven-js');
 var ko = require('knockout');
 
+
 var $osf = require('js/osfHelpers');
 
 var ctx = window.contextVars;
 var NodeActions = {}; // Namespace for NodeActions
 require('loaders.css/loaders.min.css');
+require('css/add-project-plugin.css');
 
 
 // TODO: move me to the NodeControl or separate module
@@ -39,29 +41,50 @@ NodeActions.beforeForkNode = function(url, done) {
     );
 };
 
+function afterForkGoto(url) {
+  bootbox.confirm({
+      message: '<h4 class="add-project-success text-success">Fork created successfully!</h4>',
+      callback: function(result) {
+          if(result) {
+              window.location = url;
+          }
+      },
+      buttons: {
+          confirm: {
+              label: 'Go to new fork',
+              className: 'btn-success'
+          },
+          cancel: {
+              label: 'Keep working here'
+          }
+      },
+      closeButton: false
+  });
+}
+
 NodeActions.forkNode = function() {
     NodeActions.beforeForkNode(ctx.node.urls.api + 'fork/before/', function() {
         // Block page
-        $osf.block();
-        // Fork node
-        $osf.postJSON(
-            ctx.node.urls.api + 'fork/',
-            {}
-        ).done(function(response) {
-            window.location = response;
-        }).fail(function(response) {
-            $osf.unblock();
-            if (response.status === 403) {
-                $osf.growl('Sorry:', 'you do not have permission to fork this project');
-            } else {
-                $osf.growl('Error:', 'Forking failed');
-                Raven.captureMessage('Error occurred during forking');
+        var payload = {
+            data: {
+                type: 'nodes'
             }
-        });
+        };
+        // Fork node
+        var nodeType = ctx.node.isRegistration ? 'registrations' : 'nodes';
+        $osf.ajaxJSON(
+            'POST',
+            $osf.apiV2Url(nodeType + '/' + ctx.node.id + '/forks/'),
+            {
+                isCors: true,
+                data: payload
+            }
+        );
+        $osf.growl('Fork status', 'Your fork is being created. You\'ll receive an email when it is complete.', 'info');
     });
 };
 
-NodeActions.forkPointer = function(pointerId) {
+NodeActions.forkPointer = function(nodeId) {
     bootbox.confirm({
         title: 'Fork this project?',
         message: 'Are you sure you want to fork this project?',
@@ -73,9 +96,10 @@ NodeActions.forkPointer = function(pointerId) {
                 // Fork pointer
                 $osf.postJSON(
                     ctx.node.urls.api + 'pointer/fork/',
-                    {pointerId: pointerId}
-                ).done(function() {
-                    window.location.reload();
+                    {nodeId: nodeId}
+                ).done(function(response) {
+                    $osf.unblock();
+                    afterForkGoto(response.data.node.url);
                 }).fail(function() {
                     $osf.unblock();
                     $osf.growl('Error','Could not fork link.');
@@ -94,13 +118,14 @@ NodeActions.beforeTemplate = function(url, done) {
     $.ajax({
         url: url,
         contentType: 'application/json'
-    }).success(function(response) {
+    }).done(function(response) {
+        var language = '<h4>Are you sure you want to create a new project using this project as a template?</h4>' +
+                '<p>Any add-ons configured for this project will not be authenticated in the new project.</p>';
+        if(response.isRegistration){
+            language = '<h4>Are you sure you want to create a new project using this registration as a template?</h4>';
+        }
         bootbox.confirm({
-            message: $osf.joinPrompts(response.prompts,
-                ('<h4>Are you sure you want to create a new project using this project as a template?</h4>' +
-                '<p>Any add-ons configured for this project will not be authenticated in the new project.</p>')),
-                //('Are you sure you want to create a new project using this project as a template? ' +
-                //  'Any add-ons configured for this project will not be authenticated in the new project.')),
+            message: $osf.joinPrompts(response.prompts, (language)),
             callback: function (result) {
                 if (result) {
                     done && done();
@@ -113,6 +138,11 @@ NodeActions.beforeTemplate = function(url, done) {
             }
         });
     });
+};
+
+NodeActions.redirectForkPage = function(){
+    window.location.href = '/' + ctx.node.id + '/forks/';
+    return true;
 };
 
 NodeActions.addonFileRedirect = function(item) {
@@ -135,26 +165,6 @@ NodeActions.useAsTemplate = function() {
         });
     });
 };
-
-/*
-Hide/show recent logs for for a node on the project view page.
-*/
-NodeActions.openCloseNode = function(nodeId) {
-
-    var icon = $('#icon-' + nodeId);
-    var body = $('#body-' + nodeId);
-
-    body.toggleClass('hide');
-
-    if (body.hasClass('hide')) {
-        icon.removeClass('fa fa-angle-up');
-        icon.addClass('fa fa-angle-down');
-    } else {
-        icon.removeClass('fa fa-angle-down');
-        icon.addClass('fa fa-angle-up');
-    }
-};
-
 
 NodeActions.reorderChildren = function(idList, elm) {
     $osf.postJSON(
@@ -250,9 +260,10 @@ $(document).ready(function() {
     });
 
     $('body').on('click', '.tagsinput .tag > span', function(e) {
+      if(e){
         window.location = '/search/?q=(tags:"' + $(e.target).text().toString().trim()+ '")';
+      }
     });
-
 
     // Portlet feature for the dashboard, to be implemented in later versions.
     // $( ".osf-dash-col" ).sortable({
@@ -276,8 +287,10 @@ $(document).ready(function() {
 
         // Remove Comments link from project nav bar for pages not bound to the comment view model
         var commentsLinkElm = document.getElementById('commentsLink');
-        if (!ko.dataFor(commentsLinkElm)) {
-             commentsLinkElm.remove();
+        if (commentsLinkElm) {
+            if(!ko.dataFor(commentsLinkElm)) {
+                commentsLinkElm.parentNode.removeChild(commentsLinkElm);
+            }
         }
     });
 });

@@ -1,5 +1,9 @@
 <%inherit file="base.mako"/>
 <%def name="title()">Settings</%def>
+<%def name="resource()"><%
+    return 'user'
+%>
+</%def>
 <%def name="content()">
 <% from website import settings %>
 <h2 class="page-header">Settings
@@ -57,16 +61,6 @@
     </div>
 
 </div>
-
-## TODO: Review and un-comment
-##<div mod-meta='{
-##        "tpl": "util/render_keys.mako",
-##        "uri": "/api/v1/settings/keys/",
-##        "replace": true,
-##        "kwargs" : {
-##            "route": "/settings/"}
-##        }'></div>
-
 <%include file="include/profile/names.mako" />
 <%include file="include/profile/social.mako" />
 <%include file="include/profile/jobs.mako" />

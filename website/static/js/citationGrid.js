@@ -6,11 +6,10 @@ var Raven = require('raven-js');
 var Treebeard = require('treebeard');
 var citations = require('js/citations');
 var clipboard = require('js/clipboard');
-var $osf = require('js/osfHelpers');
 
-var apaStyle = require('raw!styles/apa.csl');
+var apaStyle = require('raw-loader!styles/apa.csl');
 
-var errorPage = require('raw!citations_load_error.html');
+var errorPage = require('raw-loader!citations_load_error.html');
 
 require('css/fangorn.css');
 
@@ -118,7 +117,7 @@ var makeButtons = function(item, col, buttons) {
                         class: button.css,
                         'data-toggle': 'tooltip',
                         'data-placement': 'bottom',
-                        'data-clipboard-target': item.data.csl ? item.data.csl.id : button.clipboard,
+                        'data-clipboard-target': item.data.csl ? '[id*="' + item.data.csl.id + '"]' : button.clipboard,
                         config: mergeConfigs(button.config, tooltipConfig),
                         onclick: button.onclick ?
                             function(event) {
@@ -151,11 +150,11 @@ var buildExternalUrl = function(csl) {
 
 var makeClipboardConfig = function(getText) {
     return function(elm, isInit, ctx) {
-        var $elm = $(elm);
         if (!elm._client) {
             elm._client = clipboard(elm);
             // Attach `beforecopy` handler to ensure updated clipboard text
             if (getText) {
+                var $elm = $(elm);
                 elm._client.on('beforecopy', function() {
                     $elm.attr('data-clipboard-text', getText());
                 });
@@ -176,7 +175,6 @@ var renderActions = function(item, col) {
             icon: 'fa fa-file-o',
             css: 'btn btn-default btn-xs',
             tooltip: 'Copy citation',
-            clipboard: self.getCitation(item),
             config: makeClipboardConfig()
         });
         // Add link to external document
@@ -205,15 +203,6 @@ var renderActions = function(item, col) {
             });
         }
     } else if (item.kind === 'folder' && item.open && item.children.length) {
-        buttons.push({
-            name: '',
-            icon: 'fa fa-file-o',
-            css: 'btn btn-default btn-xs',
-            tooltip: 'Copy citations',
-            config: makeClipboardConfig(function() {
-                return self.getCitations(item).join('\n');
-            })
-        });
         buttons.push({
             name: '',
             icon: 'fa fa-arrow-circle-o-down',
@@ -298,7 +287,7 @@ CitationGrid.prototype.initTreebeard = function() {
         // TODO remove special case for Zotero
         if (self.provider === 'Zotero') {
             if (data.length >= 200) {
-        data.push({
+                data.push({
                     name: 'Only 200 citations may be displayed',
                     kind: 'message'
                 });
@@ -378,25 +367,25 @@ CitationGrid.prototype.makeBibliography = function(folder, format) {
     return {};
 };
 
-CitationGrid.prototype.getBibliography = function(folder, format) {
-    if (format) {
-        return this.makeBibliography(folder, format);
+CitationGrid.prototype.getBibliography = function(folder) {
+
+    if(!this.bibliographies[folder.id]){
+        this.bibliographies[folder.id] =  this.makeBibliography(folder);
     }
-    this.bibliographies[folder.id] = this.bibliographies[folder.id] || this.makeBibliography(folder);
     return this.bibliographies[folder.id];
 };
 
-CitationGrid.prototype.getCitation = function(item, format) {
-    var bibliography = this.getBibliography(item.parent(), format);
+CitationGrid.prototype.getCitation = function(item) {
+    var bibliography = this.getBibliography(item.parent());
     return bibliography[item.data.csl.id];
 };
 
-CitationGrid.prototype.getCitations = function(folder, format) {
+CitationGrid.prototype.getCitations = function(folder) {
     var self = this;
     return folder.children.filter(function(child) {
         return child.kind === 'file';
     }).map(function(child) {
-        return self.getCitation(child, format);
+        return self.getCitation(child);
     });
 };
 
@@ -413,9 +402,13 @@ CitationGrid.prototype.resolveRowAux = function(item) {
                 return item.data.name;
             }
             else {
-                return m('span', {id: item.data.csl.id}, [
-                    m.trust(self.getCitation(item))
-                        ]);
+                var citationContent;
+                try {
+                    citationContent = self.getCitation(item);
+                } catch(err) {
+                    citationContent = '<em>Could not render entry. Please check the contents of your citations for correctness.</em>';
+                }
+                return m('span', {id: item.data.csl.id}, [m.trust(citationContent)]);
             }
         }
     }, {

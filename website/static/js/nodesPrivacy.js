@@ -4,23 +4,24 @@
 'use strict';
 
 var $ = require('jquery');
-var $3 = window.$3;
 var ko = require('knockout');
 var Raven = require('raven-js');
 var $osf = require('./osfHelpers');
 var osfHelpers = require('js/osfHelpers');
 var m = require('mithril');
-var Treebeard = require('treebeard');
 var NodesPrivacyTreebeard = require('js/nodesPrivacySettingsTreebeard');
 
 var MESSAGES = {
     makeProjectPublicWarning:
     'Please review your projects, components, and add-ons for sensitive or restricted information before making them public.' +
     '<br><br>Once they are made public, you should assume they will always be public. You can ' +
-        'return them to private later, but search engines (including Google’s cache) or others may access files before you do.',
+        'return them to private later, but search engines (including Google’s cache) or others may access files, wiki pages, or analytics before you do.',
     makeProjectPrivateWarning:
     '<ul><li>Public forks and registrations of this project will remain public.</li>' +
-    '<li>Search engines (including Google\'s cache) or others may have accessed files while this project was public.</li></ul>',
+    '<li>Search engines (including Google\'s cache) or others may have accessed files, wiki pages, or analytics while this project was public.</li></ul>',
+    makeSupplementalProjectPrivateWarning:
+    '<ul><li>Preprints will remain public.</li><li>Public forks and registrations of this project will remain public.</li>' +
+    '<li>Search engines (including Google\'s cache) or others may have accessed files, wiki pages, or analytics while this project was public.</li></ul>',
     makeEmbargoPublicWarning: 'By clicking confirm, an email will be sent to project administrator(s) to approve ending the embargo. If approved, this registration, including any components, will be made public immediately. This action is irreversible.',
     makeEmbargoPublicTitle: 'End embargo early',
     selectNodes: 'Adjust your privacy settings by checking the boxes below. ' +
@@ -29,8 +30,11 @@ var MESSAGES = {
         nodesPublic: 'The following projects and components will be made <b>public</b>.',
         nodesPrivate: 'The following projects and components will be made <b>private</b>.',
         nodesNotChangedWarning: 'No privacy settings were changed. Go back to make a change.',
-        tooManyNodesWarning: 'You can only change the privacy of 100 projects and components at a time.  Please go back and limit your selection.'
-    }
+        tooManyNodesWarning: 'You can only change the privacy of 100 projects and components at a time.  Please go back and limit your selection.',
+    },
+    preprintPrivateWarning: 'This project/component contains supplemental materials for a preprint.'  +
+        '<p><strong>Making this project/component private will prevent others from accessing it.</strong></p>'
+
 };
 
 function _flattenNodeTree(nodeTree) {
@@ -56,7 +60,8 @@ function getNodesOriginal(nodeTree, nodesOriginal) {
             id: nodeMeta.node.id,
             title: nodeMeta.node.title,
             isAdmin: nodeMeta.node.is_admin,
-            changed: false
+            changed: false,
+            isSupplementalProject: nodeMeta.node.is_supplemental_project,
         };
     });
     nodesOriginal[nodeTree.node.id].isRoot = true;
@@ -67,29 +72,26 @@ function getNodesOriginal(nodeTree, nodesOriginal) {
  * patches all the nodes in a changed state
  * uses API v2 bulk requests
  */
-function patchNodesPrivacy(nodes) {
-    var nodesV2Url = window.contextVars.apiV2Prefix + 'nodes/';
+function patchNodesPrivacy(nodes, type) {
+    var nodesV2Url = window.contextVars.apiV2Prefix + type + '/';
     var nodesPatch = $.map(nodes, function (node) {
         return {
-            'type': 'nodes',
+            'type': type,
             'id': node.id,
             'attributes': {
                 'public': node.public
             }
         };
     });
-    //s3 is a very recent version of jQuery that fixes a known bug when used in internet explorer
-    return $3.ajax({
-        url: nodesV2Url,
-        type: 'PATCH',
-        dataType: 'json',
-        contentType: 'application/vnd.api+json; ext=bulk',
-        crossOrigin: true,
-        xhrFields: {withCredentials: true},
-        processData: false,
-        data: JSON.stringify({
-            data: nodesPatch
-        })
+    return $osf.ajaxJSON('PATCH', nodesV2Url, {
+        data: {
+            data: nodesPatch,
+        },
+        isCors: true,
+        fields: {
+            processData: false,
+            contentType: 'application/vnd.api+json; ext=bulk',
+        }
     });
 }
 
@@ -109,6 +111,8 @@ var NodesPrivacyViewModel = function(node, onSetPrivacy) {
     self.parentIsEmbargoed = node.is_embargoed;
     self.parentIsPublic = node.is_public;
     self.parentNodeType = node.node_type;
+    self.isSupplementalProject = node.is_supplemental_project;
+    self.dataType = node.is_registration ? 'registrations' : 'nodes';
     self.treebeardUrl = window.contextVars.node.urls.api  + 'tree/';
     self.nodesOriginal = {};
     self.nodesChanged = ko.observable();
@@ -153,8 +157,12 @@ var NodesPrivacyViewModel = function(node, onSetPrivacy) {
     });
 
     self.message = ko.computed(function() {
-        if (self.page() === self.WARNING &&  self.parentIsEmbargoed) {
+        if (self.page() === self.WARNING && self.parentIsEmbargoed) {
             return MESSAGES.makeEmbargoPublicWarning;
+        }
+
+        if (self.page() === self.WARNING && self.isSupplementalProject && self.parentIsPublic) {
+              return MESSAGES.preprintPrivateWarning + MESSAGES.makeSupplementalProjectPrivateWarning;
         }
 
         return {
@@ -195,7 +203,9 @@ NodesPrivacyViewModel.prototype.fetchNodeTree = function() {
     }).fail(function(xhr, status, error) {
         $osf.growl('Error', 'Unable to retrieve project settings');
         Raven.captureMessage('Could not GET project settings.', {
-            url: self.treebeardUrl, status: status, error: error
+            extra: {
+                url: self.treebeardUrl, status: status, error: error
+            }
         });
     });
 };
@@ -232,20 +242,25 @@ NodesPrivacyViewModel.prototype.confirmChanges =  function() {
     //The API's bulk limit is 100 nodes.  We catch the exception in nodes_privacy.mako.
     if (nodesChanged.length <= 100) {
         $osf.block('Updating Privacy');
-        patchNodesPrivacy(nodesChanged).then(function () {
+        patchNodesPrivacy(nodesChanged, self.dataType).then(function () {
             self.onSetPrivacy(nodesChanged);
 
-            $osf.unblock();
             self.nodesChangedPublic([]);
             self.nodesChangedPrivate([]);
             self.page(self.WARNING);
             window.location.reload();
-        }).fail(function () {
+        }).fail(function (xhr) {
             $osf.unblock();
-            $osf.growl('Error', 'Unable to update project privacy');
+            var errorMessage = 'Unable to update project privacy';
+            if (xhr.responseJSON && xhr.responseJSON.errors) {
+                errorMessage = xhr.responseJSON.errors[0].detail;
+            }
+            $osf.growl('Problem changing privacy', errorMessage);
             Raven.captureMessage('Could not PATCH project settings.');
             self.clear();
-            window.location.reload();
+            $('#nodesPrivacy').modal('hide');
+        }).always(function() {
+            $osf.unblock();
         });
     }
 };
@@ -298,7 +313,7 @@ NodesPrivacyViewModel.prototype.makeEmbargoPublic = function() {
 	return null;
     }).filter(Boolean);
     $osf.block('Submitting request to end embargo early ...');
-    patchNodesPrivacy(nodesChanged).then(function (res) {
+    patchNodesPrivacy(nodesChanged, self.dataType).then(function (res) {
         $osf.unblock();
         $('.modal').modal('hide');
         self.onSetPrivacy(nodesChanged, true);

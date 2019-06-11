@@ -1,38 +1,39 @@
 import functools
 import httplib as http
-import datetime
 import itertools
 
+import waffle
+from operator import itemgetter
+
 from dateutil.parser import parse as parse_date
+from django.db.models import Q
+from django.utils import timezone
 from flask import request, redirect
+import pytz
 
-from modularodm import Q
-from modularodm.exceptions import ValidationValueError
-
-from framework.mongo import database
-from framework.mongo.utils import get_or_http_error, autoload
+from framework.database import get_or_http_error, autoload
 from framework.exceptions import HTTPError
 from framework.status import push_status_message
 
-from website.exceptions import NodeStateError
-from website.util.permissions import ADMIN
+from osf import features
+from osf.utils.sanitize import strip_html
+from osf.utils.permissions import ADMIN
+from osf.utils.functional import rapply
+from osf.models import NodeLog, RegistrationSchema, DraftRegistration, Sanction
+
 from website.project.decorators import (
     must_be_valid_project,
     must_have_permission,
-    http_error_if_disk_saving_mode
 )
 from website import language, settings
-from website.models import NodeLog
+from website.ember_osf_web.decorators import ember_flag_is_active
 from website.prereg import utils as prereg_utils
 from website.project import utils as project_utils
-from website.project.model import MetaSchema, DraftRegistration
-from website.project.metadata.schemas import ACTIVE_META_SCHEMAS
+from website.project.metadata.schemas import LATEST_SCHEMA_VERSION, METASCHEMA_ORDERING
 from website.project.metadata.utils import serialize_meta_schema, serialize_draft_registration
 from website.project.utils import serialize_node
-from website.util import rapply
-from website.util.sanitize import strip_html
 
-get_schema_or_fail = lambda query: get_or_http_error(MetaSchema, query)
+get_schema_or_fail = lambda query: get_or_http_error(RegistrationSchema, query)
 autoload_draft = functools.partial(autoload, DraftRegistration, 'draft_id', 'draft')
 
 def must_be_branched_from_node(func):
@@ -42,6 +43,8 @@ def must_be_branched_from_node(func):
     def wrapper(*args, **kwargs):
         node = kwargs['node']
         draft = kwargs['draft']
+        if draft.deleted:
+            raise HTTPError(http.GONE)
         if not draft.branched_from._id == node._id:
             raise HTTPError(
                 http.BAD_REQUEST,
@@ -65,8 +68,8 @@ def validate_embargo_end_date(end_date_string, node):
     :raises: HTTPError if end_date is less than the approval window or greater than the
     max embargo end date
     """
-    end_date = parse_date(end_date_string, ignoretz=True)
-    today = datetime.datetime.utcnow()
+    end_date = parse_date(end_date_string, ignoretz=True).replace(tzinfo=pytz.utc)
+    today = timezone.now()
     if (end_date - today) <= settings.DRAFT_REGISTRATION_APPROVAL_PERIOD:
         raise HTTPError(http.BAD_REQUEST, data={
             'message_short': 'Invalid embargo end date',
@@ -116,16 +119,38 @@ def submit_draft_for_review(auth, node, draft, *args, **kwargs):
     :rtype: dict
     :raises: HTTPError if embargo end date is invalid
     """
-    data = request.get_json()
+    if waffle.switch_is_active(features.OSF_PREREGISTRATION):
+        raise HTTPError(http.GONE, data={
+            'message_short': 'The Prereg Challenge has ended',
+            'message_long': 'The Prereg Challenge has ended. No new submissions are accepted at this time.'
+        })
+
+    json_data = request.get_json()
+    if 'data' not in json_data:
+        raise HTTPError(http.BAD_REQUEST, data=dict(message_long='Payload must include "data".'))
+    data = json_data['data']
+    if 'attributes' not in data:
+        raise HTTPError(http.BAD_REQUEST, data=dict(message_long='Payload must include "data/attributes".'))
+    attributes = data['attributes']
     meta = {}
-    registration_choice = data.get('registrationChoice', 'immediate')
+    registration_choice = attributes['registration_choice']
     validate_registration_choice(registration_choice)
     if registration_choice == 'embargo':
         # Initiate embargo
-        end_date_string = data['embargoEndDate']
+        end_date_string = attributes['lift_embargo']
         validate_embargo_end_date(end_date_string, node)
         meta['embargo_end_date'] = end_date_string
     meta['registration_choice'] = registration_choice
+
+    if draft.registered_node and not draft.registered_node.is_deleted:
+        raise HTTPError(http.BAD_REQUEST, data=dict(message_long='This draft has already been registered, if you wish to '
+                                                              'register it again or submit it for review please create '
+                                                              'a new draft.'))
+
+    # Don't allow resubmission unless submission was rejected
+    if draft.approval and draft.approval.state != Sanction.REJECTED:
+        raise HTTPError(http.CONFLICT, data=dict(message_long='Cannot resubmit previously submitted draft.'))
+
     draft.submit_for_review(
         initiated_by=auth.user,
         meta=meta,
@@ -144,12 +169,15 @@ def submit_draft_for_review(auth, node, draft, *args, **kwargs):
 
     push_status_message(language.AFTER_SUBMIT_FOR_REVIEW,
                         kind='info',
-                        trust=False)
+                        trust=False,
+                        id='registration_submitted')
     return {
+        'data': {
+            'links': {
+                'html': node.web_url_for('node_registrations', _guid=True)
+            }
+        },
         'status': 'initiated',
-        'urls': {
-            'registrations': node.web_url_for('node_registrations')
-        }
     }, http.ACCEPTED
 
 @must_have_permission(ADMIN)
@@ -165,46 +193,6 @@ def draft_before_register_page(auth, node, draft, *args, **kwargs):
     ret['draft'] = serialize_draft_registration(draft, auth)
     return ret
 
-
-@must_have_permission(ADMIN)
-@must_be_branched_from_node
-@http_error_if_disk_saving_mode
-def register_draft_registration(auth, node, draft, *args, **kwargs):
-    """Initiate a registration from a draft registration
-
-    :return: success message; url to registrations page
-    :rtype: dict
-    """
-    data = request.get_json()
-    registration_choice = data.get('registrationChoice', 'immediate')
-    validate_registration_choice(registration_choice)
-
-    register = draft.register(auth)
-    draft.save()
-
-    if registration_choice == 'embargo':
-        # Initiate embargo
-        embargo_end_date = parse_date(data['embargoEndDate'], ignoretz=True)
-        try:
-            register.embargo_registration(auth.user, embargo_end_date)
-        except ValidationValueError as err:
-            raise HTTPError(http.BAD_REQUEST, data=dict(message_long=err.message))
-    else:
-        try:
-            register.require_approval(auth.user)
-        except NodeStateError as err:
-            raise HTTPError(http.BAD_REQUEST, data=dict(message_long=err.message))
-
-    register.save()
-    push_status_message(language.AFTER_REGISTER_ARCHIVING,
-                        kind='info',
-                        trust=False)
-    return {
-        'status': 'initiated',
-        'urls': {
-            'registrations': node.web_url_for('node_registrations')
-        }
-    }, http.ACCEPTED
 
 @must_have_permission(ADMIN)
 @must_be_branched_from_node
@@ -224,14 +212,18 @@ def get_draft_registrations(auth, node, *args, **kwargs):
     :return: serialized draft registrations
     :rtype: dict
     """
+    #'updated': '2016-08-03T14:24:12Z'
     count = request.args.get('count', 100)
     drafts = itertools.islice(node.draft_registrations_active, 0, count)
+    serialized_drafts = [serialize_draft_registration(d, auth) for d in drafts]
+    sorted_serialized_drafts = sorted(serialized_drafts, key=itemgetter('updated'), reverse=True)
     return {
-        'drafts': [serialize_draft_registration(d, auth) for d in drafts]
+        'drafts': sorted_serialized_drafts
     }, http.OK
 
 @must_have_permission(ADMIN)
 @must_be_valid_project
+@ember_flag_is_active(features.EMBER_CREATE_DRAFT_REGISTRATION)
 def new_draft_registration(auth, node, *args, **kwargs):
     """Create a new draft registration for the node
 
@@ -258,20 +250,18 @@ def new_draft_registration(auth, node, *args, **kwargs):
 
     schema_version = data.get('schema_version', 2)
 
-    meta_schema = get_schema_or_fail(
-        Q('name', 'eq', schema_name) &
-        Q('schema_version', 'eq', int(schema_version))
-    )
+    meta_schema = get_schema_or_fail(Q(name=schema_name, schema_version=int(schema_version)))
     draft = DraftRegistration.create_from_node(
         node,
         user=auth.user,
         schema=meta_schema,
         data={}
     )
-    return redirect(node.web_url_for('edit_draft_registration_page', draft_id=draft._id))
+    return redirect(node.web_url_for('edit_draft_registration_page', draft_id=draft._id, _guid=True))
 
 
 @must_have_permission(ADMIN)
+@ember_flag_is_active(features.EMBER_EDIT_DRAFT_REGISTRATION)
 @must_be_branched_from_node
 def edit_draft_registration_page(auth, node, draft, **kwargs):
     """Draft registration editor
@@ -302,10 +292,7 @@ def update_draft_registration(auth, node, draft, *args, **kwargs):
     schema_name = data.get('schema_name')
     schema_version = data.get('schema_version', 1)
     if schema_name:
-        meta_schema = get_schema_or_fail(
-            Q('name', 'eq', schema_name) &
-            Q('schema_version', 'eq', schema_version)
-        )
+        meta_schema = get_schema_or_fail(Q(name=schema_name, schema_version=schema_version))
         existing_schema = draft.registration_schema
         if (existing_schema.name, existing_schema.schema_version) != (meta_schema.name, meta_schema.schema_version):
             draft.registration_schema = meta_schema
@@ -330,7 +317,8 @@ def delete_draft_registration(auth, node, draft, *args, **kwargs):
                 'message_long': 'This draft has already been registered and cannot be deleted.'
             }
         )
-    DraftRegistration.remove_one(draft)
+    draft.deleted = timezone.now()
+    draft.save(update_fields=['deleted'])
     return None, http.NO_CONTENT
 
 def get_metaschemas(*args, **kwargs):
@@ -343,25 +331,12 @@ def get_metaschemas(*args, **kwargs):
     count = request.args.get('count', 100)
     include = request.args.get('include', 'latest')
 
-    meta_schema_collection = database['metaschema']
-
-    meta_schemas = []
+    meta_schemas = RegistrationSchema.objects.filter(active=True)
     if include == 'latest':
-        schema_names = meta_schema_collection.distinct('name')
-        for name in schema_names:
-            meta_schema_set = MetaSchema.find(
-                Q('name', 'eq', name) &
-                Q('schema_version', 'eq', 2)
-            )
-            meta_schemas = meta_schemas + [s for s in meta_schema_set]
-    else:
-        meta_schemas = MetaSchema.find()
-    meta_schemas = [
-        schema
-        for schema in meta_schemas
-        if schema.name in ACTIVE_META_SCHEMAS
-    ]
-    meta_schemas.sort(key=lambda a: ACTIVE_META_SCHEMAS.index(a.name))
+        meta_schemas.filter(schema_version=LATEST_SCHEMA_VERSION)
+
+    meta_schemas = sorted(meta_schemas, key=lambda x: METASCHEMA_ORDERING.index(x.name))
+
     return {
         'meta_schemas': [
             serialize_meta_schema(ms) for ms in meta_schemas[:count]

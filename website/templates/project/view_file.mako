@@ -1,4 +1,5 @@
 <%inherit file="project/project_base.mako"/>
+
 <div id="alertBar"></div>
 
 ## Use full page width
@@ -6,7 +7,7 @@
 
 <%def name="title()">${file_name | h}</%def>
 
-% if (user['can_comment'] or node['has_comments']) and allow_comments:
+% if (user['can_comment'] or node['has_comments']) and allow_comments and not node['anonymous']:
     <%include file="include/comment_pane_template.mako"/>
 % endif
 
@@ -14,7 +15,8 @@
   <div class="col-sm-5">
     <h2 class="break-word">
       ## Split file name into two parts: with and without extension
-      ${file_name_title | h}<span id="file-ext">${file_name_ext | h}</span>
+      <span id="fileTitleEditable">${file_name | h}</span>
+      <a id='versionLink' class='scripted'>(Version: ${ version_id | h})</a>
       % if file_revision:
         <small>&nbsp;${file_revision | h}</small>
       % endif
@@ -25,6 +27,7 @@
   </div>
 </div>
 <hr>
+
 <div class="row">
 
   <div id="file-navigation" class="panel-toggle col-sm-3 file-tree">
@@ -32,8 +35,14 @@
       <div class="osf-panel-body-flex file-page reset-height">
         <div id="grid">
           <div class="spinner-loading-wrapper">
-            <div class="logo-spin logo-lg"></div>
+            % if target_deleted:
+            <p class="m-t-sm fg-load-message">No files</p>
+            %else:
+            <div class="ball-scale ball-scale-blue">
+                <div></div>
+            </div>
             <p class="m-t-sm fg-load-message"> Loading files...  </p>
+            %endif
           </div>
         </div>
       </div>
@@ -186,6 +195,8 @@
             file_tags: ${file_tags if file_tags else False| sjson, n},
             guid: ${file_guid | sjson, n},
             id: ${file_id | sjson, n},
+            checkoutUser: ${checkout_user if checkout_user else None | sjson, n},
+            isPreregCheckout: ${pre_reg_checkout if pre_reg_checkout else False | sjson, n},
           urls: {
         %if error is None:
               render: ${ urls['render'] | sjson, n },
@@ -199,7 +210,7 @@
             userId: ${ user['id'] | sjson, n },
             userName: ${ user['fullname'] | sjson, n },
             userUrl: ${ ('/' + user['id'] + '/') if user['id'] else None | sjson, n },
-            userGravatar: ${ urls['gravatar'].replace('&amp;', '&') | sjson, n }
+            userProfileImage: ${ urls['profile_image'].replace('&amp;', '&') | sjson, n }
         },
         node: {
           urls: {
@@ -209,12 +220,18 @@
         panelsUsed: ['edit', 'view'],
         currentUser: {
           canEdit: ${ int(user['can_edit']) | sjson, n }
-        }
+        },
+        analyticsMeta: {
+            pageMeta: {
+                title: 'File: ' + ${file_name | sjson, n},
+                public: true,
+            },
+        },
       });
       window.contextVars.file.urls.external = window.contextVars.file.extra.webView;
     </script>
 
-    <link href="/static/css/pages/file-view-page.css" rel="stylesheet">
+    <link href="/static/css/pages/file-view-page.css" rel="stylesheet" />
     <link href="${urls['mfr']}/static/css/mfr.css" media="all" rel="stylesheet" />
     <script src="${urls['mfr']}/static/js/mfr.js"></script>
 

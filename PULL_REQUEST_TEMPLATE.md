@@ -13,10 +13,25 @@
 
 <!-- Briefly describe or list your changes  -->
 
-## Side effects
+## QA Notes
 
-<!--Any possible side effects? -->
+<!-- Does this change need QA? If so, this section is required.
+     - Is cross-browser testing required/recommended?
+     - Is API testing required/recommended?
+     - What pages on the OSF should be tested?
+     - What edge cases should QA be aware of?
+-->
 
+## Documentation
+
+<!-- Does any internal or external documentation need to be updated?
+     - If the API was versioned, update the developer.osf.io changelog.
+     - If changes were made to the API, link the developer.osf.io PR here.
+-->
+
+## Side Effects
+
+<!-- Any possible side effects? -->
 
 ## Ticket
 

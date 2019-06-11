@@ -3,12 +3,12 @@ var $ = require('jquery');
 
 var pointers = require('js/pointers');
 var AccountClaimer = require('js/accountClaimer');
-var $osf = require('js/osfHelpers');
 
 // NodeActions is needed for rendering recent logs in nodelists (e.g. regsitrations and forks
 // pages
 require('js/project');
 require('js/licensePicker');
+require('css/pages/project-page.css');
 
 var node = window.contextVars.node;
 var OFFSET = 49;
@@ -19,12 +19,8 @@ if (!window.contextVars.currentUser.isContributor) {
     new AccountClaimer('.contributor-unregistered');
 }
 
-if (node.isPublic && node.piwikSiteID) {
-    $osf.trackPiwik(node.piwikHost, node.piwikSiteID);
-}
-
 // Used for clearing backward/forward cache issues
-$(window).unload(function(){
+$(window).on('unload', function(){
     return 'Unload';
 });
 

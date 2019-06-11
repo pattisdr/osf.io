@@ -6,17 +6,17 @@ from celery.utils.log import get_task_logger
 from raven import Client
 from raven.contrib.celery import register_signal
 
-from website import settings
+from website.settings import SENTRY_DSN, VERSION, CeleryConfig
 
 app = Celery()
+app.config_from_object(CeleryConfig)
 
-# TODO: Hardcoded settings module. Should be set using framework's config handler
-app.config_from_object('website.settings')
-
-if settings.SENTRY_DSN:
-    client = Client(settings.SENTRY_DSN, release=settings.VERSION, tags={'App': 'celery'})
+if SENTRY_DSN:
+    client = Client(SENTRY_DSN, release=VERSION, tags={'App': 'celery'})
     register_signal(client)
 
+if CeleryConfig.broker_use_ssl:
+    app.setup_security()
 
 @app.task
 def error_handler(task_id, task_name):
@@ -32,5 +32,5 @@ def error_handler(task_id, task_name):
     excep = result.get(propagate=False)
     # log detailed error mesage in error log
     logger.error('#####FAILURE LOG BEGIN#####\n'
-                'Task {0} raised exception: {0}\n\{0}\n'
+                r'Task {0} raised exception: {0}\n\{0}\n'
                 '#####FAILURE LOG STOP#####'.format(task_name, excep, result.traceback))

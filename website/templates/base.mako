@@ -34,19 +34,67 @@
     </script>
     % endif
 
+    <!-- Metadata tags-->
+    <meta name="dc.title" content="${self.title_meta()}" />
+    <meta name="dc.type" content="collection" />
+    <meta name="citation_title" content="${self.title_meta()}" />
+    %if self.identifier_meta():
+        <meta name="citation_doi" content="${self.identifier_meta()['doi']}" />
+        <meta name="dc.identifier" content="${self.identifier_meta()['doi']}" />
+        <meta name="dc.identifier" content="${self.identifier_meta()['ark']}" />
+    %endif
+    <meta name="citation_publisher" content="OSF" />
+    %for institution in self.institutions_meta()[:10]:
+        <meta name="citation_author_institution" content="${institution}" />
+    %endfor
+    %for rel in self.relations_meta():
+        %if rel:
+            <meta name="dc.relation" scheme="DCTERMS.URI" content="${rel}" />
+        %endif
+    %endfor
+    <meta name="dc.abstract" content="${self.description_meta()}" />
+    <meta name="dc.license" content="${self.license_meta()}" />
+    <meta name="dc.datemodified" content="${self.datemodified_meta()}" />
+    <meta name="dc.datesubmitted" content="${self.datecreated_meta()}" />
+    <meta name="dc.publisher" content="OSF" />
+    <meta name="dc.language" content="en" />
+    <meta name="dc.identifier" content="${self.url_meta()}" />
+    <meta name="citation_description" content="${self.description_meta()}" />
+    <meta name="citation_public_url" content="${self.url_meta()}" />
+    <meta name="citation_publication_date" content="${self.datecreated_meta()}" />
+
     <!-- Facebook display -->
-    <meta name="og:image" content="http://centerforopenscience.org/static/img/cos_center_logo_small.png"/>
-    <meta name="og:title" content="${self.title()}"/>
-    <meta name="og:ttl" content="3"/>
-    <meta name="og:description" content="${self.og_description()}"/>
+    <meta property="og:ttl" content="3" />
+    <meta property="og:site_name" content="OSF" />
+    <meta property="og:url" content="${self.url_meta()}" />
+    <meta property="og:title" content="${self.title_meta()}" />
+    <meta property="og:description" content="${self.description_meta()}" />
+    <meta property="og:image" content="${self.image_meta()}" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="OSF" />
+
+    %for author in self.authors_meta()[:10]:
+        <meta name="dc.creator" content="${author}" />
+        <meta name="citation_author" content="${author}" />
+    %endfor
+    %for tag in self.keywords_meta()[:10]:
+        <meta name="citation_keywords" content="${tag}" />
+        <meta name="dc.subject" content="${tag}" />
+    %endfor
+
+    <!-- Twitter display -->
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:site" content="@OSFramework">
+    <meta name="twitter:creator" content="@OSFramework">
 
     ${includes_top()}
     ${self.stylesheets()}
     <script src="${"/static/public/js/base-page.js" | webpack_asset}"></script>
     ${self.javascript()}
 
-    <link href='//fonts.googleapis.com/css?family=Carrois+Gothic|Inika|Patua+One' rel='stylesheet' type='text/css'>
-    <link href='https://fonts.googleapis.com/css?family=Open+Sans:400,600,300,700' rel='stylesheet' type='text/css'>
+    <link href='https://fonts.googleapis.com/css?family=Open+Sans:400,600,300' rel='stylesheet' type='text/css'>
 
 </head>
 <body data-spy="scroll" data-target=".scrollspy">
@@ -87,29 +135,46 @@
     </div>
     % endif
 
-    <%namespace name="nav_file" file="nav.mako"/>
-    <%block name="nav">
-        ${nav_file.nav()}
-    </%block>
+    ${self.nav()}
      ## TODO: shouldn't always have the watermark class
     ${self.content_wrap()}
 
-% if not user_id:
-<div id="footerSlideIn">
-    <div class="container">
-        <div class="row">
-            <div class='col-sm-2 hidden-xs'>
-                <img class="logo" src="/static/img/circle_logo.png">
-            </div>
-            <div class='col-sm-10 col-xs-12'>
-                <a data-bind="click: dismiss" class="close" href="#">&times;</a>
-                <h1>Start managing your projects on the OSF today.</h1>
-                <p>Free and easy to use, the Open Science Framework supports the entire research lifecycle: planning, execution, reporting, archiving, and discovery.</p>
-                <div>
-                    <a data-bind="click: trackClick.bind($data, 'Create Account')" class="btn btn-primary" href="${web_url_for('index')}#signUp">Create an Account</a>
+<div class="footBanners">
+    <div id="IEDepreciationBanner"  class="alert warningBanner">
+        <div class="warningBannerText">
+            OSF does not support the use of Internet Explorer. For optimal performance, please switch to another browser.
+        </div>
+        <div class="warningBannerAcceptBtn">
+            <div class="btn btn-default" data-dismiss="alert" data-bind="click: accept" aria-label="Accept">Accept</div>
+        </div>
+    </div>
+    % if not user_id:
+    <div id="cookieBanner" class="alert warningBanner">
+        <div id="cookieText" class="warningBannerText">
+            This website relies on cookies to help provide a better user experience. By clicking Accept or continuing to use the site, you agree. For more information,
+            see our <a href='https://github.com/CenterForOpenScience/cos.io/blob/master/PRIVACY_POLICY.md'>Privacy Policy</a>
+            and information on <a href='https://github.com/CenterForOpenScience/cos.io/blob/master/PRIVACY_POLICY.md#7-types-of-information-we-collect'>cookie use</a>.
+        </div>
+        <div class="warningBannerAcceptBtn">
+            <div class="btn btn-default" data-dismiss="alert" data-bind="click: accept" aria-label="Accept">Accept</div>
+        </div>
+    </div>
+    <div id="footerSlideIn">
+        <div class="container">
+            <div class="row">
+                <div class='col-sm-2 hidden-xs'>
+                    <img class="logo" src="/static/img/circle_logo.png">
+                </div>
+                <div class='col-sm-10 col-xs-12'>
+                    <a data-bind="click: dismiss" class="close" href="#">&times;</a>
+                    <h1>Start managing your projects on the OSF today.</h1>
+                    <p>Free and easy to use, the Open Science Framework supports the entire research lifecycle: planning, execution, reporting, archiving, and discovery.</p>
+                    <div>
+                        <a data-bind="click: trackClick.bind($data, 'Create Account')" class="btn btn-primary" href="${web_url_for('index')}#signUp">Create an Account</a>
 
-                    <a data-bind="click: trackClick.bind($data, 'Learn More')" class="btn btn-primary" href="http://help.osf.io" target="_blank" rel="noreferrer">Learn More</a>
-                    <a data-bind="click: dismiss">Hide this message</a>
+                        <a data-bind="click: trackClick.bind($data, 'Learn More')" class="btn btn-primary" href="https://openscience.zendesk.com/hc/en-us" target="_blank" rel="noreferrer">Learn More</a>
+                        <a data-bind="click: dismiss">Hide this message</a>
+                    </div>
                 </div>
             </div>
         </div>
@@ -119,21 +184,6 @@
 
 
     ${self.footer()}
-    <%include file="copyright.mako"/>
-        % if settings.PINGDOM_ID:
-            <script>
-            var _prum = [['id', ${ settings.PINGDOM_ID | sjson, n }],
-                            ['mark', 'firstbyte', (new Date()).getTime()]];
-            (function() {
-                var s = document.getElementsByTagName('script')[0]
-                    , p = document.createElement('script');
-                p.async = 'async';
-                p.src = '//rum-static.pingdom.net/prum.min.js';
-                s.parentNode.insertBefore(p, s);
-            })();
-            </script>
-        % endif
-
         <%!
             import hashlib
 
@@ -158,9 +208,11 @@
 
             ga('create', ${ settings.GOOGLE_ANALYTICS_ID | sjson, n }, 'auto', {'allowLinker': true});
             ga('require', 'linker');
-            ga('linker:autoLink', ['centerforopenscience.org'] );
-            ga('set', 'dimension1', ${user_hash(user_id) | sjson, n});
-            ga('set', 'dimension2', ${create_timestamp() | sjson, n});
+            ga('linker:autoLink', ['centerforopenscience.org', 'cos.io'] );
+            ga('set', 'dimension1', (${ user_id | sjson, n} != "") ? 'Logged in': 'Logged out');
+            ga('set', 'dimension2', '${self.resource()}');
+            ga('set', 'dimension3', '${self.public()}');
+            ga('set', 'anonymizeIp', true);
             ga('send', 'pageview');
             </script>
 
@@ -170,17 +222,15 @@
           </script>
         % endif
 
-        % if piwik_host:
-            <script src="${ piwik_host }piwik.js" type="text/javascript"></script>
-        % endif
-
         <script>
             // Mako variables accessible globally
             window.contextVars = $.extend(true, {}, window.contextVars, {
+                osfURL: ${ osf_url if osf_url.endswith('/') else osf_url + '/' | sjson, n },
                 waterbutlerURL: ${ waterbutler_url if waterbutler_url.endswith('/') else waterbutler_url + '/' | sjson, n },
                 // Whether or not this page is loaded under osf.io or another domain IE: institutions
                 isOnRootDomain: ${domain | sjson, n } === window.location.origin + '/',
                 cookieName: ${ cookie_name | sjson, n },
+                apiV2Domain: ${ api_v2_domain | sjson, n },
                 apiV2Prefix: ${ api_v2_base | sjson, n },
                 registerUrl: ${ api_url_for('register_user') | sjson, n },
                 currentUser: {
@@ -189,47 +239,32 @@
                     timezone: ${ user_timezone | sjson, n },
                     entryPoint: ${ user_entry_point | sjson, n },
                     institutions: ${ user_institutions | sjson, n},
-                    emailsToAdd: ${ user_email_verifications | sjson, n }
+                    emailsToAdd: ${ user_email_verifications | sjson, n },
+                    anon: ${ anon | sjson, n },
                 },
-                allInstitutions: ${ all_institutions | sjson, n},
-                popular: ${ popular_links_node | sjson, n },
-                newAndNoteworthy: ${ noteworthy_links_node | sjson, n },
-                maintenance: ${ maintenance | sjson, n}
+                maintenance: ${ maintenance | sjson, n},
+                analyticsMeta: {},
+                osfSupportEmail: ${osf_support_email | sjson, n },
+                csrfCookieName: ${ csrf_cookie_name | sjson, n },
             });
         </script>
 
-        % if piwik_host:
-            <% is_public = node.get('is_public', 'ERROR') if node else True %>
-            <script type="text/javascript">
-
-                $(function() {
-                    var cvars = [];
-                    % if user_id:
-                        cvars.push([1, "User ID", ${ user_id | sjson, n }, "visit"]);
-                        cvars.push([2, "User Name", ${ user_full_name | sjson, n }, "visit"]);
-                    % endif
-                    % if node:
-                        <% parent_project = parent_node.get('id') or node.get('id') %>
-                        cvars.push([2, "Project ID", ${ parent_project | sjson, n }, "page"]);
-                        cvars.push([3, "Node ID", ${ node.get('id') | sjson, n }, "page"]);
-                        cvars.push([4, "Tags", ${ ','.join(node.get('tags', [])) | sjson , n }, "page"]);
-                    % endif
-                    // Note: Use cookies for global site ID; only one cookie
-                    // will be used, so this won't overflow uwsgi header
-                    // buffer.
-                    $.osf.trackPiwik(${ piwik_host | sjson, n}, ${ piwik_site_id | sjson, n }, cvars, true);
+        % if keen['public']['project_id']:
+            <script>
+                window.contextVars = $.extend(true, {}, window.contextVars, {
+                    keen: {
+                        public: {
+                            projectId: ${ keen['public']['project_id'] | sjson, n },
+                            writeKey: ${ keen['public']['write_key'] | sjson, n },
+                        },
+                        private: {
+                            projectId: ${ keen['private']['project_id'] | sjson, n },
+                            writeKey: ${ keen['private']['write_key'] | sjson, n },
+                        },
+                    },
                 });
             </script>
         % endif
-
-        %if keen_project_id:
-            <script>
-                window.contextVars = $.extend(true, {}, window.contextVars, {
-                    keenProjectId: ${keen_project_id | sjson, n},
-                    keenWriteKey: ${keen_write_key | sjson, n}
-                })
-            </script>
-        %endif
 
 
         ${self.javascript_bottom()}
@@ -239,8 +274,23 @@
 
 ###### Base template functions #####
 
+<%def name="nav()">
+    <%namespace name="nav_helper" file="nav.mako" />
+    ${nav_helper.nav(service_name='HOME', service_url=domain, service_support_url='/support/')}
+</%def>
+
 <%def name="title()">
     ### The page title ###
+</%def>
+
+<%def name="resource()"><%
+    return 'n/a'
+%> ### What resource is displayed on page ###
+</%def>
+
+<%def name="public()"><%
+    return 'n/a'
+%> ### What the public/private status of the resource displayed on page ###
 </%def>
 
 <%def name="container_class()">
@@ -251,9 +301,59 @@
     ### The page description ###
 </%def>
 
-<%def name="og_description()">
+<!-- Metadata tags-->
+<%def name="description_meta()">
     Hosted on the Open Science Framework
 </%def>
+
+<%def name="title_meta()">
+    ### The project title ###
+</%def>
+
+<%def name="institutions_meta()">
+  ### The list of affiliated institutions ###
+</%def>
+
+<%def name="authors_meta()">
+    ### The list of project contributors ###
+</%def>
+
+<%def name="datemodified_meta()">
+    ### The project last modified date.
+</%def>
+
+<%def name="datecreated_meta()">
+    ### The project creation date.
+</%def>
+
+<%def name="identifier_meta()">
+    ### The project doi ###
+</%def>
+
+<%def name="license_meta()">
+    ### The project license ###
+</%def>
+
+<%def name="keywords_meta()">
+    ### The project tags ###
+</%def>
+
+<%def name="relations_meta()">
+    ### The list of url for related nodes ###
+</%def>
+
+<%def name="category_meta()">
+    ### The project category ###
+</%def>
+
+<%def name="url_meta()">
+    ### The project canonical url ###
+</%def>
+
+<%def name="image_meta()">
+    ### The project image url ###
+</%def>
+<!--Metadata tags-->
 
 <%def name="stylesheets()">
     ### Extra css for this page. ###
@@ -269,6 +369,8 @@
 
 <%def name="javascript_bottom()">
     ### Javascript loaded at the bottom of the page ###
+    <!-- Uncomment to include a waffle object to access flags, samples, and switches. -->
+    <!-- <script src="${wafflejs_url}"></script> -->
 </%def>
 
 <%def name="footer()">
@@ -282,17 +384,6 @@
 <%def name="content_wrap()">
     <div class="watermarked">
         <div class="container ${self.container_class()}">
-            % if maintenance:
-            ## Maintenance alert
-            <div id="maintenance" class="scripted alert alert-info alert-dismissible" role="alert">
-                <button type="button" class="close" data-dismiss="alert" aria-label="Close">
-                    <span aria-hidden="true">&times;</span></button>
-                <strong>Notice:</strong> The site will undergo maintenance between
-                <span id="maintenanceTime"></span>.
-                Thank you for your patience.
-            </div>
-            ## End Maintenance alert
-            % endif
 
             % if status:
                 ${self.alert()}
@@ -317,26 +408,16 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/es6-shim/0.35.0/es6-shim.min.js"></script>
 
-    ## TODO: Get fontawesome and select2 to play nicely with webpack
-    <link rel="stylesheet" href="/static/vendor/bower_components/bootstrap/dist/css/bootstrap.min.css">
-    <link rel="stylesheet" href="/static/vendor/bower_components/select2/select2.css">
-    <link rel="stylesheet" href="/static/vendor/bower_components/osf-style/css/base.css">
-    <link rel="stylesheet" href="/static/css/style.css">
-
     % if settings.USE_CDN_FOR_CLIENT_LIBS:
-        <script src="//ajax.googleapis.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
-        <script>window.jQuery || document.write('<script src="/static/vendor/bower_components/jquery/dist/jquery.min.js">\x3C/script>')</script>
-        <script src="//ajax.googleapis.com/ajax/libs/jqueryui/1.10.3/jquery-ui.min.js"></script>
-        <script>window.jQuery.ui || document.write('<script src="/static/vendor/bower_components/jquery-ui/ui/minified/jquery-ui.min.js">\x3C/script>')</script>
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+        <script>window.jQuery || document.write('<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js">\x3C/script>')</script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
+        <script>window.jQuery.ui || document.write('<script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js">\x3C/script>')</script>
     % else:
         <script src="/static/vendor/bower_components/jquery/dist/jquery.min.js"></script>
-        <script src="/static/vendor/bower_components/jquery-ui/ui/minified/jquery-ui.min.js"></script>
+        <script src="/static/vendor/bower_components/jquery-ui/jquery-ui.min.js"></script>
     % endif
-    <!-- JQuery 3 for IE Patching -->
-    <script type="text/javascript" src="/static/vendor/jquery-compat-git/jquery-compat-git.js"></script>
-    <script type="text/javascript">
-        var $3 = jQuery.noConflict(true);
-    </script>
     ## NOTE: We load vendor bundle  at the top of the page because contains
     ## the webpack runtime and a number of necessary stylesheets which should be loaded before the user sees
     ## content.

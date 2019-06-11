@@ -1,12 +1,11 @@
 var $ = require('jquery');
 var ko = require('knockout');
 var m = require('mithril');
-var bootbox = require('bootbox');  // TODO: Why is this required? Is it? See [#OSF-6100]
+var bootbox = require('bootbox');
 
 var FilesWidget = require('js/filesWidget');
-var Fangorn = require('js/fangorn');
+var Fangorn = require('js/fangorn').Fangorn;
 var $osf = require('js/osfHelpers');
-var waterbutler = require('js/waterbutler');
 var ContribAdder = require('js/contribAdder');
 
 var node = window.contextVars.node;
@@ -86,7 +85,8 @@ var osfUploader = function(element, valueAccessor, allBindings, viewModel, bindi
                 Fangorn.DefaultOptions.dropzoneEvents,
                 {
                     complete: function(tb, file, response) {
-                        var fileMeta = JSON.parse(file.xhr.response);
+                        var fileResponse = JSON.parse(file.xhr.response);
+                        var fileMeta = fileResponse.data.attributes;
                         fileMeta.nodeId = file.treebeardParent.data.nodeId;
                         onSelectRow({
                             kind: 'file',
@@ -165,10 +165,10 @@ ko.bindingHandlers.osfUploader = {
 
 
 var uploaderCount = 0;
-var Uploader = function(question) {
-
+var Uploader = function(question, pk) {
     var self = this;
 
+    self.draft_id = pk;
     question.showUploader = ko.observable(false);
     self.toggleUploader = function() {
         question.showUploader(!question.showUploader());
@@ -185,17 +185,25 @@ var Uploader = function(question) {
         question.value(question.formattedFileList());
     });
     self.fileWarn = ko.observable(true);
+    self.descriptionVisible = ko.pureComputed(function() {
+        return (question.fileDescription ? question.fileDescription : false);
+    }, self);
+    self.value = ko.observable('');
+    self.fileLimit = ko.pureComputed(function() {
+        return (question.fileLimit ? question.fileLimit : 5);
+    }, self);
 
-    self.UPLOAD_LANGUAGE = 'You may attach up to 5 files to this question. You may attach files that you already have ' +
+    self.UPLOAD_LANGUAGE = 'You may attach up to ' + self.fileLimit() + ' file(s) to this question. You may attach files that you already have ' +
         'in this OSF project, or upload a new file from your computer. Uploaded files will automatically be added to this project ' +
         'so that they can be registered.';
 
     self.addFile = function(file) {
-        if(self.selectedFiles().length >= 5 && self.fileWarn()) {
+        self.value = ko.observable(file.data.descriptionvalue || '');
+        if(self.selectedFiles().length >= self.fileLimit && self.fileWarn()) {
             self.fileWarn(false);
             bootbox.alert({
                 title: 'Too many files',
-                message: 'You cannot attach more than 5 files to a question.',
+                message: 'You cannot attach more than ' + self.fileLimit() + 'file(s) to a question.',
                 buttons: {
                     ok: {
                         label: 'Close',
@@ -204,22 +212,50 @@ var Uploader = function(question) {
                 }
             }).css({ 'top': '35%' });
             return false;
-        } else if(self.selectedFiles().length >= 5 && !self.fileWarn()) {
+        } else if(self.selectedFiles().length >= self.fileLimit && !self.fileWarn()) {
             return false;
         }
         if(self.fileAlreadySelected(file))
             return false;
 
+        var guid = self.getGuid(file).then(function (val) {
+            self.setGuid(val, file.data.extra.hashes.sha256);
+        });
         self.selectedFiles.push({
+            fileId: guid,
             data: file.data,
             selectedFileName: file.data.name,
             nodeId: file.data.nodeId,
             viewUrl: '/project/' + file.data.nodeId + '/files/osfstorage' + file.data.path,
-            sha256: file.data.extra.hashes.sha256
+            sha256: file.data.extra.hashes.sha256,
+            descriptionValue: self.value()
         });
         return true;
     };
 
+    self.getGuid = function (file) {
+        var ret = $.Deferred();
+        var url = '/api/v1/project/' + file.data.nodeId + '/files/osfstorage' + file.data.path + '/?action=get_guid&draft=' + self.draft_id;
+        var request = $osf.ajaxJSON('GET', url, {});
+
+        request.done(function (resp) {
+            ret.resolve(resp.guid);
+        });
+
+        return ret.promise();
+    };
+
+    self.setGuid = function (guid, sha256) {
+        var files = question.extra();
+
+        for (var i = 0; i < files.length; i++) {
+            var file = files[i];
+            if(file.sha256 === sha256) {
+                self.selectedFiles()[i].fileId = guid;
+                break;
+            }
+        }
+    };
 
     self.fileAlreadySelected = function(file) {
         var selected = false;
@@ -253,14 +289,21 @@ var Uploader = function(question) {
 
     self.preview = function() {
         var value = question.value();
-        if (!value || value === NO_FILE || question.extra().length === 0) {
+        if (value === NO_FILE || question.extra().length === 0) {
             return 'no file selected';
         }
         else {
             var files = question.extra();
             var elem = '';
             $.each(files, function(_, file) {
-                elem += '<a target="_blank" href="' + file.viewUrl + '">' + $osf.htmlEscape(file.selectedFileName) + ' </a>' + '</br>';
+                if (!file.data) { // old data may have empty file objects
+                    return; // skip bad files
+                }
+                if(!file.data.descriptionValue){
+                    elem += '<a target="_blank" href="' + file.viewUrl + '">' + $osf.htmlEscape(file.selectedFileName) + ' </a>' + '</br>';
+                }else{
+                    elem += '<span><a target="_blank" href="' + file.viewUrl + '">' + $osf.htmlEscape(file.selectedFileName) + ' </a>' + '  (' + file.data.descriptionValue + ')' + '</span></br>';
+                }
             });
             return $(elem);
         }

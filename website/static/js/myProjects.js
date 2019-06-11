@@ -25,6 +25,39 @@ if (!window.fileBrowserCounter) {
     window.fileBrowserCounter = 0;
 }
 
+var sparseNodeFields = String([
+    'category',
+    'children',
+    'contributors',
+    'current_user_permissions',
+    'date_modified',
+    'description',
+    'parent',
+    'public',
+    'tags',
+    'title'
+]);
+
+var sparseRegistrationFields = String([
+    sparseNodeFields,
+    'registration',
+    'pending_registration_approval',
+    'withdrawn'
+]);
+
+var sparseUserFields = String([
+    'family_name',
+    'full_name',
+    'given_name',
+    'middle_names'
+]);
+
+var sparseContributorFields = String([
+    'bibliographic',
+    'unregistered_contributor',
+    'users'
+]);
+
 //Backport of Set
 if (!window.Set) {
   window.Set = function Set(initial) {
@@ -51,30 +84,54 @@ if (!window.Set) {
 }
 
 
-function NodeFetcher(type, link, handleOrphans) {
-  this.type = type || 'nodes';
-  this.loaded = 0;
-  this._failed = 0;
-  this.total = 0;
-  this._flat = [];
-  this._orphans = [];
-  this._cache = {};
-  this._promise = null;
-  this._started = false;
-  this._continue = true;
-  this._handleOrphans = handleOrphans === undefined ? true : handleOrphans;
-  this._callbacks = {
-    done: [this._onFinish.bind(this)],
-    page: [],
-    children: [],
-    fetch : []
-  };
-  this.nextLink = link || $osf.apiV2Url('users/me/' + this.type + '/', { query : { 'related_counts' : 'children', 'embed' : 'contributors' }});
+function NodeFetcher(type, link, handleOrphans, regType, regLink, preprintType, preprintLink) {
+    this.type = type || 'nodes';
+    this.regType = regType || null;
+    this.regLink = regLink || null;
+    this.preprintType = preprintType || null;
+    this.preprintLink = preprintLink || null;
+    this.loaded = 0;
+    this._failed = 0;
+    this.total = 0;
+    this._flat = [];
+    this._orphans = [];
+    this._cache = {};
+    this._promise = null;
+    this._started = false;
+    this._continue = true;
+    // hack to force a re-sort and cleanup when the fetcher is done
+    this.forceRedraw = false;
+    this._handleOrphans = handleOrphans === undefined ? true : handleOrphans;
+    this._callbacks = {
+        done: [this._onFinish.bind(this)],
+        page: [],
+        children: [],
+        fetch : []
+    };
+
+    var params = {'related_counts' : 'children', 'embed' : 'contributors', 'version': '2.2', 'fields[users]' : sparseUserFields, 'fields[contributors]' : sparseContributorFields};
+
+    if (this.type === 'nodes') {
+        params['fields[nodes]'] = sparseNodeFields;
+    }
+
+    if (this.type === 'registrations') {
+        params['fields[registrations]'] = sparseRegistrationFields;
+    }
+
+    // TODO Use sparse fields on preprints, users/contributors already added
+    if (this.type === 'preprints') {
+        link = link ? link : $osf.apiV2Url('users/me/preprints/', { query : { 'embed' : ['contributors'], 'fields[users]' : sparseUserFields, 'fields[contributors]' : sparseContributorFields}});
+    }
+
+    this.nextLink = link ?
+        link + '&version=2.2' :
+        $osf.apiV2Url('users/me/' + this.type + '/', { query: params});
 }
 
 NodeFetcher.prototype = {
   isFinished: function() {
-    return this.loaded >= this.total && this._promise === null && this._orphans.length === 0;
+    return this.loaded >= this.total && this._promise === null && this._orphans.length === 0 && !this.nextLink;
   },
   isEmpty: function() {
     return this.loaded === 0 && this.isFinished();
@@ -104,6 +161,7 @@ NodeFetcher.prototype = {
   add: function(item) {
     if (!this._started ||this._flat.indexOf(item) !== - 1) return;
 
+    this.forceRedraw = true;
     this.total++;
     this.loaded++;
 
@@ -123,6 +181,11 @@ NodeFetcher.prototype = {
   },
   remove: function(item) {
     item = item.id || item;
+
+    this.forceRedraw = true;
+    this.total--;
+    this.loaded--;
+
     if (!this._cache[item]) return;
     delete this._cache[item];
     for(var i = 0; i < this._flat.length; i++)
@@ -149,7 +212,9 @@ NodeFetcher.prototype = {
   },
   fetch: function(id) {
     // TODO This method is currently untested
-    var url =  $osf.apiV2Url(this.type + '/' + id + '/', {query: {related_counts: 'children', embed: 'contributors' }});
+    // this.type can be 'registrations' when it needs to be 'nodes' based on when this is called
+    // TODO assess sparse field usage (some already implemented)
+    var url =  $osf.apiV2Url(this.type + '/' + id + '/', {query: {related_counts: 'children', embed: 'contributors', version: '2.2', 'fields[users]' : sparseUserFields, 'fields[contributors]' : sparseContributorFields}});
     return m.request({method: 'GET', url: url, config: mHelpers.apiV2Config({withCredentials: window.contextVars.isOnRootDomain}), background: true})
       .then((function(result) {
         this.add(result.data);
@@ -158,19 +223,22 @@ NodeFetcher.prototype = {
   },
   fetchChildren: function(parent, link) {
     //TODO Allow suspending of children
-    return m.request({method: 'GET', url: link || parent.relationships.children.links.related.href + '?embed=contributors&related_counts=children', config: mHelpers.apiV2Config({withCredentials: window.contextVars.isOnRootDomain}), background: true})
+    return m.request({method: 'GET', url: link || parent.relationships.children.links.related.href + '&embed=contributors&related_counts=children', config: mHelpers.apiV2Config({withCredentials: window.contextVars.isOnRootDomain}), background: true})
       .then(this._childrenSuccess.bind(this, parent), this._fail.bind(this));
   },
   _success: function(results) {
     // Only reset if we're lower as loading children will increment this number
-    if (this.total < results.links.meta.total)
-        this.total = results.links.meta.total;
+    if (this.total < results.meta.total)
+        this.total = results.meta.total;
 
     this.nextLink = results.links.next;
     this.loaded += results.data.length;
     for(var i = 0; i < results.data.length; i++) {
-      if (this.type === 'registrations' && (results.data[i].attributes.withdrawn === true || results.data[i].attributes.pending_registration_approval === true))
+      if (this.type === 'registrations' && (results.data[i].attributes.withdrawn === true || results.data[i].attributes.pending_registration_approval === true)){
+          this.total--;
+          this.loaded--;
           continue; // Exclude retracted and pending registrations
+      }
       else if (results.data[i].relationships.parent && this._handleOrphans)
           this._orphans.push(results.data[i]);
       else
@@ -186,9 +254,17 @@ NodeFetcher.prototype = {
         this._cache[parentId].children.push(item);
         return false;
       }).bind(this));
+    }
+    if(!this.nextLink && this.regLink) {
+        this.nextLink = this.regLink;
+        this.type = this.regType;
+        this.regLink = null;
+    }
 
-      // if (results.data[i].relationships.children.links.related.meta.count > 0)
-      //   this.fetchChildren(results.data[i]);
+    if(!this.nextLink && this.preprintLink) {
+        this.nextLink = this.preprintLink;
+        this.type = this.preprintType;
+        this.preprintLink = null;
     }
 
     this._callbacks.page.forEach((function(cb) {
@@ -202,7 +278,7 @@ NodeFetcher.prototype = {
   },
   _childrenSuccess: function(parent, results) {
     if (!results.links.prev)
-      this.total += results.links.meta.total;
+      this.total += results.meta.total;
 
     this.loaded += results.data.length;
     var finder = function(id, item) {return item.id === id;};
@@ -230,6 +306,7 @@ NodeFetcher.prototype = {
     $osf.growl('We\'re having some trouble contacting our servers. Try reloading the page.', 'Something went wrong!', 'danger', 5000);
   },
   _onFinish: function() {
+    this.forceRedraw = true;
     this._flat = this._orphans.concat(this._flat).sort(function(a,b) {
       a = new Date(a.attributes.date_modified);
       b = new Date(b.attributes.date_modified);
@@ -258,7 +335,7 @@ function getUID() {
 function _formatDataforPO(item) {
     item.kind = 'folder';
     item.uid = item.id;
-    item.name = item.attributes.title;
+    item.name = $osf.decodeText(item.attributes.title);
     item.tags = item.attributes.tags.toString();
     item.contributors = '';
     var contributorsData = lodashGet(item, 'embeds.contributors.data', null);
@@ -304,10 +381,10 @@ var LinkObject = function _LinkObject (type, data, label, institutionId) {
  * @param id {String} unique id of the node like 'ez8f3'
  * @returns {{data: {type: string, relationships: {nodes: {data: {type: string, id: *}}}}}}
  */
-function buildCollectionNodeData (id) {
+function buildCollectionNodeData (id, type) {
     return {
         'data': [{
-            'type': 'linked_nodes',
+            'type': 'linked_'+type,
             'id': id
         }]
     };
@@ -327,7 +404,7 @@ var MyProjects = {
         self.logUrlCache = {}; // dictionary of load urls to avoid multiple calls with little refactor
         self.nodeUrlCache = {}; // Cached returns of the project related urls
         // VIEW STATES
-        self.showInfo = m.prop(true); // Show the info panel
+        self.showInfo = m.prop(false); // Show the info panel
         self.showSidebar = m.prop(false); // Show the links with collections etc. used in narrow views
         self.allProjectsLoaded = m.prop(false);
         self.categoryList = [];
@@ -352,14 +429,17 @@ var MyProjects = {
         // Add All my Projects and All my registrations to collections
         self.systemCollections = options.systemCollections || [
             new LinkObject('collection', { nodeType : 'projects'}, 'All my projects'),
-            new LinkObject('collection', { nodeType : 'registrations'}, 'All my registrations')
+            new LinkObject('collection', { nodeType : 'registrations'}, 'All my registrations'),
+            new LinkObject('collection', { nodeType : 'preprints'}, 'All my preprints')
         ];
 
         self.fetchers = {};
         if (!options.systemCollections) {
           self.fetchers[self.systemCollections[0].id] = new NodeFetcher('nodes');
           self.fetchers[self.systemCollections[1].id] = new NodeFetcher('registrations');
+          self.fetchers[self.systemCollections[2].id] = new NodeFetcher('preprints', self.systemCollections[2].data.link);
         } else {
+            // TODO: This assumes that there are two systemcolelctiosn passes and what they are. It should ideally loop through passed collections.
           self.fetchers[self.systemCollections[0].id] = new NodeFetcher('nodes', self.systemCollections[0].data.link);
           self.fetchers[self.systemCollections[1].id] = new NodeFetcher('registrations', self.systemCollections[1].data.link);
         }
@@ -431,9 +511,14 @@ var MyProjects = {
             if(self.selected().length === 1 && !self.logRequestPending){
                 var item = self.selected()[0];
                 var id = item.data.id;
+                // Hiding preprint logs for now
+                if (item.data.type === 'preprints') {
+                    return [];
+                }
                 if(!item.data.attributes.retracted){
                     var urlPrefix = item.data.attributes.registration ? 'registrations' : 'nodes';
-                    var url = $osf.apiV2Url(urlPrefix + '/' + id + '/logs/', { query : { 'page[size]' : 6, 'embed' : ['original_node', 'user', 'linked_node', 'template_node'], 'profile_image_size': PROFILE_IMAGE_SIZE}});
+                    // TODO assess sparse field usage (some already implemented)
+                    var url = $osf.apiV2Url(urlPrefix + '/' + id + '/logs/', { query : { 'page[size]' : 6, 'embed' : ['original_node', 'user', 'linked_node', 'linked_registration', 'template_node'], 'profile_image_size': PROFILE_IMAGE_SIZE, 'fields[users]' : sparseUserFields}});
                     var promise = self.getLogs(url);
                     return promise;
                 }
@@ -442,7 +527,7 @@ var MyProjects = {
 
         /* filesData is the link that loads tree data. This function refreshes that information. */
         self.updateFilesData = function _updateFilesData(linkObject) {
-            if ((linkObject.type === 'node') && self.viewOnly){
+            if ((linkObject.type === 'node' || linkObject.type === 'registration') && self.viewOnly){
                 return;
             }
 
@@ -463,11 +548,60 @@ var MyProjects = {
             self.getCurrentLogs();
         };
 
+        self.filterHistoryData = {
+            undefined: {title: 'My Projects', name: ''},
+            1: {title: 'My Registrations', name: '#registrations'},
+            2: {title: 'My Preprints', name: '#preprints'}
+        };
+
+        /**
+         * Sets the url history with filter param when filter is updated
+         * @param index {Number} the filter id - 1 or index of the filter in the collections array
+         */
+        self.setFilterHistory = function(index) {
+            // if not on the myprojects version of this page, don't change state (e.g., institutions)
+            if (window.location.href.indexOf('/myprojects') === -1 ) {
+                return;
+            }
+            var filter;
+            if (index in self.filterHistoryData) {
+                filter = self.filterHistoryData[index];
+            }   else {
+                filter = self.filterHistoryData[undefined];
+            }
+            // Uses replaceState instead of pushState because back buttons will not reset the filter on back without forcing a page refresh
+            // A bug in history causes titles not to change despite setting them here.
+            window.history.replaceState({setFilter: index}, 'OSF | ' + filter.title, '/myprojects/' + filter.name);
+        };
+
+        /**
+         * Sets the initial filter based on href
+         */
+        self.getFilterIndex = function() {
+            // if not on the myprojects version of this page, don't change state (e.g., institutions)
+            if (window.location.href.indexOf('/myprojects') === -1 ) {
+                return 0;
+            }
+            // Cast to string undefined => "undefined" to handle upper/lower case anchors
+            var name = String(window.location.href.split('#')[1]).toLowerCase();
+            switch(name) {
+                case 'registrations':
+                    return 1;
+                case 'preprints':
+                    return 2;
+                default:
+                    return 0;
+            }
+        };
+
         /**
          * Update the currentView
          * @param filter
          */
         self.updateFilter = function _updateFilter(filter) {
+            // index for the filter is id - 1
+            self.setFilterHistory(filter.id - 1);
+
             // if collection, reset currentView otherwise toggle the item in the list of currentview items
             if (['node', 'collection'].indexOf(filter.type) === -1 ) {
                 var filterIndex = self.currentView()[filter.type].indexOf(filter);
@@ -500,32 +634,46 @@ var MyProjects = {
             var currentCollection = self.currentView().collection;
             var collectionNode = currentCollection.data.node; // If it's not a system collection like projects or registrations this will have a node
 
-            var data = {
-              data: self.selected().map(function(item){
-                return {id: item.data.id, type: 'linked_nodes'};
-              })
-            };
-
-            m.request({
-                method : 'DELETE',
-                url : collectionNode.links.self + 'relationships/' + 'linked_nodes/',  //collection.links.self + 'node_links/' + item.data.id + '/', //collection.links.self + relationship/ + linked_nodes/
-                config : mHelpers.apiV2Config({withCredentials: window.contextVars.isOnRootDomain}),
-                data : data
-            }).then(function(result) {
-              data.data.forEach(function(item) {
-                  self.fetchers[currentCollection.id].remove(item.id);
-                  currentCollection.data.count(currentCollection.data.count()-1);
-                  self.updateSelected([]);
-              });
-              self.updateList();
-            }, function _removeProjectFromCollectionsFail(result){
-                var message = 'Some projects';
-                if(data.data.length === 1) {
-                    message = self.selected()[0].data.name;
+            var link_types = {'linked_nodes': {'data': []},
+                              'linked_registrations': {'data': []},
+                              'linked_preprints': {'data': []}};
+            self.selected().map(function(item){
+                if(item.data.type === 'nodes') {
+                    link_types.linked_nodes.data.push({id: item.data.id,
+                                                       type: 'linked_nodes'});
+                } else if (item.data.type === 'registrations') {
+                    link_types.linked_registrations.data.push({id: item.data.id,
+                                                 type: 'linked_registrations'});
                 } else {
-                    message += ' could not be removed from the collection';
+                    link_types.linked_preprints.data.push({id: item.data.id,
+                                                 type: 'linked_preprints'});
                 }
-                $osf.growl(message, 'Please try again.', 'danger', 5000);
+            });
+
+            $.each(link_types, function(link_type, data) {
+                if(link_types[link_type].data.length > 0) {
+                    m.request({
+                        method : 'DELETE',
+                        url : collectionNode.links.self + 'relationships/' + link_type  + '/',
+                        config : mHelpers.apiV2Config({withCredentials: window.contextVars.isOnRootDomain}),
+                        data : data
+                    }).then(function(result) {
+                      data.data.forEach(function(item) {
+                          self.fetchers[currentCollection.id].remove(item.id);
+                          currentCollection.data.count(currentCollection.data.count()-1);
+                          self.updateSelected([]);
+                      });
+                      self.updateList();
+                    }, function _removeProjectFromCollectionsFail(result){
+                        var message = 'Some projects';
+                        if(data.data.length === 1) {
+                            message = self.selected()[0].data.name;
+                        } else {
+                            message += ' could not be removed from the collection';
+                        }
+                        $osf.growl(message, 'Please try again.', 'danger', 5000);
+                    });
+                }
             });
         };
 
@@ -559,8 +707,6 @@ var MyProjects = {
             var contributors = self.currentView().contributor;
 
             return self.currentView().fetcher._flat.filter(function(node) {
-              // var tagMatch = tags.length === 0;
-              // var contribMatch = contributors.length === 0;
               var tagMatch = true;
               var contribMatch = true;
 
@@ -599,7 +745,7 @@ var MyProjects = {
             }
             self.updateFolder()(null, self.treeData());
             // Manually select first item without triggering a click
-            if(self.multiselected()().length === 0 && self.treeData().children[0]){
+            if (self.treeData().children[0] && ((self.multiselected()().length === 0 && self.currentView().fetcher.isFinished()) || self.currentView().fetcher.forceRedraw === true)) {
               self.updateTbMultiselect([self.treeData().children[0]]);
             }
             m.redraw(true);
@@ -620,15 +766,25 @@ var MyProjects = {
                         template = m('.db-non-load-template.m-md.p-md.osf-box',
                             'You have not created any projects yet.');
                     } else if (lastcrumb.data.nodeType === 'registrations'){
-                        template = m('.db-non-load-template.m-md.p-md.osf-box',
+                        if (self.institutionId) {
+                            template = m('.db-non-load-template.m-md.p-md.osf-box',
+                                'There have been no completed registrations for this institution, but you can view the ',
+                                m('a', {href: 'https://osf.io/explore/activity/#newPublicRegistrations'}, 'newest public registrations'),
+                                ' or ',
+                                m('a', {href: 'https://osf.io/explore/activity/#popularPublicRegistrations'}, 'popular public registrations.'));
+                        } else {
+                            template = m('.db-non-load-template.m-md.p-md.osf-box',
                             'You have not made any registrations yet. Go to ',
-                            m('a', {href: 'http://help.osf.io/m/registrations'}, 'Getting Started'), ' to learn how registrations work.' );
-                    } else if (lastcrumb.data.node.attributes && lastcrumb.data.node.attributes.bookmarks) {
+                            m('a', {href: 'https://openscience.zendesk.com/hc/en-us/categories/360001550953'}, 'Guides'), ' to learn how registrations work.' );
+                        }
+                    } else if (lastcrumb.data.nodeType === 'preprints'){
+                        template = m('.db-non-load-template.m-md.p-md.osf-box', [m('span', 'You have not made any preprints yet. Learn more about preprints in the '), m('a[href="https://openscience.zendesk.com/hc/en-us/categories/360001530554"]', 'OSF Guides'), m('span', ' or '), m('a[href="/preprints/"]', 'make one now.')]);
+                    } else if (lodashGet(lastcrumb, 'data.node.attributes.bookmarks')) {
                         template = m('.db-non-load-template.m-md.p-md.osf-box', 'You have no bookmarks. You can add projects or registrations by dragging them into your bookmarks or by clicking the Add to Bookmark button on the project or registration.');
                     } else {
                         var helpText = 'This collection is empty.';
                         if (!self.viewOnly) {
-                            helpText +=' You can add projects or registrations by dragging them into the collection.';
+                            helpText +=' You can add projects, registrations, or preprints by dragging them into the collection.';
                         }
                         template = m('.db-non-load-template.m-md.p-md.osf-box', helpText);
                     }
@@ -662,6 +818,7 @@ var MyProjects = {
                 if (contributors) {
                     for(var i = 0; i < contributors.length; i++) {
                         var u = contributors[i];
+                        u.id = (u.id.indexOf('-') > -1) ? u.id.split('-')[1] : u.id;
                         if ((u.id === window.contextVars.currentUser.id) && !(self.institutionId)) {
                           continue;
                         }
@@ -796,12 +953,14 @@ var MyProjects = {
             var promise = m.request({method : 'GET', url : url, config : mHelpers.apiV2Config({withCredentials: window.contextVars.isOnRootDomain})});
             promise.then(function(result){
                 result.data.forEach(function(node){
-                    var count = node.relationships.linked_nodes.links.related.meta.count;
-                    self.collections().push(new LinkObject('collection', { path : 'collections/' + node.id + '/linked_nodes/', query : { 'related_counts' : 'children', 'embed' : 'contributors' }, nodeType : 'collection', node : node, count : m.prop(count), loaded: 1 }, node.attributes.title));
-
-                    var link = $osf.apiV2Url('collections/' + node.id + '/linked_nodes/', { query : { 'related_counts' : 'children', 'embed' : 'contributors' }});
-                    self.fetchers[self.collections()[self.collections().length-1].id] = new NodeFetcher('nodes', link, false);
-                    self.fetchers[self.collections()[self.collections().length-1].id].on(['page', 'done'], self.onPageLoad);
+                    var count = node.relationships.linked_registrations.links.related.meta.count + node.relationships.linked_nodes.links.related.meta.count + node.relationships.linked_preprints.links.related.meta.count;
+                    self.collections().push(new LinkObject('collection', {nodeType : 'collection', node : node, count : m.prop(count), loaded: 1 }, $osf.decodeText(node.attributes.title)));
+                    // TODO assess whether more sparse fields can be used
+                    var preprintLink = $osf.apiV2Url('collections/' + node.id + '/linked_preprints/', { query : {'embed' : 'contributors', 'version': '2.2'}});
+                    var regLink = $osf.apiV2Url('collections/' + node.id + '/linked_registrations/', { query : { 'related_counts' : 'children', 'embed' : 'contributors', 'version': '2.2', 'fields[registrations]' : sparseRegistrationFields}});
+                    var link = $osf.apiV2Url('collections/' + node.id + '/linked_nodes/', { query : { 'related_counts' : 'children', 'embed' : 'contributors', 'fields[nodes]' : sparseNodeFields }});
+                    self.fetchers[self.collections()[self.collections().length-1].id] = new NodeFetcher('nodes', link, false, 'registrations', regLink, 'preprints', preprintLink);
+                    self.fetchers[self.collections()[self.collections().length-1].id].on(['page'], self.onPageLoad);
                 });
                 if(result.links.next){
                     self.loadCollections(result.links.next);
@@ -855,17 +1014,43 @@ var MyProjects = {
           }
         };
 
+        self.onLoadReset = function() {
+            var current = self.currentView().fetcher;
+            if (current.isFinished() && current.forceRedraw && !current.isEmpty()) {
+
+                // If data loads before treebeard force redrawing
+                self.loadValue(100);
+                self.generateFiltersList();
+                self.updateList();
+
+                // Hack to force redraws when things get out of sync due to race condition
+                // If the believed number of rows is different from the actual number, force another redraw
+                if (!(self.currentView().totalRows === 0 && current._flat.length !== 0)) {
+                    current.forceRedraw = false;
+                }
+                // TB/Mithril interaction requires the redraw to be called a bit later
+                // TODO Figure out why
+                setTimeout(m.redraw.bind(this, true), 250);
+            }
+        };
+
         self.init = function _init_fileBrowser() {
             self.loadCategories().then(function(){
                 self.fetchers[self.systemCollections[0].id].on(['page', 'done'], self.onPageLoad);
                 self.fetchers[self.systemCollections[1].id].on(['page', 'done'], self.onPageLoad);
+                if(self.systemCollections[2]){
+                    self.fetchers[self.systemCollections[2].id].on(['page', 'done'], self.onPageLoad);
+                }
             });
             if (!self.viewOnly){
-                var collectionsUrl = $osf.apiV2Url('collections/', { query : {'related_counts' : 'linked_nodes', 'page[size]' : self.collectionsPageSize(), 'sort' : 'date_created', 'embed' : 'node_links'}});
+                // TODO use sparse fields
+                var collectionsUrl = $osf.apiV2Url('collections/', { query : {'related_counts' : 'linked_registrations,linked_nodes,linked_preprints', 'page[size]' : self.collectionsPageSize(), 'sort' : 'date_created', 'embed' : 'linked_nodes'}});
                 self.loadCollections(collectionsUrl);
             }
             // Add linkObject to the currentView
-            self.updateFilter(self.collections()[0]);
+            var filterIndex = self.getFilterIndex();
+            self.updateBreadcrumbs(self.collections()[filterIndex]);
+            self.updateFilter(self.collections()[filterIndex]);
         };
 
         self.init();
@@ -913,18 +1098,12 @@ var MyProjects = {
                 multiselected : ctrl.multiselected,
                 highlightMultiselect : ctrl.highlightMultiselect,
                 _onload: function(tb) {
-                  if (!ctrl.currentView().fetcher.isFinished()) return;
-                  // If data loads before treebeard force redrawing
-                  ctrl.loadValue(100);
-                  ctrl.generateFiltersList();
-                  ctrl.updateList();
-                  // TB/Mithril interaction requires the redraw to be called a bit later
-                  // TODO Figure out why
-                  setTimeout(m.redraw.bind(this, true), 250);
+                    ctrl.onLoadReset();
                 }
             },
             ctrl.projectOrganizerOptions
         );
+        ctrl.onLoadReset();
         return [
             !ctrl.institutionId ? m('.dashboard-header', m('.row', [
                 m('.col-xs-8', m('h3', [
@@ -1031,7 +1210,7 @@ var Collections = {
         self.totalPages = m.prop(1);
         self.calculateTotalPages = function _calculateTotalPages(result){
             if(result){ // If this calculation comes after GET call to collections
-                self.totalPages(Math.ceil((result.links.meta.total + args.systemCollections.length)/self.pageSize()));
+                self.totalPages(Math.ceil((result.meta.total + args.systemCollections.length)/self.pageSize()));
             } else {
                 self.totalPages(Math.ceil((self.collections().length)/self.pageSize()));
             }
@@ -1086,8 +1265,8 @@ var Collections = {
             promise.then(function(result){
                 var node = result.data;
                 var count = node.relationships.linked_nodes.links.related.meta.count || 0;
-                self.collections().push(new LinkObject('collection', { path : 'collections/' + node.id + '/linked_nodes/', query : { 'related_counts' : 'children' }, node : node, count : m.prop(count), nodeType : 'collection' }, node.attributes.title));
-                var link = $osf.apiV2Url('collections/' + node.id + '/linked_nodes/', { query : { 'related_counts' : 'children', 'embed' : 'contributors' }});
+                self.collections().push(new LinkObject('collection', { path : 'collections/' + node.id + '/linked_nodes/', query : { 'related_counts' : 'children' }, node : node, count : m.prop(count), nodeType : 'collection' }, $osf.decodeText(node.attributes.title)));
+                var link = $osf.apiV2Url('collections/' + node.id + '/linked_nodes/', { query : { 'related_counts' : 'children', 'embed' : 'contributors'}});
                 args.fetchers[self.collections()[self.collections().length-1].id] = new NodeFetcher('nodes', link);
                 args.fetchers[self.collections()[self.collections().length-1].id].on(['page', 'done'], args.onPageLoad);
 
@@ -1168,16 +1347,16 @@ var Collections = {
                 drop: function( event, ui ) {
                     var dataArray = [];
                     var collection = self.collections()[$(this).attr('data-index')];
-                    var collectionLink = $osf.apiV2Url(collection.data.path, { query : collection.data.query});
                     // If multiple items are dragged they have to be selected to make it work
                     if (args.selected().length > 1) {
                         dataArray = args.selected().map(function(item){
-                            $osf.trackClick('myProjects', 'projectOrganizer', 'multiple-projects-dragged-to-collection');
-                            return buildCollectionNodeData(item.data.id);
+                            return buildCollectionNodeData(item.data.id,
+                                                           item.data.type);
                         });
+                        $osf.trackClick('myProjects', 'projectOrganizer', 'multiple-projects-dragged-to-collection');
                     } else {
                         // if single items are passed use the event information
-                        dataArray.push(buildCollectionNodeData(ui.draggable.find('.title-text>a').attr('data-nodeID'))); // data-nodeID attribute needs to be set in project organizer building title column
+                        dataArray.push(buildCollectionNodeData(ui.draggable.find('.title-text>a').attr('data-nodeID'), ui.draggable.find('.title-text>a').attr('data-nodeType'))); // data-nodeID and data-nodeType attribute needs to be set in project organizer building title column
                         var projectName = ui.draggable.find('.title-text>a').attr('data-nodeTitle');
                         $osf.trackClick('myProjects', 'projectOrganizer', 'single-project-dragged-to-collection');
                     }
@@ -1187,7 +1366,7 @@ var Collections = {
                         return args.currentView().fetcher === args.fetchers[collection.id] ? args.updateList() : null;
                       m.request({
                           method : 'POST',
-                          url : collection.data.node.links.self + 'relationships/linked_nodes/',
+                          url : collection.data.node.links.self + 'relationships/' + data[index].data[0].type  + '/',
                           config : mHelpers.apiV2Config({withCredentials: window.contextVars.isOnRootDomain}),
                           data : data[index]
                       }).then(function(result){
@@ -1259,7 +1438,7 @@ var Collections = {
             for (var i = begin; i < end; i++) {
                 item = ctrl.collections()[i];
                 index = i;
-                dropAcceptClass = index > 1 ? 'acceptDrop' : '';
+                dropAcceptClass = index > 2 ? 'acceptDrop' : '';
                 childCount = item.data.count ? ' (' + item.data.count() + ')' : '';
                 if (args.currentView().collection === item) {
                     selectedCSS = 'active';
@@ -1607,7 +1786,7 @@ var Breadcrumbs = {
                                     $osf.trackClick('myProjects', 'add-component', 'open-add-component-modal');
                                 }}, [m('i.fa.fa-plus.m-r-xs', {style: 'font-size: 10px;'}), 'Create component']),
                                 parentID: linkObject.data.id,
-                                parentTitle: linkObject.data.name,
+                                parentTitle: $osf.decodeText(linkObject.data.name),
                                 modalID: 'addSubComponent',
                                 title: 'Create new component',
                                 categoryList: args.categoryList,
@@ -1638,7 +1817,7 @@ var Breadcrumbs = {
                         }
                         return [
                             m('li', [
-                                m('span.btn', item.label),
+                                m('span.btn', $osf.decodeText(item.label)),
                                 contributorsTemplate,
                                 tagsTemplate,
                                 m('i.fa.fa-angle-right')
@@ -1650,7 +1829,7 @@ var Breadcrumbs = {
                 item.index = index; // Add index to update breadcrumbs
                 item.placement = 'breadcrumb'; // differentiate location for proper breadcrumb actions
                 return m('li',[
-                    m('span.btn.btn-link', {onclick : updateFilesOnClick.bind(null, item)},  item.label),
+                    m('span.btn.btn-link', {onclick : updateFilesOnClick.bind(null, item)},  $osf.decodeText(item.label)),
                     index === 0 && arr.length === 1 ? [contributorsTemplate, tagsTemplate] : '',
                     m('i.fa.fa-angle-right'),
                     ]
@@ -1777,6 +1956,7 @@ var Information = {
     view : function (ctrl, args) {
 
         var template = '';
+        var category;
         var showRemoveFromCollection;
         var collectionFilter = args.currentView().collection;
         if (args.selected().length === 0) {
@@ -1784,10 +1964,13 @@ var Information = {
         }
         if (args.selected().length === 1) {
             var item = args.selected()[0].data;
+            var resourceType = item.type;
             var permission = item.attributes.current_user_permissions.slice(-1)[0];
             showRemoveFromCollection = collectionFilter.data.nodeType === 'collection' && args.selected()[0].depth === 1 && args.fetchers[collectionFilter.id]._flat.indexOf(item) !== -1; // Be able to remove top level items but not their children
-            if(item.attributes.category === ''){
-                item.attributes.category = 'Uncategorized';
+            if (resourceType === 'preprints') {
+                category = 'Preprint';
+            } else {
+                category = item.attributes.category === '' ? 'Uncategorized' : item.attributes.category;
             }
             template = m('.p-sm', [
                 showRemoveFromCollection ? m('.clearfix', m('.btn.btn-default.btn-sm.btn.p-xs.text-danger.pull-right', { onclick : function() {
@@ -1796,13 +1979,13 @@ var Information = {
                 } }, 'Remove from collection')) : '',
                     m('h3', m('a', { href : item.links.html, onclick: function(){
                         $osf.trackClick('myProjects', 'information-panel', 'navigate-to-project');
-                    }}, item.attributes.title)),
+                    }}, $osf.decodeText(item.attributes.title))),
                 m('[role="tabpanel"]', [
                     m('ul.nav.nav-tabs.m-b-md[role="tablist"]', [
                         m('li[role="presentation"].active', m('a[href="#tab-information"][aria-controls="information"][role="tab"][data-toggle="tab"]', {onclick: function(){
                             $osf.trackClick('myProjects', 'information-panel', 'open-information-tab');
                         }}, 'Information')),
-                        m('li[role="presentation"]', m('a[href="#tab-activity"][aria-controls="activity"][role="tab"][data-toggle="tab"]', {onclick : function() {
+                        resourceType === 'preprints' ? '' : m('li[role="presentation"]', m('a[href="#tab-activity"][aria-controls="activity"][role="tab"][data-toggle="tab"]', {onclick : function() {
                             args.getCurrentLogs();
                             $osf.trackClick('myProjects', 'information-panel', 'open-activity-tab');
                         }}, 'Activity'))
@@ -1810,13 +1993,19 @@ var Information = {
                     m('.tab-content', [
                         m('[role="tabpanel"].tab-pane.active#tab-information',[
                             m('p.db-info-meta.text-muted', [
-                                m('', 'Visibility : ' + (item.attributes.public ? 'Public' : 'Private')),
-                                m('.text-capitalize', 'Category: ' + item.attributes.category),
+                                resourceType === 'preprints' && item.attributes.reviews_state !== 'initial' && item.attributes.reviews_state !== null ? m('.text-capitalize', 'Status: ' + item.attributes.reviews_state) : resourceType === 'preprints' && item.attributes.date_withdrawn !== null ? 'Status: Withdrawn' : '',  // is a preprint, has a state, provider uses moderation
+                                resourceType === 'preprints' && item.attributes.is_published === true ? m('.text-capitalize', 'Published: ' + item.attributes.is_published) : '',
+                                m('', 'Visibility: ' + (item.attributes.public ? 'Public' : 'Private')),
+                                m('', [
+                                  m('span', 'Category: '),
+                                  m('span', { className : mHelpers.getIcon(category) }),
+                                  m('span.text-capitalize', ' ' + category)
+                                ]),
                                 m('.text-capitalize', 'Permission: ' + permission),
                                 m('', 'Last Modified on: ' + (item.date ? item.date.local : ''))
                             ]),
                             m('p', [
-                                m('span', {style: 'white-space:pre-wrap'}, item.attributes.description)
+                                m('span', {style: 'white-space:pre-wrap'}, $osf.decodeText(item.attributes.description))
                             ]),
                             item.attributes.tags.length > 0 ?
                             m('p.m-t-md', [
@@ -1829,7 +2018,7 @@ var Information = {
                             ]) : ''
                         ]),
                         m('[role="tabpanel"].tab-pane#tab-activity',[
-                            m.component(ActivityLogs, args)
+                            item.type !== 'preprints' ? m.component(ActivityLogs, args) : ''
                         ])
                     ])
                 ])
@@ -1843,12 +2032,18 @@ var Information = {
                     $osf.trackClick('myProjects', 'information-panel', 'remove-multiple-projects-from-collections');
                 } }, 'Remove selected from collection')) : '',
                 args.selected().map(function(item){
+                    var resourceType = item.data.type;
+                    if (resourceType === 'preprints') {
+                        category = 'Preprint';
+                    } else {
+                        category = item.data.attributes.category === '' ? 'Uncategorized' : item.data.attributes.category;
+                    }
                     return m('.db-info-multi', [
                         m('h4', m('a', { href : item.data.links.html, onclick: function(){
                             $osf.trackClick('myProjects', 'information-panel', 'navigate-to-project-multiple-selected');
-                        }}, item.data.attributes.title)),
+                        }}, $osf.decodeText(item.data.attributes.title))),
                         m('p.db-info-meta.text-muted', [
-                            m('span', item.data.attributes.public ? 'Public' : 'Private' + ' ' + item.data.attributes.category),
+                            resourceType === 'preprints'? m('span', (item.data.attributes.is_published ? 'Published' : 'Unpublished') + ' ' + category) : m('span', (item.data.attributes.public ? 'Public' : 'Private') + ' ' + category),
                             m('span', ', Last Modified on ' + item.data.date.local)
                         ])
                     ]);
@@ -1875,7 +2070,7 @@ var ActivityLogs = {
                 }
                 return m('.db-activity-item', [
                 m('', [ m('.db-log-avatar.m-r-xs', image),
-                    m.component(LogText, item)]),
+                    m.component(LogText.LogText, item)]),
                 m('.text-right', m('span.text-muted.m-r-xs', item.attributes.formattableDate.local))]);
 
             }) : '',

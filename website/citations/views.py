@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 from flask import request
-
-from modularodm import Q
+from django.db.models import Q
 
 from framework.auth.decorators import must_be_logged_in
 
-from website.models import CitationStyle
+from osf.models.citation import CitationStyle
 from website.project.decorators import (
     must_have_addon, must_be_addon_authorizer,
     must_have_permission, must_not_be_registration,
@@ -13,18 +12,16 @@ from website.project.decorators import (
 )
 
 def list_citation_styles():
-    query = None
-
-    term = request.args.get('q')
-    if term:
-        query = (
-            Q('_id', 'icontains', term) |
-            Q('title', 'icontains', term) |
-            Q('short_title', 'icontains', term)
+    query = request.args.get('q')
+    citation_styles = CitationStyle.objects.all()
+    if query:
+        citation_styles = CitationStyle.objects.filter(
+            Q(_id__icontains=query) |
+            Q(title__icontains=query) |
+            Q(short_title__icontains=query)
         )
-
     return {
-        'styles': [style.to_json() for style in CitationStyle.find(query)],
+        'styles': [style.to_json() for style in citation_styles if style.has_bibliography]
     }
 
 
@@ -67,6 +64,7 @@ class GenericCitationViews(object):
     def account_list(self):
         addon_short_name = self.addon_short_name
         Provider = self.Provider
+
         @must_be_logged_in
         def _account_list(auth):
             """ List addon accounts associated with the currently logged-in user
@@ -78,12 +76,13 @@ class GenericCitationViews(object):
     def get_config(self):
         addon_short_name = self.addon_short_name
         Provider = self.Provider
+
         @must_be_logged_in
         @must_have_addon(addon_short_name, 'node')
         @must_be_valid_project
         @must_have_permission('write')
         def _get_config(auth, node_addon, **kwargs):
-            """ Returns the serialized node settigs,
+            """ Returns the serialized node settings,
             with a boolean indicator for credential validity.
             """
             provider = Provider()
@@ -99,6 +98,7 @@ class GenericCitationViews(object):
     def set_config(self):
         addon_short_name = self.addon_short_name
         Provider = self.Provider
+
         @must_not_be_registration
         @must_have_addon(addon_short_name, 'user')
         @must_have_addon(addon_short_name, 'node')
@@ -131,6 +131,7 @@ class GenericCitationViews(object):
     def import_auth(self):
         addon_short_name = self.addon_short_name
         Provider = self.Provider
+
         @must_not_be_registration
         @must_have_addon(addon_short_name, 'user')
         @must_have_addon(addon_short_name, 'node')
@@ -148,6 +149,7 @@ class GenericCitationViews(object):
     def deauthorize_node(self):
         addon_short_name = self.addon_short_name
         Provider = self.Provider
+
         @must_not_be_registration
         @must_have_addon(addon_short_name, 'node')
         @must_have_permission('write')
@@ -162,6 +164,7 @@ class GenericCitationViews(object):
     def widget(self):
         addon_short_name = self.addon_short_name
         Provider = self.Provider
+
         @must_be_contributor_or_public
         @must_have_addon(addon_short_name, 'node')
         def _widget(node_addon, **kwargs):
@@ -174,6 +177,7 @@ class GenericCitationViews(object):
     def citation_list(self):
         addon_short_name = self.addon_short_name
         Provider = self.Provider
+
         @must_be_contributor_or_public
         @must_have_addon(addon_short_name, 'node')
         def _citation_list(auth, node_addon, list_id=None, **kwargs):

@@ -1,4 +1,3 @@
-var $ = require('jquery');
 var m = require('mithril');
 var Treebeard = require('treebeard');
 
@@ -46,7 +45,7 @@ function Meetings(data) {
                     data : 'name',  // Data field name
                     sortInclude : true,
                     filter : true,
-                    custom : function() { return m('a', { href : item.data.url, target : '_blank' }, item.data.name ); }
+                    custom : function() { return m('a', { href : item.data.url }, item.data.name ); }
 
                 },
                 {

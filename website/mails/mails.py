@@ -20,10 +20,12 @@ Usage: ::
 """
 import os
 import logging
+import waffle
 
 from mako.lookup import TemplateLookup, Template
 
 from framework.email import tasks
+from osf import features
 from website import settings
 
 logger = logging.getLogger(__name__)
@@ -34,9 +36,12 @@ _tpl_lookup = TemplateLookup(
     directories=[EMAIL_TEMPLATES_DIR],
 )
 
-TXT_EXT = '.txt.mako'
 HTML_EXT = '.html.mako'
 
+DISABLED_MAILS = [
+    'welcome',
+    'welcome_osf4i'
+]
 
 class Mail(object):
     """An email object.
@@ -46,21 +51,19 @@ class Mail(object):
     :param iterable categories: Categories to add to the email using SendGrid's
         SMTPAPI. Used for email analytics.
         See https://sendgrid.com/docs/User_Guide/Statistics/categories.html
+    :param: bool engagement: Whether this is an engagement email that can be disabled with
+        the disable_engagement_emails waffle flag
     """
 
-    def __init__(self, tpl_prefix, subject, categories=None):
+    def __init__(self, tpl_prefix, subject, categories=None, engagement=False):
         self.tpl_prefix = tpl_prefix
         self._subject = subject
         self.categories = categories
+        self.engagement = engagement
 
     def html(self, **context):
         """Render the HTML email message."""
         tpl_name = self.tpl_prefix + HTML_EXT
-        return render_message(tpl_name, **context)
-
-    def text(self, **context):
-        """Render the plaintext email message"""
-        tpl_name = self.tpl_prefix + TXT_EXT
         return render_message(tpl_name, **context)
 
     def subject(self, **context):
@@ -73,8 +76,10 @@ def render_message(tpl_name, **context):
     return tpl.render(**context)
 
 
-def send_mail(to_addr, mail, mimetype='plain', from_addr=None, mailer=None,
-            username=None, password=None, callback=None, **context):
+def send_mail(
+        to_addr, mail, mimetype='html', from_addr=None, mailer=None, celery=True,
+        username=None, password=None, callback=None, attachment_name=None,
+        attachment_content=None, **context):
     """Send an email from the OSF.
     Example: ::
 
@@ -91,11 +96,13 @@ def send_mail(to_addr, mail, mimetype='plain', from_addr=None, mailer=None,
     .. note:
          Uses celery if available
     """
+    if waffle.switch_is_active(features.DISABLE_ENGAGEMENT_EMAILS) and mail.engagement:
+        return False
 
     from_addr = from_addr or settings.FROM_EMAIL
     mailer = mailer or tasks.send_email
     subject = mail.subject(**context)
-    message = mail.text(**context) if mimetype in ('plain', 'txt') else mail.html(**context)
+    message = mail.html(**context)
     # Don't use ttls and login in DEBUG_MODE
     ttls = login = not settings.DEBUG_MODE
     logger.debug('Sending email...')
@@ -112,33 +119,127 @@ def send_mail(to_addr, mail, mimetype='plain', from_addr=None, mailer=None,
         username=username,
         password=password,
         categories=mail.categories,
+        attachment_name=attachment_name,
+        attachment_content=attachment_content,
     )
 
+    logger.debug('Preparing to send...')
     if settings.USE_EMAIL:
-        if settings.USE_CELERY:
+        if settings.USE_CELERY and celery:
+            logger.debug('Sending via celery...')
             return mailer.apply_async(kwargs=kwargs, link=callback)
         else:
+            logger.debug('Sending without celery')
             ret = mailer(**kwargs)
             if callback:
                 callback()
 
             return ret
 
+
+def get_english_article(word):
+    """
+    Decide whether to use 'a' or 'an' for a given English word.
+
+    :param word: the word immediately after the article
+    :return: 'a' or 'an'
+    """
+    return 'a' + ('n' if word[0].lower() in 'aeiou' else '')
+
+
 # Predefined Emails
 
 TEST = Mail('test', subject='A test email to ${name}', categories=['test'])
 
-INITIAL_CONFIRM_EMAIL = Mail('initial_confirm', subject='Open Science Framework Account Verification')
-CONFIRM_EMAIL = Mail('confirm', subject='Add a new email to your OSF account')
-CONFIRM_EMAIL_PREREG = Mail('confirm_prereg', subject='Open Science Framework Account Verification, Preregistration Challenge')
+# Emails for first-time login through external identity providers.
+EXTERNAL_LOGIN_CONFIRM_EMAIL_CREATE = Mail(
+    'external_confirm_create',
+    subject='OSF Account Verification'
+)
 
+FORK_COMPLETED = Mail(
+    'fork_completed',
+    subject='Your fork has completed'
+)
+
+FORK_FAILED = Mail(
+    'fork_failed',
+    subject='Your fork has failed'
+)
+
+EXTERNAL_LOGIN_CONFIRM_EMAIL_LINK = Mail(
+    'external_confirm_link',
+    subject='OSF Account Verification'
+)
+EXTERNAL_LOGIN_LINK_SUCCESS = Mail(
+    'external_confirm_success',
+    subject='OSF Account Verification Success'
+)
+
+# Sign up confirmation emails for OSF, native campaigns and branded campaigns
+INITIAL_CONFIRM_EMAIL = Mail(
+    'initial_confirm',
+    subject='OSF Account Verification'
+)
+CONFIRM_EMAIL = Mail(
+    'confirm',
+    subject='Add a new email to your OSF account'
+)
+CONFIRM_EMAIL_PREREG = Mail(
+    'confirm_prereg',
+    subject='OSF Account Verification, Preregistration Challenge'
+)
+CONFIRM_EMAIL_ERPC = Mail(
+    'confirm_erpc',
+    subject='OSF Account Verification, Election Research Preacceptance Competition'
+)
+CONFIRM_EMAIL_PREPRINTS = lambda name, provider: Mail(
+    'confirm_preprints_{}'.format(name),
+    subject='OSF Account Verification, {}'.format(provider)
+)
+CONFIRM_EMAIL_REGISTRIES_OSF = Mail(
+    'confirm_registries_osf',
+    subject='OSF Account Verification, OSF Registries'
+)
+CONFIRM_EMAIL_MODERATION = lambda provider: Mail(
+    'confirm_moderation',
+    subject='OSF Account Verification, {}'.format(provider.name)
+)
+
+# Merge account, add or remove email confirmation emails.
 CONFIRM_MERGE = Mail('confirm_merge', subject='Confirm account merge')
-
-REMOVED_EMAIL = Mail('email_removed', subject='Email address removed from your OSF account')
 PRIMARY_EMAIL_CHANGED = Mail('primary_email_changed', subject='Primary email changed')
-INVITE = Mail('invite', subject='You have been added as a contributor to an OSF project.')
-CONTRIBUTOR_ADDED = Mail('contributor_added', subject='You have been added as a contributor to an OSF project.')
 
+
+# Contributor added confirmation emails
+INVITE_DEFAULT = Mail(
+    'invite_default',
+    subject='You have been added as a contributor to an OSF project.'
+)
+INVITE_PREPRINT = lambda template, provider: Mail(
+    'invite_preprints_{}'.format(template),
+    subject='You have been added as a contributor to {} {} {}.'.format(get_english_article(provider.name), provider.name, provider.preprint_word)
+)
+CONTRIBUTOR_ADDED_DEFAULT = Mail(
+    'contributor_added_default',
+    subject='You have been added as a contributor to an OSF project.'
+)
+CONTRIBUTOR_ADDED_PREPRINT = lambda template, provider: Mail(
+    'contributor_added_preprints_{}'.format(template),
+    subject='You have been added as a contributor to {} {} {}.'.format(get_english_article(provider.name), provider.name, provider.preprint_word)
+)
+CONTRIBUTOR_ADDED_PREPRINT_NODE_FROM_OSF = Mail(
+    'contributor_added_preprint_node_from_osf',
+    subject='You have been added as a contributor to an OSF project.'
+)
+MODERATOR_ADDED = lambda provider: Mail(
+    'moderator_added',
+    subject='You have been added as a moderator for {}'.format(provider.name)
+)
+CONTRIBUTOR_ADDED_ACCESS_REQUEST = Mail(
+    'contributor_added_access_request',
+    subject='Your access request to an OSF project has been approved'
+)
 FORWARD_INVITE = Mail('forward_invite', subject='Please forward to ${fullname}')
 FORWARD_INVITE_REGISTERED = Mail('forward_invite_registered', subject='Please forward to ${fullname}')
 
@@ -150,23 +251,31 @@ PENDING_VERIFICATION_REGISTERED = Mail('pending_registered', subject='Received r
 REQUEST_EXPORT = Mail('support_request', subject='[via OSF] Export Request')
 REQUEST_DEACTIVATION = Mail('support_request', subject='[via OSF] Deactivation Request')
 
+SPAM_USER_BANNED = Mail('spam_user_banned', subject='[OSF] Account flagged as spam')
+
 CONFERENCE_SUBMITTED = Mail(
     'conference_submitted',
-    subject='Project created on Open Science Framework',
+    subject='Project created on OSF',
 )
 CONFERENCE_INACTIVE = Mail(
     'conference_inactive',
-    subject='Open Science Framework Error: Conference inactive',
+    subject='OSF Error: Conference inactive',
 )
 CONFERENCE_FAILED = Mail(
     'conference_failed',
-    subject='Open Science Framework Error: No files attached',
+    subject='OSF Error: No files attached',
 )
 
 DIGEST = Mail(
     'digest', subject='OSF Notifications',
     categories=['notifications', 'notifications-digest']
 )
+
+DIGEST_REVIEWS_MODERATORS = Mail(
+    'digest_reviews_moderators',
+    subject='Recent submissions to ${provider_name}',
+)
+
 TRANSACTIONAL = Mail(
     'transactional', subject='OSF: ${subject}',
     categories=['notifications', 'notifications-transactional']
@@ -217,9 +326,8 @@ FILE_OPERATION_FAILED = Mail(
     subject='Your ${action} has failed',
 )
 
-UNESCAPE = '<% from website.util.sanitize import unescape_entities %> ${unescape_entities(src.title)}'
+UNESCAPE = '<% from osf.utils.sanitize import unescape_entities %> ${unescape_entities(src.title)}'
 PROBLEM_REGISTERING = 'Problem registering ' + UNESCAPE
-PROBLEM_REGISTERING_STUCK = PROBLEM_REGISTERING + '- Stuck Registration'
 
 ARCHIVE_SIZE_EXCEEDED_DESK = Mail(
     'archive_size_exceeded_desk',
@@ -255,7 +363,7 @@ ARCHIVE_UNCAUGHT_ERROR_DESK = Mail(
 
 ARCHIVE_REGISTRATION_STUCK_DESK = Mail(
     'archive_registration_stuck_desk',
-    subject=PROBLEM_REGISTERING_STUCK
+    subject='[auto] Stuck registrations audit'
 )
 
 ARCHIVE_UNCAUGHT_ERROR_USER = Mail(
@@ -270,12 +378,14 @@ ARCHIVE_SUCCESS = Mail(
 
 WELCOME = Mail(
     'welcome',
-    subject='Welcome to the Open Science Framework'
+    subject='Welcome to OSF',
+    engagement=True
 )
 
 WELCOME_OSF4I = Mail(
     'welcome_osf4i',
-    subject='Welcome to the Open Science Framework'
+    subject='Welcome to OSF',
+    engagement=True
 )
 
 PREREG_CHALLENGE_REJECTED = Mail(
@@ -288,4 +398,49 @@ PREREG_CHALLENGE_ACCEPTED = Mail(
     subject='Your research plan has been registered and accepted for the Preregistration Challenge'
 )
 
+PREREG_CSV = Mail(
+    'prereg_csv',
+    subject='[auto] Updated Prereg CSV'
+)
+
 EMPTY = Mail('empty', subject='${subject}')
+
+SHARE_ERROR_DESK = Mail(
+    'send_data_share_error_desk',
+    subject='Share Error'
+)
+
+SHARE_PREPRINT_ERROR_DESK = Mail(
+    'send_data_share_preprint_error_desk',
+    subject='Share Error'
+)
+
+REVIEWS_SUBMISSION_CONFIRMATION = Mail(
+    'reviews_submission_confirmation',
+    subject='Confirmation of your submission to ${provider_name}'
+)
+
+ACCESS_REQUEST_SUBMITTED = Mail(
+    'access_request_submitted',
+    subject='An OSF user has requested access to your ${node.project_or_component}'
+)
+
+ACCESS_REQUEST_DENIED = Mail(
+    'access_request_rejected',
+    subject='Your access request to an OSF project has been declined'
+)
+
+CROSSREF_ERROR = Mail(
+    'crossref_doi_error',
+    subject='There was an error creating a DOI for preprint(s). batch_id: ${batch_id}'
+)
+
+PREPRINT_WITHDRAWAL_REQUEST_GRANTED = Mail(
+    'preprint_withdrawal_request_granted',
+    subject='Your ${reviewable.provider.preprint_word} has been withdrawn',
+)
+
+PREPRINT_WITHDRAWAL_REQUEST_DECLINED = Mail(
+    'preprint_withdrawal_request_declined',
+    subject='Your withdrawal request has been declined',
+)

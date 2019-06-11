@@ -1,19 +1,17 @@
 # -*- coding: utf-8 -*-
-from datetime import datetime
-from modularodm import Q
+from django.utils import timezone
 
 from website import settings
 
 def no_addon(email):
-    return len(email.user.get_addons()) == 0
+    return len([addon for addon in email.user.get_addons() if addon.config.short_name != 'osfstorage']) == 0
 
 def no_login(email):
-    from website.models import QueuedMail
-    from website.mails import NO_LOGIN_TYPE
-    sent = QueuedMail.find(Q('user', 'eq', email.user) & Q('email_type', 'eq', NO_LOGIN_TYPE) & Q('_id', 'ne', email._id))
-    if sent.count():
+    from osf.models.queued_mail import QueuedMail, NO_LOGIN_TYPE
+    sent = QueuedMail.objects.filter(user=email.user, email_type=NO_LOGIN_TYPE).exclude(_id=email._id)
+    if sent.exists():
         return False
-    return email.user.date_last_login < datetime.utcnow() - settings.NO_LOGIN_WAIT_TIME
+    return email.user.date_last_login < timezone.now() - settings.NO_LOGIN_WAIT_TIME
 
 def new_public_project(email):
     """ Will check to make sure the project that triggered this presend is still public
@@ -25,14 +23,15 @@ def new_public_project(email):
     """
 
     # In line import to prevent circular importing
-    from website.models import Node
+    from osf.models import AbstractNode
 
-    node = Node.load(email.data['nid'])
+    node = AbstractNode.load(email.data['nid'])
 
     if not node:
         return False
     public = email.find_sent_of_same_type_and_user()
     return node.is_public and not len(public)
+
 
 def welcome_osf4m(email):
     """ presend has two functions. First is to make sure that the user has not
@@ -44,9 +43,9 @@ def welcome_osf4m(email):
     :return: boolean based on whether the email should be sent
     """
     # In line import to prevent circular importing
-    from website.files.models import OsfStorageFileNode
+    from addons.osfstorage.models import OsfStorageFileNode
     if email.user.date_last_login:
-        if email.user.date_last_login > datetime.utcnow() - settings.WELCOME_OSF4M_WAIT_TIME_GRACE:
+        if email.user.date_last_login > timezone.now() - settings.WELCOME_OSF4M_WAIT_TIME_GRACE:
             return False
     upload = OsfStorageFileNode.load(email.data['fid'])
     if upload:

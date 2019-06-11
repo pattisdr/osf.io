@@ -1,9 +1,21 @@
 # -*- coding: utf-8 -*-
+from __future__ import absolute_import
 import os
 import httplib as http
+import requests
+import urlparse
+import waffle
+import json
 
 from flask import request
 from flask import send_from_directory
+from flask import Response
+from flask import stream_with_context
+from flask import g
+from django.core.urlresolvers import reverse
+from django.conf import settings as api_settings
+
+from geolite2 import geolite2
 
 from framework import status
 from framework import sentry
@@ -12,79 +24,100 @@ from framework.routing import Rule
 from framework.flask import redirect
 from framework.routing import WebRenderer
 from framework.exceptions import HTTPError
-from framework.auth import get_display_name
-from framework.routing import xml_renderer
 from framework.routing import json_renderer
 from framework.routing import process_rules
 from framework.auth import views as auth_views
 from framework.routing import render_mako_string
 from framework.auth.core import _get_current_user
 
-from modularodm import Q
-from modularodm.exceptions import QueryException, NoResultsFound
-
+from osf import features
+from osf.models import Institution
+from osf.utils import sanitize
 from website import util
 from website import prereg
 from website import settings
 from website import language
 from website.util import metrics
 from website.util import paths
-from website.util import sanitize
 from website import maintenance
-from website.models import Institution
 from website import landing_pages as landing_page_views
 from website import views as website_views
 from website.citations import views as citation_views
 from website.search import views as search_views
 from website.oauth import views as oauth_views
+from addons.osfstorage import views as osfstorage_views
+from website.profile.utils import get_profile_image_url
 from website.profile import views as profile_views
 from website.project import views as project_views
-from website.addons.base import views as addon_views
+from addons.base import views as addon_views
 from website.discovery import views as discovery_views
 from website.conferences import views as conference_views
 from website.preprints import views as preprint_views
+from website.registries import views as registries_views
+from website.reviews import views as reviews_views
 from website.institutions import views as institution_views
 from website.notifications import views as notification_views
+from website.ember_osf_web import views as ember_osf_web_views
+from website.closed_challenges import views as closed_challenges_views
+from website.identifiers import views as identifier_views
+from website.settings import EXTERNAL_EMBER_APPS, EXTERNAL_EMBER_SERVER_TIMEOUT
 
+def set_status_message(user):
+    if user and not user.accepted_terms_of_service:
+        status.push_status_message(
+            message=language.TERMS_OF_SERVICE.format(api_domain=settings.API_DOMAIN,
+                                                     user_id=user._id,
+                                                     csrf_token=json.dumps(g.get('csrf_token'))),
+            kind='default',
+            dismissible=True,
+            trust=True,
+            jumbotron=True,
+            id='terms_of_service',
+            extra={}
+        )
 
 def get_globals():
     """Context variables that are available for every template rendered by
     OSFWebRenderer.
     """
     user = _get_current_user()
-    user_institutions = [{'id': inst._id, 'name': inst.name, 'logo_path': inst.logo_path} for inst in user.affiliated_institutions] if user else []
-    all_institutions = [{'id': inst._id, 'name': inst.name, 'logo_path': inst.logo_path} for inst in Institution.find().sort('name')]
+    set_status_message(user)
+    user_institutions = [{'id': inst._id, 'name': inst.name, 'logo_path': inst.logo_path_rounded_corners} for inst in user.affiliated_institutions.all()] if user else []
+    location = geolite2.reader().get(request.remote_addr) if request.remote_addr else None
     if request.host_url != settings.DOMAIN:
         try:
-            inst_id = (Institution.find_one(Q('domains', 'eq', request.host.lower())))._id
+            inst_id = Institution.objects.get(domains__icontains=request.host, is_deleted=False)._id
             request_login_url = '{}institutions/{}'.format(settings.DOMAIN, inst_id)
-        except NoResultsFound:
+        except Institution.DoesNotExist:
             request_login_url = request.url.replace(request.host_url, settings.DOMAIN)
     else:
         request_login_url = request.url
+
     return {
         'private_link_anonymous': is_private_link_anonymous_view(),
         'user_name': user.username if user else '',
         'user_full_name': user.fullname if user else '',
-        'user_id': user._primary_key if user else '',
+        'user_id': user._id if user else '',
         'user_locale': user.locale if user and user.locale else '',
         'user_timezone': user.timezone if user and user.timezone else '',
         'user_url': user.url if user else '',
-        'user_gravatar': profile_views.current_user_gravatar(size=25)['gravatar_url'] if user else '',
+        'user_profile_image': get_profile_image_url(user=user, size=25) if user else '',
         'user_email_verifications': user.unconfirmed_email_info if user else [],
         'user_api_url': user.api_url if user else '',
         'user_entry_point': metrics.get_entry_point(user) if user else '',
         'user_institutions': user_institutions if user else None,
-        'all_institutions': all_institutions,
-        'display_name': get_display_name(user.fullname) if user else '',
+        'display_name': user.fullname if user else '',
+        'anon': {
+            'continent': (location or {}).get('continent', {}).get('code', None),
+            'country': (location or {}).get('country', {}).get('iso_code', None),
+        },
         'use_cdn': settings.USE_CDN_FOR_CLIENT_LIBS,
-        'piwik_host': settings.PIWIK_HOST,
-        'piwik_site_id': settings.PIWIK_SITE_ID,
         'sentry_dsn_js': settings.SENTRY_DSN_JS if sentry.enabled else None,
         'dev_mode': settings.DEV_MODE,
         'allow_login': settings.ALLOW_LOGIN,
         'cookie_name': settings.COOKIE_NAME,
         'status': status.pop_status_messages(),
+        'prev_status': status.pop_previous_status_messages(),
         'domain': settings.DOMAIN,
         'api_domain': settings.API_DOMAIN,
         'disk_saving_mode': settings.DISK_SAVING_MODE,
@@ -94,29 +127,48 @@ def get_globals():
         'web_url_for': util.web_url_for,
         'api_url_for': util.api_url_for,
         'api_v2_url': util.api_v2_url,  # URL function for templates
+        'api_v2_domain': settings.API_DOMAIN,
         'api_v2_base': util.api_v2_url(''),  # Base url used by JS api helper
         'sanitize': sanitize,
         'sjson': lambda s: sanitize.safe_json(s),
         'webpack_asset': paths.webpack_asset,
+        'osf_url': settings.INTERNAL_DOMAIN,
         'waterbutler_url': settings.WATERBUTLER_URL,
         'login_url': cas.get_login_url(request_login_url),
+        'sign_up_url': util.web_url_for('auth_register', _absolute=True, next=request_login_url),
         'reauth_url': util.web_url_for('auth_logout', redirect_url=request.url, reauth=True),
         'profile_url': cas.get_profile_url(),
         'enable_institutions': settings.ENABLE_INSTITUTIONS,
-        'keen_project_id': settings.KEEN_PROJECT_ID,
-        'keen_write_key': settings.KEEN_WRITE_KEY,
+        'keen': {
+            'public': {
+                'project_id': settings.KEEN['public']['project_id'],
+                'write_key': settings.KEEN['public']['write_key'],
+            },
+            'private': {
+                'project_id': settings.KEEN['private']['project_id'],
+                'write_key': settings.KEEN['private']['write_key'],
+            },
+        },
+        'institutional_landing_flag': waffle.flag_is_active(request, features.INSTITUTIONAL_LANDING_FLAG),
         'maintenance': maintenance.get_maintenance(),
+        'recaptcha_site_key': settings.RECAPTCHA_SITE_KEY,
+        'custom_citations': settings.CUSTOM_CITATIONS,
+        'osf_support_email': settings.OSF_SUPPORT_EMAIL,
+        'osf_contact_email': settings.OSF_CONTACT_EMAIL,
+        'wafflejs_url': '{api_domain}{waffle_url}'.format(api_domain=settings.API_DOMAIN.rstrip('/'), waffle_url=reverse('wafflejs')),
+        'footer_links': settings.FOOTER_LINKS,
+        'features': features,
+        'waffle': waffle,
+        'csrf_cookie_name': api_settings.CSRF_COOKIE_NAME,
     }
 
 
 def is_private_link_anonymous_view():
+    # Avoid circular import
+    from osf.models import PrivateLink
     try:
-        # Avoid circular import
-        from website.project.model import PrivateLink
-        return PrivateLink.find_one(
-            Q('key', 'eq', request.args.get('view_only'))
-        ).anonymous
-    except QueryException:
+        return PrivateLink.objects.filter(key=request.args.get('view_only')).values_list('anonymous', flat=True).get()
+    except PrivateLink.DoesNotExist:
         return False
 
 
@@ -128,6 +180,7 @@ class OsfWebRenderer(WebRenderer):
     def __init__(self, *args, **kwargs):
         kwargs['data'] = get_globals
         super(OsfWebRenderer, self).__init__(*args, **kwargs)
+
 
 #: Use if a view only redirects or raises error
 notemplate = OsfWebRenderer('', renderer=render_mako_string, trust=False)
@@ -154,17 +207,67 @@ def robots():
     return send_from_directory(
         settings.STATIC_FOLDER,
         robots_file,
-        mimetype='text/plain'
+        mimetype='html'
     )
 
+def sitemap_file(path):
+    """Serves the sitemap/* files."""
+    if path.endswith('.xml.gz'):
+        mime = 'application/x-gzip'
+    elif path.endswith('.xml'):
+        mime = 'text/xml'
+    else:
+        raise HTTPError(http.NOT_FOUND)
+    return send_from_directory(
+        settings.STATIC_FOLDER + '/sitemaps/',
+        path,
+        mimetype=mime
+    )
+
+def ember_app(path=None):
+    """Serve the contents of the ember application"""
+    ember_app_folder = None
+    fp = path or 'index.html'
+
+    ember_app = None
+
+    for k in EXTERNAL_EMBER_APPS.keys():
+        if request.path.strip('/').startswith(k):
+            ember_app = EXTERNAL_EMBER_APPS[k]
+            break
+
+    if not ember_app:
+        raise HTTPError(http.NOT_FOUND)
+
+    if settings.PROXY_EMBER_APPS:
+        path = request.path[len(ember_app['path']):]
+        url = urlparse.urljoin(ember_app['server'], path)
+        resp = requests.get(url, stream=True, timeout=EXTERNAL_EMBER_SERVER_TIMEOUT, headers={'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'})
+        excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+        headers = [(name, value) for (name, value) in resp.raw.headers.items() if name.lower() not in excluded_headers]
+        return Response(resp.content, resp.status_code, headers)
+
+    ember_app_folder = os.path.abspath(os.path.join(os.getcwd(), ember_app['path']))
+
+    if not ember_app_folder:
+        raise HTTPError(http.NOT_FOUND)
+
+    if not os.path.abspath(os.path.join(ember_app_folder, fp)).startswith(ember_app_folder):
+        # Prevent accessing files outside of the ember build dir
+        raise HTTPError(http.NOT_FOUND)
+
+    if not os.path.isfile(os.path.join(ember_app_folder, fp)):
+        fp = 'index.html'
+
+    return send_from_directory(ember_app_folder, fp)
 
 def goodbye():
     # Redirect to dashboard if logged in
+    redirect_url = util.web_url_for('index')
     if _get_current_user():
-        return redirect(util.web_url_for('index'))
-    status.push_status_message(language.LOGOUT, kind='success', trust=False)
-    return {}
-
+        return redirect(redirect_url)
+    else:
+        return redirect(redirect_url + '?goodbye=true')
 
 def make_url_map(app):
     """Set up all the routes for the OSF app.
@@ -217,7 +320,62 @@ def make_url_map(app):
     process_rules(app, [
         Rule('/favicon.ico', 'get', favicon, json_renderer),
         Rule('/robots.txt', 'get', robots, json_renderer),
+        Rule('/sitemaps/<path>', 'get', sitemap_file, json_renderer),
     ])
+
+    # Ember Applications
+    if settings.USE_EXTERNAL_EMBER:
+        # Routes that serve up the Ember application. Hide behind feature flag.
+        for prefix in EXTERNAL_EMBER_APPS.keys():
+            process_rules(app, [
+                Rule(
+                    [
+                        '/<provider>/<guid>/download',
+                        '/<provider>/<guid>/download/',
+                    ],
+                    ['get', 'post', 'put', 'patch', 'delete'],
+                    website_views.resolve_guid_download,
+                    notemplate,
+                    endpoint_suffix='__' + prefix
+                ),
+            ], prefix='/' + prefix)
+
+            process_rules(app, [
+                Rule(
+                    [
+                        '/',
+                        '/<path:path>',
+                    ],
+                    'get',
+                    ember_app,
+                    json_renderer,
+                    endpoint_suffix='__' + prefix
+                ),
+            ], prefix='/' + prefix)
+
+        if EXTERNAL_EMBER_APPS.get('ember_osf_web'):
+            process_rules(app, [
+                Rule(
+                    ember_osf_web_views.routes,
+                    'get',
+                    ember_osf_web_views.use_ember_app,
+                    notemplate
+                )
+            ])
+            if 'routes' in EXTERNAL_EMBER_APPS['ember_osf_web']:
+                for route in EXTERNAL_EMBER_APPS['ember_osf_web']['routes']:
+                    process_rules(app, [
+                        Rule(
+                            [
+                                '/',
+                                '/<path:path>',
+                            ],
+                            'get',
+                            ember_osf_web_views.use_ember_app,
+                            notemplate,
+                            endpoint_suffix='__' + route
+                        )
+                    ], prefix='/' + route)
 
     ### Base ###
 
@@ -227,7 +385,7 @@ def make_url_map(app):
             '/dashboard/',
             'get',
             website_views.dashboard,
-            OsfWebRenderer('home.mako', trust=False)
+            notemplate
         ),
 
         Rule(
@@ -245,17 +403,8 @@ def make_url_map(app):
         ),
         Rule('/about/', 'get', website_views.redirect_about, notemplate),
         Rule('/help/', 'get', website_views.redirect_help, notemplate),
-        Rule('/faq/', 'get', {}, OsfWebRenderer('public/pages/faq.mako', trust=False)),
+        Rule('/faq/', 'get', website_views.redirect_faq, notemplate),
         Rule(['/getting-started/', '/getting-started/email/', '/howosfworks/'], 'get', website_views.redirect_getting_started, notemplate),
-        Rule('/support/', 'get', {}, OsfWebRenderer('public/pages/support.mako', trust=False)),
-
-        Rule(
-            '/explore/',
-            'get',
-            {},
-            OsfWebRenderer('public/explore.mako', trust=False)
-        ),
-
         Rule(
             [
                 '/messages/',
@@ -266,10 +415,17 @@ def make_url_map(app):
         ),
 
         Rule(
-            '/view/<meeting>/',
+            '/meetings/<meeting>/',
             'get',
             conference_views.conference_results,
             OsfWebRenderer('public/pages/meeting.mako', trust=False),
+        ),
+
+        Rule(
+            '/view/<meeting>/',
+            'get',
+            conference_views.redirect_to_conference_results,
+            notemplate
         ),
 
         Rule(
@@ -316,6 +472,24 @@ def make_url_map(app):
         ),
 
         Rule(
+            [
+                '/rr/',
+                '/registeredreports/',
+                '/registeredreport/',
+            ],
+            'get',
+            registries_views.registered_reports_landing,
+            OsfWebRenderer('registered_reports_landing.mako', trust=False)
+        ),
+
+        Rule(
+            '/erpc/',
+            'get',
+            closed_challenges_views.erpc_landing_page,
+            OsfWebRenderer('erpc_landing_page.mako', trust=False)
+        ),
+
+        Rule(
             '/prereg/',
             'get',
             prereg.prereg_landing_page,
@@ -330,6 +504,20 @@ def make_url_map(app):
         ),
 
         Rule(
+            '/registries/',
+            'get',
+            registries_views.registries_landing_page,
+            OsfWebRenderer('public/pages/registries_landing.mako', trust=False),
+        ),
+
+        Rule(
+            '/reviews/',
+            'get',
+            reviews_views.reviews_landing_page,
+            OsfWebRenderer('public/pages/reviews_landing.mako', trust=False),
+        ),
+
+        Rule(
             '/preprint/',
             'get',
             preprint_views.preprint_redirect,
@@ -337,9 +525,12 @@ def make_url_map(app):
         ),
 
         Rule(
-            '/api/v1/prereg/draft_registrations/',
+            [
+                '/api/v1/<campaign>/draft_registrations/',
+                '/api/v1/draft_registrations/'
+            ],
             'get',
-            prereg.prereg_draft_registrations,
+            registries_views.draft_registrations,
             json_renderer,
         ),
     ])
@@ -438,18 +629,16 @@ def make_url_map(app):
     process_rules(app, [
         Rule('/forms/signin/', 'get', website_views.signin_form, json_renderer),
         Rule('/forms/forgot_password/', 'get', website_views.forgot_password_form, json_renderer),
-        Rule('/forms/reset_password/', 'get', website_views.reset_password_form, json_renderer),
     ], prefix='/api/v1')
 
     ### Discovery ###
 
     process_rules(app, [
-
         Rule(
-            '/explore/activity/',
+            ['/activity/', '/explore/activity/', '/explore/'],
             'get',
-            discovery_views.activity,
-            OsfWebRenderer('public/pages/active_nodes.mako', trust=False)
+            discovery_views.redirect_activity_to_search,
+            notemplate
         ),
     ])
 
@@ -465,9 +654,17 @@ def make_url_map(app):
             notemplate
         ),
 
+        # confirm email for login through external identity provider
+        Rule(
+            '/confirm/external/<uid>/<token>/',
+            'get',
+            auth_views.external_login_confirm_email_get,
+            notemplate
+        ),
+
         # reset password get
         Rule(
-            '/resetpassword/<verification_key>/',
+            '/resetpassword/<uid>/<token>/',
             'get',
             auth_views.reset_password_get,
             OsfWebRenderer('public/resetpassword.mako', render_mako_string, trust=False)
@@ -475,7 +672,7 @@ def make_url_map(app):
 
         # reset password post
         Rule(
-            '/resetpassword/<verification_key>/',
+            '/resetpassword/<uid>/<token>/',
             'post',
             auth_views.reset_password_post,
             OsfWebRenderer('public/resetpassword.mako', render_mako_string, trust=False)
@@ -498,20 +695,28 @@ def make_url_map(app):
 
         ),
 
+        # oauth user email get
+        Rule(
+            '/external-login/email',
+            'get',
+            auth_views.external_login_email_get,
+            OsfWebRenderer('external_login_email.mako', render_mako_string, trust=False)
+        ),
+
+        # oauth user email post
+        Rule(
+            '/external-login/email',
+            'post',
+            auth_views.external_login_email_post,
+            OsfWebRenderer('external_login_email.mako', render_mako_string, trust=False)
+        ),
+
         # user sign up page
         Rule(
             '/register/',
             'get',
             auth_views.auth_register,
-            OsfWebRenderer('public/login.mako', trust=False)
-        ),
-
-        # create user account via api
-        Rule(
-            '/api/v1/register/',
-            'post',
-            auth_views.register_user,
-            json_renderer
+            OsfWebRenderer('public/register.mako', trust=False)
         ),
 
         # osf login and campaign login
@@ -522,7 +727,15 @@ def make_url_map(app):
             ],
             'get',
             auth_views.auth_login,
-            OsfWebRenderer('public/login.mako', trust=False)
+            notemplate
+        ),
+
+        # create user account via api
+        Rule(
+            '/api/v1/register/',
+            'post',
+            auth_views.register_user,
+            json_renderer
         ),
 
         # osf logout and cas logout
@@ -584,8 +797,9 @@ def make_url_map(app):
             OsfWebRenderer('profile.mako', trust=False)
         ),
 
-        # Route for claiming and setting email and password.
-        # Verification token must be querystring argument
+        # unregistered user claim account (contributor-ship of a project)
+        # user will be required to set email and password
+        # claim token must be present in query parameter
         Rule(
             ['/user/<uid>/<pid>/claim/'],
             ['get', 'post'],
@@ -593,6 +807,9 @@ def make_url_map(app):
             OsfWebRenderer('claim_account.mako', trust=False)
         ),
 
+        # registered user claim account (contributor-ship of a project)
+        # user will be required to verify password
+        # claim token must be present in query parameter
         Rule(
             ['/user/<uid>/<pid>/claim/verify/<token>/'],
             ['get', 'post'],
@@ -607,6 +824,15 @@ def make_url_map(app):
             OsfWebRenderer('profile/settings.mako', trust=False),
         ),
 
+        Rule(
+            [
+                '/project/<pid>/addons/',
+                '/project/<pid>/node/<nid>/addons/',
+            ],
+            'get',
+            project_views.node.node_addons,
+            OsfWebRenderer('project/addons.mako', trust=False)
+        ),
         Rule(
             '/settings/account/',
             'get',
@@ -675,36 +901,19 @@ def make_url_map(app):
             'get',
             profile_views.personal_access_token_detail,
             OsfWebRenderer('profile/personal_tokens_detail.mako', trust=False)
-        ),
-
-
-        # TODO: Uncomment once outstanding issues with this feature are addressed
-        # Rule(
-        #     '/@<twitter_handle>/',
-        #     'get',
-        #     profile_views.redirect_to_twitter,
-        #     OsfWebRenderer('error.mako', render_mako_string, trust=False)
-        # ),
+        )
     ])
 
     # API
 
     process_rules(app, [
 
-        Rule('/profile/', 'get', profile_views.profile_view, json_renderer),
+        Rule('/profile/', 'get', profile_views.profile_view_json, json_renderer),
         Rule('/profile/', 'put', profile_views.update_user, json_renderer),
         Rule('/resend/', 'put', profile_views.resend_confirmation, json_renderer),
-        Rule('/profile/<uid>/', 'get', profile_views.profile_view_id, json_renderer),
+        Rule('/profile/<uid>/', 'get', profile_views.profile_view_id_json, json_renderer),
 
         # Used by profile.html
-        Rule('/profile/<uid>/edit/', 'post', profile_views.edit_profile, json_renderer),
-        Rule('/profile/<uid>/public_projects/', 'get',
-             profile_views.get_public_projects, json_renderer),
-        Rule('/profile/<uid>/public_components/', 'get',
-             profile_views.get_public_components, json_renderer),
-
-        Rule('/profile/<user_id>/summary/', 'get',
-             profile_views.get_profile_summary, json_renderer),
         Rule('/user/<uid>/<pid>/claim/email/', 'post',
              project_views.contributor.claim_user_post, json_renderer),
 
@@ -716,36 +925,31 @@ def make_url_map(app):
         ),
 
         Rule(
+            '/profile/region/',
+            'put',
+            osfstorage_views.update_region,
+            json_renderer,
+        ),
+
+        Rule(
             '/profile/deactivate/',
             'post',
             profile_views.request_deactivation,
             json_renderer,
         ),
-
         Rule(
-            [
-                '/profile/gravatar/',
-                '/users/gravatar/',
-                '/profile/gravatar/<size>',
-                '/users/gravatar/<size>',
-            ],
-            'get',
-            profile_views.current_user_gravatar,
+            '/profile/cancel_request_deactivation/',
+            'post',
+            profile_views.cancel_request_deactivation,
             json_renderer,
         ),
 
         Rule(
-            [
-                '/profile/<uid>/gravatar/',
-                '/users/<uid>/gravatar/',
-                '/profile/<uid>/gravatar/<size>',
-                '/users/<uid>/gravatar/<size>',
-            ],
-            'get',
-            profile_views.get_gravatar,
+            '/profile/logins/',
+            'patch',
+            profile_views.delete_external_identity,
             json_renderer,
         ),
-
 
         # Rules for user profile configuration
         Rule('/settings/names/', 'get', profile_views.serialize_names, json_renderer),
@@ -823,41 +1027,20 @@ def make_url_map(app):
         Rule(
             '/search/',
             'get',
-            {},
+            search_views.search_view,
             OsfWebRenderer('search.mako', trust=False)
-        ),
-        Rule(
-            '/share/',
-            'get',
-            {},
-            OsfWebRenderer('share_search.mako', trust=False)
         ),
         Rule(
             '/share/registration/',
             'get',
             {'register': settings.SHARE_REGISTRATION_URL},
-            OsfWebRenderer('share_registration.mako', trust=False)
+            json_renderer
         ),
         Rule(
-            '/share/help/',
-            'get',
-            {'help': settings.SHARE_API_DOCS_URL},
-            OsfWebRenderer('share_api_docs.mako', trust=False)
+            '/api/v1/user/search/',
+            'get', search_views.search_contributor,
+            json_renderer
         ),
-        Rule(  # FIXME: Dead route; possible that template never existed; confirm deletion candidate with ErinB
-            '/share_dashboard/',
-            'get',
-            {},
-            OsfWebRenderer('share_dashboard.mako', trust=False)
-        ),
-        Rule(
-            '/share/atom/',
-            'get',
-            search_views.search_share_atom,
-            xml_renderer
-        ),
-        Rule('/api/v1/user/search/', 'get', search_views.search_contributor, json_renderer),
-
         Rule(
             '/api/v1/search/node/',
             'post',
@@ -873,9 +1056,7 @@ def make_url_map(app):
 
         Rule(['/search/', '/search/<type>/'], ['get', 'post'], search_views.search_search, json_renderer),
         Rule('/search/projects/', 'get', search_views.search_projects_by_title, json_renderer),
-        Rule('/share/search/', ['get', 'post'], search_views.search_share, json_renderer),
-        Rule('/share/stats/', 'get', search_views.search_share_stats, json_renderer),
-        Rule('/share/providers/', 'get', search_views.search_share_providers, json_renderer),
+        Rule('/share/search/', 'get', website_views.legacy_share_v1_search, json_renderer),
 
     ], prefix='/api/v1')
 
@@ -890,10 +1071,9 @@ def make_url_map(app):
     # Web
 
     process_rules(app, [
-        # '/' route loads home.mako if logged in, otherwise loads landing.mako
-        Rule('/', 'get', website_views.index, OsfWebRenderer('index.mako', trust=False)),
+        Rule('/', 'get', website_views.index, OsfWebRenderer('institution.mako', trust=False)),
 
-        Rule('/goodbye/', 'get', goodbye, OsfWebRenderer('landing.mako', trust=False)),
+        Rule('/goodbye/', 'get', goodbye, notemplate),
 
         Rule(
             [
@@ -905,6 +1085,17 @@ def make_url_map(app):
             OsfWebRenderer('project/project.mako', trust=False)
         ),
 
+        # Process token action
+        Rule(
+            [
+                '/token_action/<pid>/',
+            ],
+            'get',
+            project_views.node.token_action,
+            notemplate,
+        ),
+
+
         # Create a new subproject/component
         Rule(
             '/project/<pid>/newnode/',
@@ -913,8 +1104,6 @@ def make_url_map(app):
             notemplate
         ),
 
-        # # TODO: Add API endpoint for tags
-        # Rule('/tags/<tag>/', 'get', project_views.tag.project_tag, OsfWebRenderer('tags.mako', trust=False)),
         Rule('/project/new/<pid>/beforeTemplate/', 'get',
              project_views.node.project_before_template, json_renderer),
 
@@ -949,8 +1138,6 @@ def make_url_map(app):
             OsfWebRenderer('project/project.mako', trust=False)
         ),
 
-        ### Logs ###
-
         # View forks
         Rule(
             [
@@ -959,7 +1146,7 @@ def make_url_map(app):
             ],
             'get',
             project_views.node.node_forks,
-            OsfWebRenderer('project/forks.mako', trust=False)
+            notemplate,
         ),
 
         # Registrations
@@ -989,7 +1176,7 @@ def make_url_map(app):
             ],
             'get',
             project_views.node.node_registrations,
-            OsfWebRenderer('project/registrations.mako', trust=False)
+            notemplate,
         ),
         Rule(
             [
@@ -1043,17 +1230,6 @@ def make_url_map(app):
             notemplate,
         ),
 
-        # Statistics
-        Rule(
-            [
-                '/project/<pid>/statistics/',
-                '/project/<pid>/node/<nid>/statistics/',
-            ],
-            'get',
-            project_views.node.project_statistics_redirect,
-            notemplate,
-        ),
-
         Rule(
             [
                 '/project/<pid>/analytics/',
@@ -1061,8 +1237,9 @@ def make_url_map(app):
             ],
             'get',
             project_views.node.project_statistics,
-            OsfWebRenderer('project/statistics.mako', trust=False)
+            notemplate,
         ),
+
 
         ### Files ###
 
@@ -1081,12 +1258,29 @@ def make_url_map(app):
         ),
         Rule(
             [
+                '/<guid>/files/<provider>/<path:path>/',
                 '/project/<pid>/files/<provider>/<path:path>/',
                 '/project/<pid>/node/<nid>/files/<provider>/<path:path>/',
             ],
             'get',
             addon_views.addon_view_or_download_file,
             OsfWebRenderer('project/view_file.mako', trust=False)
+        ),
+        Rule(
+            '/download/<fid_or_guid>/',
+            'get',
+            addon_views.persistent_file_download,
+            json_renderer,
+        ),
+        Rule(
+            [
+                '/api/v1/<guid>/files/<provider>/<path:path>/',
+                '/api/v1/project/<pid>/files/<provider>/<path:path>/',
+                '/api/v1/project/<pid>/node/<nid>/files/<provider>/<path:path>/',
+            ],
+            'get',
+            addon_views.addon_view_or_download_file,
+            json_renderer
         ),
         Rule(
             [
@@ -1159,6 +1353,14 @@ def make_url_map(app):
             addon_views.addon_view_or_download_file_legacy,
             json_renderer
         ),
+        Rule(
+            [
+                '/quickfiles/<fid>/'
+            ],
+            'get',
+            addon_views.addon_view_or_download_quickfile,
+            json_renderer
+        )
     ])
 
     # API
@@ -1217,14 +1419,6 @@ def make_url_map(app):
         ),
         Rule(
             [
-                '/pointers/move/',
-            ],
-            'post',
-            project_views.node.move_pointers,
-            json_renderer,
-        ),
-        Rule(
-            [
                 '/project/<pid>/pointer/',
                 '/project/<pid>/node/<nid>pointer/',
             ],
@@ -1232,33 +1426,6 @@ def make_url_map(app):
             project_views.node.remove_pointer,
             json_renderer,
         ),
-        Rule(
-            [
-                '/folder/<pid>/pointer/<pointer_id>',
-            ],
-            'delete',
-            project_views.node.remove_pointer_from_folder,
-            json_renderer,
-        ),
-        Rule([
-            '/project/<pid>/get_summary/',
-            '/project/<pid>/node/<nid>/get_summary/',
-        ], 'get', project_views.node.get_summary, json_renderer),
-        # TODO: [#OSF-6557] Route "get_children" is deprecated. Use get_readable_descendants.
-        Rule([
-            '/project/<pid>/get_children/',
-            '/project/<pid>/node/<nid>/get_children/',
-            '/project/<pid>/get_readable_descendants/',
-            '/project/<pid>/node/<nid>/get_readable_descendants/',
-        ], 'get', project_views.node.get_readable_descendants, json_renderer),
-        Rule([
-            '/project/<pid>/get_forks/',
-            '/project/<pid>/node/<nid>/get_forks/',
-        ], 'get', project_views.node.get_forks, json_renderer),
-        Rule([
-            '/project/<pid>/get_registrations/',
-            '/project/<pid>/node/<nid>/get_registrations/',
-        ], 'get', project_views.node.get_registrations, json_renderer),
 
         # Draft Registrations
         Rule([
@@ -1405,35 +1572,16 @@ def make_url_map(app):
         ),
         Rule(
             [
-                '/project/<pid>/fork/',
-                '/project/<pid>/node/<nid>/fork/',
-            ], 'post', project_views.node.node_fork_page, json_renderer,
-        ),
-        Rule(
-            [
                 '/project/<pid>/pointer/fork/',
                 '/project/<pid>/node/<nid>/pointer/fork/',
             ], 'post', project_views.node.fork_pointer, json_renderer,
         ),
-        # View forks
-        Rule([
-            '/project/<pid>/forks/',
-            '/project/<pid>/node/<nid>/forks/',
-        ], 'get', project_views.node.node_forks, json_renderer),
 
         # Registrations
         Rule([
             '/project/<pid>/beforeregister/',
             '/project/<pid>/node/<nid>/beforeregister',
         ], 'get', project_views.register.project_before_register, json_renderer),
-        Rule([
-            '/project/<pid>/drafts/<draft_id>/register/',
-            '/project/<pid>/node/<nid>/drafts/<draft_id>/register/',
-        ], 'post', project_views.drafts.register_draft_registration, json_renderer),
-        Rule([
-            '/project/<pid>/register/<template>/',
-            '/project/<pid>/node/<nid>/register/<template>/',
-        ], 'get', project_views.register.node_register_template_page, json_renderer),
         Rule([
             '/project/<pid>/withdraw/',
             '/project/<pid>/node/<nid>/withdraw/'
@@ -1444,62 +1592,8 @@ def make_url_map(app):
                 '/project/<pid>/identifiers/',
                 '/project/<pid>/node/<nid>/identifiers/',
             ],
-            'get',
-            project_views.register.node_identifiers_get,
-            json_renderer,
-        ),
-
-        Rule(
-            [
-                '/project/<pid>/identifiers/',
-                '/project/<pid>/node/<nid>/identifiers/',
-            ],
             'post',
-            project_views.register.node_identifiers_post,
-            json_renderer,
-        ),
-
-        # Statistics
-        Rule([
-            '/project/<pid>/statistics/',
-            '/project/<pid>/node/<nid>/statistics/',
-        ], 'get', project_views.node.project_statistics, json_renderer),
-
-        # Permissions
-        Rule([
-            '/project/<pid>/permissions/<permissions>/',
-            '/project/<pid>/node/<nid>/permissions/<permissions>/',
-        ], 'post', project_views.node.project_set_privacy, json_renderer),
-
-        Rule([
-            '/project/<pid>/permissions/beforepublic/',
-            '/project/<pid>/node/<nid>/permissions/beforepublic/',
-        ], 'get', project_views.node.project_before_set_public, json_renderer),
-
-        ### Watching ###
-        Rule([
-            '/project/<pid>/watch/',
-            '/project/<pid>/node/<nid>/watch/'
-        ], 'post', project_views.node.watch_post, json_renderer),
-
-        Rule([
-            '/project/<pid>/unwatch/',
-            '/project/<pid>/node/<nid>/unwatch/'
-        ], 'post', project_views.node.unwatch_post, json_renderer),
-
-        Rule([
-            '/project/<pid>/togglewatch/',
-            '/project/<pid>/node/<nid>/togglewatch/'
-        ], 'post', project_views.node.togglewatch_post, json_renderer),
-
-        # Combined files
-        Rule(
-            [
-                '/project/<pid>/files/',
-                '/project/<pid>/node/<nid>/files/'
-            ],
-            'get',
-            project_views.file.collect_file_trees,
+            identifier_views.node_identifiers_post,
             json_renderer,
         ),
 
@@ -1615,6 +1709,16 @@ def make_url_map(app):
             json_renderer,
         ),
 
+        Rule(
+            [
+                '/project/<pid>/settings/requests/',
+                '/project/<pid>/node/<nid>/settings/requests/',
+            ],
+            'post',
+            project_views.node.configure_requests,
+            json_renderer,
+        ),
+
         # Invite Users
         Rule(
             [
@@ -1627,11 +1731,21 @@ def make_url_map(app):
         )
     ], prefix='/api/v1')
 
-    # Set up static routing for addons
+    # Set up static routing for addons and providers
     # NOTE: We use nginx to serve static addon assets in production
-    addon_base_path = os.path.abspath('website/addons')
+    addon_base_path = os.path.abspath('addons')
+    provider_static_path = os.path.abspath('assets')
     if settings.DEV_MODE:
         @app.route('/static/addons/<addon>/<path:filename>')
         def addon_static(addon, filename):
             addon_path = os.path.join(addon_base_path, addon, 'static')
             return send_from_directory(addon_path, filename)
+
+        @app.route('/assets/<filename>')
+        def provider_static(filename):
+            return send_from_directory(provider_static_path, filename)
+
+        @app.route('/ember-cli-live-reload.js')
+        def ember_cli_live_reload():
+            req = requests.get('{}/ember-cli-live-reload.js'.format(settings.LIVE_RELOAD_DOMAIN), stream=True)
+            return Response(stream_with_context(req.iter_content()), content_type=req.headers['content-type'])

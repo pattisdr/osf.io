@@ -3,10 +3,12 @@ import operator
 from django.core.exceptions import ImproperlyConfigured
 from rest_framework import exceptions, permissions
 
+from api.base.utils import has_admin_scope
+
 from framework.auth import oauth_scopes
 from framework.auth.cas import CasResponse
 
-from website.models import ApiOAuth2Application, ApiOAuth2PersonalToken
+from osf.models import ApiOAuth2Application, ApiOAuth2PersonalToken
 from website.util.sanitize import is_iterable_but_not_string
 
 
@@ -32,11 +34,16 @@ class TokenHasScope(permissions.BasePermission):
             # Assumption: user authenticated via non-oauth means, so don't check token permissions.
             return True
 
+        return self._verify_scopes(request, view, token)
+
+    def _verify_scopes(self, request, view, token):
+        # Anything calling this method should handle the case where
+        # `token is None` before making this call.
+
         required_scopes = self._get_scopes(request, view)
 
         # Scopes are returned as a space-delimited list in the token
         allowed_scopes = token.attributes['accessTokenScope']
-
         try:
             normalized_scopes = oauth_scopes.normalize_scopes(allowed_scopes)
         except KeyError:
@@ -52,13 +59,17 @@ class TokenHasScope(permissions.BasePermission):
             try:
                 read_scopes = set(view.required_read_scopes)
             except AttributeError:
-                raise ImproperlyConfigured('TokenHasScope requires the view to define the '
-                                           'required_read_scopes attribute')
+                raise ImproperlyConfigured(
+                    'TokenHasScope requires the view to define the '
+                    'required_read_scopes attribute',
+                )
             assert is_iterable_but_not_string(view.required_read_scopes), \
                 'The required_read_scopes must be an iterable of CoreScopes'
             if view.required_read_scopes and isinstance(view.required_read_scopes[0], tuple):
-                raise ImproperlyConfigured('TokenHasScope requires the view to define the '
-                                           'required_read_scopes attribute using CoreScopes rather than ComposedScopes')
+                raise ImproperlyConfigured(
+                    'TokenHasScope requires the view to define the '
+                    'required_read_scopes attribute using CoreScopes rather than ComposedScopes',
+                )
 
             return read_scopes
         else:
@@ -66,14 +77,50 @@ class TokenHasScope(permissions.BasePermission):
             try:
                 write_scopes = set(view.required_write_scopes)
             except AttributeError:
-                raise ImproperlyConfigured('TokenHasScope requires the view to define the '
-                                           'required_write_scopes attribute')
+                raise ImproperlyConfigured(
+                    'TokenHasScope requires the view to define the '
+                    'required_write_scopes attribute',
+                )
             assert is_iterable_but_not_string(view.required_read_scopes), \
                 'The required_write_scopes must be an iterable of CoreScopes'
             if view.required_write_scopes and isinstance(view.required_write_scopes[0], tuple):
-                raise ImproperlyConfigured('TokenHasScope requires the view to define the '
-                                           'required_write_scopes attribute using CoreScopes rather than ComposedScopes')
+                raise ImproperlyConfigured(
+                    'TokenHasScope requires the view to define the '
+                    'required_write_scopes attribute using CoreScopes rather than ComposedScopes',
+                )
             return write_scopes
+
+
+class RequiresScopedRequestOrReadOnly(TokenHasScope):
+    message = 'Write requests to this view are restricted to properly-scoped tokens.'
+
+    def has_object_permission(self, request, view, obj):
+        # FIXME: Implement request.user validation if necessary
+        return self.has_permission(request, view)
+
+    def has_permission(self, request, view):
+        token = request.auth
+
+        # User either needs properly scoped token or cookie. Otherwise, endpoint has restricted write.
+        if token is None or not isinstance(token, CasResponse):
+            if request.COOKIES:
+                return True
+            else:
+                return request.method in permissions.SAFE_METHODS
+
+        return self._verify_scopes(request, view, token)
+
+
+class RequestHasAdminScope(permissions.BasePermission):
+    def has_object_permission(self, request, view, obj):
+        if has_admin_scope(request):
+            return True
+        raise exceptions.NotFound()
+
+    def has_permission(self, request, view):
+        if has_admin_scope(request):
+            return True
+        raise exceptions.NotFound()
 
 
 class OwnerOnly(permissions.BasePermission):
@@ -83,7 +130,7 @@ class OwnerOnly(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         """Not applied to all members of a queryset"""
         assert isinstance(obj, (ApiOAuth2Application, ApiOAuth2PersonalToken)), 'obj must be an ApiOAuth2Application or ApiOAuth2PersonalToken, got {}'.format(obj)
-        return (obj.owner._id == request.user._id)
+        return (obj.owner.id == request.user.id)
 
 
 def PermissionWithGetter(Base, getter):

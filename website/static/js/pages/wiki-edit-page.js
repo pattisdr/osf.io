@@ -11,11 +11,11 @@ require('ace-noconflict');
 require('ace-mode-markdown');
 require('ace-ext-language_tools');
 require('addons/wiki/static/ace-markdown-snippets.js');
-
-var $osf = require('js/osfHelpers');
+require('../../vendor/ace-plugins/spellcheck_ace.js');
 
 var WikiMenu = require('../wikiMenu');
 var Comment = require('js/comment'); //jshint ignore:line
+var $osf = require('js/osfHelpers');
 
 var ctx = window.contextVars.wiki;  // mako context variables
 
@@ -103,7 +103,7 @@ $(document).ready(function () {
         grid.addClass('hidden');
         errorMsg.removeClass('hidden');
         errorMsg.append('<p>Could not retrieve wiki pages. If this issue persists, ' +
-            'please report it to <a href="mailto:support@osf.io">support@osf.io</a>.</p>');
+            'please report it to ' + $osf.osfSupportLink());
         Raven.captureMessage('Could not GET wiki menu pages', {
             extra: { url: ctx.urls.grid, status: status, error: error }
         });
@@ -182,9 +182,41 @@ if ($comments.length && window.contextVars.wiki.wikiID !== null) {
         rootId: window.contextVars.wiki.wikiID,
         fileId: null,
         canComment: window.contextVars.currentUser.canComment,
-        hasChildren: window.contextVars.node.hasChildren,
         currentUser: window.contextVars.currentUser,
-        pageTitle: window.contextVars.wiki.wikiName
+        pageTitle: window.contextVars.wiki.wikiName,
+        inputSelector: '.atwho-input'
     };
     Comment.init('#commentsLink', '.comment-pane', options);
 }
+
+// Disable backspace sending you back a page in firefox. This is just a usability fix because users
+// tend to click out of the text box while it loads MFR embeds, then press backspace, believing the
+// cursor is still active.
+// https://stackoverflow.com/questions/1495219/how-can-i-prevent-the-backspace-key-from-navigating-back
+$(document).unbind('keydown').bind('keydown', function (event) {
+    if (event.keyCode === 8) {
+        var doPrevent = true;
+        var types = ['text', 'password', 'file', 'search', 'email', 'number', 'date', 'color', 'datetime', 'datetime-local', 'month', 'range', 'search', 'tel', 'time', 'url', 'week'];
+        var d = $(event.srcElement || event.target);
+        var disabled = d.prop('readonly') || d.prop('disabled');
+        if (!disabled) {
+            if (d[0].isContentEditable) {
+                doPrevent = false;
+            } else if (d.is('input')) {
+                var type = d.attr('type');
+                if (type) {
+                    type = type.toLowerCase();
+                }
+                if (types.indexOf(type) > -1) {
+                    doPrevent = false;
+                }
+            } else if (d.is('textarea')) {
+                doPrevent = false;
+            }
+        }
+        if (doPrevent) {
+            event.preventDefault();
+            return false;
+        }
+    }
+});

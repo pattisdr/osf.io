@@ -1,15 +1,17 @@
-from modularodm import Q
-
-from website.project.model import DraftRegistration, ensure_schemas, MetaSchema
+from osf.models import DraftRegistration, RegistrationSchema
+from admin.pre_reg.views import get_metadata_files
 
 
 def draft_reg_util():
-    DraftRegistration.remove()
-    ensure_schemas()
-    return MetaSchema.find_one(
-        Q('name', 'eq', 'Prereg Challenge') &
-        Q('schema_version', 'eq', 2)
-    )
+    DraftRegistration.objects.all().delete()
+    return RegistrationSchema.objects.get(name='Prereg Challenge', schema_version=2)
+
+
+def checkin_files(draft):
+    if draft.approval_id:
+        for item in get_metadata_files(draft):
+            item.checkout = None
+            item.save()
 
 
 SCHEMA_DATA = {

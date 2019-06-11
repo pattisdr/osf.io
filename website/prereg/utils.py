@@ -1,9 +1,5 @@
-from modularodm import Q
+from website.registries.utils import get_campaign_schema
 
-def get_prereg_schema():
-    from website.models import MetaSchema  # noqa
 
-    return MetaSchema.find_one(
-        Q('name', 'eq', 'Prereg Challenge') &
-        Q('schema_version', 'eq', 2)
-    )
+def get_prereg_schema(campaign='prereg_challenge'):
+    return get_campaign_schema(campaign)

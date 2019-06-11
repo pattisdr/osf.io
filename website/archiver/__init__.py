@@ -10,6 +10,7 @@ ARCHIVER_SENDING = 'SENDING'
 ARCHIVER_NETWORK_ERROR = 'NETWORK_ERROR'
 ARCHIVER_SIZE_EXCEEDED = 'SIZE_EXCEEDED'
 ARCHIVER_FILE_NOT_FOUND = 'FILE_NOT_FOUND'
+ARCHIVER_FORCED_FAILURE = 'FORCED_FAILURE'
 ARCHIVER_UNCAUGHT_ERROR = 'UNCAUGHT_ERROR'
 
 ARCHIVER_FAILURE_STATUSES = {
@@ -17,12 +18,16 @@ ARCHIVER_FAILURE_STATUSES = {
     ARCHIVER_NETWORK_ERROR,
     ARCHIVER_SIZE_EXCEEDED,
     ARCHIVER_FILE_NOT_FOUND,
+    ARCHIVER_FORCED_FAILURE,
     ARCHIVER_UNCAUGHT_ERROR,
 }
 
 NO_ARCHIVE_LIMIT = 'high_upload_limit'
 
-class StatResult(object):
+# StatResult and AggregateStatResult are dict subclasses because they are used
+# in celery tasks, and celery serializes to JSON by default
+
+class StatResult(dict):
     """
     Helper class to collect metadata about a single file
     """
@@ -33,45 +38,39 @@ class StatResult(object):
         self.target_name = target_name
         self.disk_usage = float(disk_usage)
 
-    def __str__(self):
-        return str(self._to_dict())
-
-    def _to_dict(self):
-        return {
+        self.update({
             'target_id': self.target_id,
             'target_name': self.target_name,
             'disk_usage': self.disk_usage,
-        }
+            'num_files': self.num_files
+        })
 
 
-class AggregateStatResult(object):
+class AggregateStatResult(dict):
     """
     Helper class to collect metadata about arbitrary depth file/addon/node file trees
     """
     def __init__(self, target_id, target_name, targets=None):
         self.target_id = target_id
         self.target_name = target_name
+        targets = targets or []
         self.targets = [target for target in targets if target]
 
-    def __str__(self):
-        return str(self._to_dict())
-
-    def _to_dict(self):
-        return {
+        self.update({
             'target_id': self.target_id,
             'target_name': self.target_name,
             'targets': [
-                target._to_dict()
+                target
                 for target in self.targets
             ],
             'num_files': self.num_files,
             'disk_usage': self.disk_usage,
-        }
+        })
 
     @property
     def num_files(self):
-        return sum([value.num_files for value in self.targets])
+        return sum([value['num_files'] for value in self.targets])
 
     @property
     def disk_usage(self):
-        return sum([value.disk_usage for value in self.targets])
+        return sum([value['disk_usage'] for value in self.targets])

@@ -16,16 +16,17 @@ from website.notifications.events.base import (
     register, Event, event_registry, RegistryError
 )
 from website.notifications.events import utils as event_utils
-from website.models import Node
-from website.project.model import NodeLog
-from website.addons.base.signals import file_updated as signal
+from osf.models import AbstractNode, NodeLog, Preprint
+from addons.base.signals import file_updated as signal
 
 
 @signal.connect
-def file_updated(self, node=None, user=None, event_type=None, payload=None):
+def file_updated(self, target=None, user=None, event_type=None, payload=None):
+    if isinstance(target, Preprint):
+        return
     if event_type not in event_registry:
         raise RegistryError
-    event = event_registry[event_type](user, node, event_type, payload=payload)
+    event = event_registry[event_type](user, target, event_type, payload=payload)
     event.perform()
 
 
@@ -118,7 +119,8 @@ class ComplexFileEvent(FileEvent):
     def __init__(self, user, node, event, payload=None):
         super(ComplexFileEvent, self).__init__(user, node, event, payload=payload)
 
-        self.source_node = Node.load(self.payload['source']['node']['_id'])
+        source_nid = self.payload['source']['node']['_id']
+        self.source_node = AbstractNode.load(source_nid) or Preprint.load(source_nid)
         self.addon = self.node.get_addon(self.payload['destination']['provider'])
 
     def _build_message(self, html=False):
@@ -260,15 +262,15 @@ class AddonFileMoved(ComplexFileEvent):
             if moved[notification]:
                 emails.store_emails(moved[notification], notification, 'file_updated', self.user, self.node,
                                     self.timestamp, message=self.html_message,
-                                    gravatar_url=self.gravatar_url, url=self.url)
+                                    profile_image_url=self.profile_image_url, url=self.url)
             if warn[notification]:
                 emails.store_emails(warn[notification], notification, 'file_updated', self.user, self.node,
-                                    self.timestamp, message=warn_message, gravatar_url=self.gravatar_url,
+                                    self.timestamp, message=warn_message, profile_image_url=self.profile_image_url,
                                     url=self.url)
             if rm_users[notification]:
                 emails.store_emails(rm_users[notification], notification, 'file_updated', self.user, self.source_node,
                                     self.timestamp, message=remove_message,
-                                    gravatar_url=self.gravatar_url, url=self.source_url)
+                                    profile_image_url=self.profile_image_url, url=self.source_url)
 
 
 @register(NodeLog.FILE_COPIED)
@@ -300,8 +302,8 @@ class AddonFileCopied(ComplexFileEvent):
             if moved[notification] or warn[notification]:
                 users = list(set(moved[notification]).union(set(warn[notification])))
                 emails.store_emails(users, notification, 'file_updated', self.user, self.node, self.timestamp,
-                                    message=self.html_message, gravatar_url=self.gravatar_url, url=self.url)
+                                    message=self.html_message, profile_image_url=self.profile_image_url, url=self.url)
             if rm_users[notification]:
                 emails.store_emails(rm_users[notification], notification, 'file_updated', self.user, self.source_node,
                                     self.timestamp, message=remove_message,
-                                    gravatar_url=self.gravatar_url, url=self.source_url)
+                                    profile_image_url=self.profile_image_url, url=self.source_url)

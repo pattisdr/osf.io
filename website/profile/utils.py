@@ -1,65 +1,42 @@
 # -*- coding: utf-8 -*-
-
-from modularodm import Q
-
 from framework import auth
 
 from website import settings
-from website.filters import gravatar
-from website.project.model import Node
-from website.util.permissions import reduce_permissions
+from osf.models import Contributor
+from addons.osfstorage.models import Region
+from website.filters import profile_image_url
+from osf.models.contributor import get_contributor_permissions
+from osf.utils.permissions import reduce_permissions
+
+from osf.utils import workflows
+from website.ember_osf_web.decorators import storage_i18n_flag_active
 
 
-def get_projects(user):
-    """Return a list of user's projects, excluding registrations and folders."""
-    # Note: If the user is a contributor to a child (but does not have access to the parent), it will be
-    # excluded from this view
-    # Avoid circular import
-    from website.project.utils import TOP_LEVEL_PROJECT_QUERY
+def get_profile_image_url(user, size=settings.PROFILE_IMAGE_MEDIUM):
+    return profile_image_url(settings.PROFILE_IMAGE_PROVIDER,
+                             user,
+                             use_ssl=True,
+                             size=size)
 
-    return Node.find_for_user(user, subquery=TOP_LEVEL_PROJECT_QUERY)
-
-def get_public_projects(user):
-    """Return a list of a user's public projects."""
-    # Avoid circular import
-    from website.project.utils import TOP_LEVEL_PROJECT_QUERY
-
-    return Node.find_for_user(
-        user,
-        subquery=(
-            Q('is_public', 'eq', True) &
-            TOP_LEVEL_PROJECT_QUERY
-        )
-    )
-
-
-def get_gravatar(user, size=None):
-    if size is None:
-        size = settings.PROFILE_IMAGE_LARGE
-    return gravatar(
-        user, use_ssl=True,
-        size=size
-    )
-
-
-def serialize_user(user, node=None, admin=False, full=False, is_profile=False):
+def serialize_user(user, node=None, admin=False, full=False, is_profile=False, include_node_counts=False):
     """
     Return a dictionary representation of a registered user.
 
     :param User user: A User object
     :param bool full: Include complete user properties
     """
+    contrib = None
+    if isinstance(user, Contributor):
+        contrib = user
+        user = contrib.user
     fullname = user.display_full_name(node=node)
     ret = {
-        'id': str(user._primary_key),
+        'id': str(user._id),
         'registered': user.is_registered,
         'surname': user.family_name,
         'fullname': fullname,
         'shortname': fullname if len(fullname) < 50 else fullname[:23] + '...' + fullname[-23:],
-        'gravatar_url': gravatar(
-            user, use_ssl=True,
-            size=settings.PROFILE_IMAGE_MEDIUM
-        ),
+        'profile_image_url': user.profile_image_url(size=settings.PROFILE_IMAGE_MEDIUM),
         'active': user.is_active,
     }
     if node is not None:
@@ -69,9 +46,10 @@ def serialize_user(user, node=None, admin=False, full=False, is_profile=False):
                 'permission': 'read',
             }
         else:
+            is_contributor_obj = isinstance(contrib, Contributor)
             flags = {
-                'visible': user._id in node.visible_contributor_ids,
-                'permission': reduce_permissions(node.get_permissions(user)),
+                'visible': contrib.visible if is_contributor_obj else node.contributor_set.filter(user=user, visible=True).exists(),
+                'permission': get_contributor_permissions(contrib, as_list=False) if is_contributor_obj else reduce_permissions(node.get_permissions(user)),
             }
         ret.update(flags)
     if user.is_registered:
@@ -90,14 +68,14 @@ def serialize_user(user, node=None, admin=False, full=False, is_profile=False):
                     'address': each,
                     'primary': each.strip().lower() == user.username.strip().lower(),
                     'confirmed': True,
-                } for each in user.emails
+                } for each in user.emails.values_list('address', flat=True)
             ] + [
                 {
                     'address': each,
                     'primary': each.strip().lower() == user.username.strip().lower(),
                     'confirmed': False
                 }
-                for each in user.unconfirmed_emails
+                for each in user.get_unconfirmed_emails_exclude_external_identity()
             ]
 
         if user.is_merged:
@@ -109,17 +87,24 @@ def serialize_user(user, node=None, admin=False, full=False, is_profile=False):
             }
         else:
             merged_by = None
+
+        default_region = user.get_addon('osfstorage').default_region
+        available_regions = [region for region in Region.objects.all().values('_id', 'name')]
         ret.update({
-            'number_projects': get_projects(user).count(),
-            'number_public_projects': get_public_projects(user).count(),
             'activity_points': user.get_activity_points(),
-            'gravatar_url': gravatar(
-                user, use_ssl=True,
-                size=settings.PROFILE_IMAGE_LARGE
-            ),
+            'profile_image_url': user.profile_image_url(size=settings.PROFILE_IMAGE_LARGE),
             'is_merged': user.is_merged,
+            'available_regions': available_regions,
+            'storage_flag_is_active': storage_i18n_flag_active(),
+            'default_region': {'name': default_region.name, '_id': default_region._id},
             'merged_by': merged_by,
         })
+        if include_node_counts:
+            projects = user.nodes.exclude(is_deleted=True).filter(type='osf.node').get_roots()
+            ret.update({
+                'number_projects': projects.count(),
+                'number_public_projects': projects.filter(is_public=True).count(),
+            })
 
     return ret
 
@@ -131,7 +116,14 @@ def serialize_contributors(contribs, node, **kwargs):
     ]
 
 
-def add_contributor_json(user, current_user=None):
+def serialize_visible_contributors(node):
+    # This is optimized when node has .include('contributor__user__guids')
+    return [
+        serialize_user(c, node) for c in node.contributor_set.all() if c.visible
+    ]
+
+
+def add_contributor_json(user, current_user=None, node=None):
     """
     Generate a dictionary representation of a user, optionally including # projects shared with `current_user`
 
@@ -154,21 +146,26 @@ def add_contributor_json(user, current_user=None):
     if user.schools:
         education = user.schools[0]['institution']
 
-    return {
+    contributor_json = {
         'fullname': user.fullname,
-        'email': user.username,
+        'email': user.email,
         'id': user._primary_key,
         'employment': current_employment,
         'education': education,
         'n_projects_in_common': n_projects_in_common,
         'registered': user.is_registered,
         'active': user.is_active,
-        'gravatar_url': gravatar(
-            user, use_ssl=True,
-            size=settings.PROFILE_IMAGE_MEDIUM
-        ),
+        'profile_image_url': user.profile_image_url(size=settings.PROFILE_IMAGE_MEDIUM),
         'profile_url': user.profile_url
     }
+
+    if node:
+        contributor_info = user.contributor_set.get(node=node.parent_node)
+        contributor_json['permission'] = get_contributor_permissions(contributor_info, as_list=False)
+        contributor_json['visible'] = contributor_info.visible
+
+    return contributor_json
+
 
 def serialize_unregistered(fullname, email):
     """Serializes an unregistered user."""
@@ -179,8 +176,10 @@ def serialize_unregistered(fullname, email):
             'id': None,
             'registered': False,
             'active': False,
-            'gravatar': gravatar(email, use_ssl=True,
-                                 size=settings.PROFILE_IMAGE_MEDIUM),
+            'profile_image_url': profile_image_url(settings.PROFILE_IMAGE_PROVIDER,
+                                                   email,
+                                                   use_ssl=True,
+                                                   size=settings.PROFILE_IMAGE_MEDIUM),
             'email': email,
         }
     else:
@@ -188,3 +187,17 @@ def serialize_unregistered(fullname, email):
         serialized['fullname'] = fullname
         serialized['email'] = email
     return serialized
+
+
+def serialize_access_requests(node):
+    """Serialize access requests for a node"""
+    return [
+        {
+            'user': serialize_user(access_request.creator),
+            'comment': access_request.comment,
+            'id': access_request._id
+        } for access_request in node.requests.filter(
+            request_type=workflows.RequestTypes.ACCESS.value,
+            machine_state=workflows.DefaultStates.PENDING.value
+        ).select_related('creator')
+    ]

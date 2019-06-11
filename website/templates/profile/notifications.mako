@@ -1,11 +1,6 @@
 <%inherit file="base.mako"/>
 <%def name="title()">Notifications</%def>
 
-<%def name="stylesheets()">
-   ${parent.stylesheets()}
-   <link rel="stylesheet" href='/static/css/pages/account-setting-page.css'>
-</%def>
-
 <%def name="content()">
 <% from website import settings%>
 <h2 class="page-header">Settings</h2>
@@ -61,7 +56,9 @@
                 <form id="selectNotifications" class="osf-treebeard-minimal">
                     <div id="grid">
                         <div class="spinner-loading-wrapper">
-                            <div class="logo-spin logo-lg"></div>
+                            <div class="ball-scale ball-scale-blue">
+                                <div></div>
+                            </div>
                             <p class="m-t-sm fg-load-message"> Loading notification settings... </p>
                         </div>
                     </div>

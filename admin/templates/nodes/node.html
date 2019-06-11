@@ -1,5 +1,8 @@
 {% extends 'base.html' %}
 {% load static %}
+{% block top_includes %}
+    <script src="/static/js/nodes/registrations.js"></script>
+{% endblock %}
 {% load user_extras %}
 {% load node_extras %}
 {% block title %}
@@ -11,43 +14,121 @@
 {% endblock title %}
 {% block content %}
     <div class="container-fluid">
+        <ul class="messages">
+            {% for message in messages %}
+            <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
+            {% endfor %}
+        </ul>
         <div class="row">
-            <a href="{% url 'nodes:search' %}"
-               class="btn btn-primary col-md-1">
-                <i class="fa fa-search"></i>
-            </a>
-            {% if not node.is_registration %}
-                {% if not node.deleted %}
-                    <span class="col-md-2">
-                    <a href="{% url 'nodes:remove' guid=node.id %}"
-                       data-toggle="modal" data-target="#deleteModal"
-                       class="btn btn-danger">
-                        Delete Node
+            <div class="col-md-12">
+                <div class="btn-group" role="group">
+                    <a href="{% url 'nodes:search' %}" class="btn btn-primary"> <i class="fa fa-search"></i></a>
+                    <a href="{% url 'nodes:node-logs' node.id %}" class="btn btn-primary">View Logs</a>
+                    {%  if perms.osf.delete_node %}
+                        {% if not node.is_registration %}
+                            {% if not node.deleted %}
+                                <a href="{% url 'nodes:remove' guid=node.id %}"
+                                   data-toggle="modal" data-target="#deleteModal"
+                                        class="btn btn-danger">
+                                    Delete Node
+                                </a>
+                                <div class="modal" id="deleteModal">
+                                    <div class="modal-dialog">
+                                        <div class="modal-content"></div>
+                                        {# Data from above link #}
+                                    </div>
+                                </div>
+                            {% else %}
+                                <form method="post"
+                                      action="{% url 'nodes:restore' guid=node.id %}">
+                                    {% csrf_token %}
+                                    <input class="btn btn-success" type="submit"
+                                           value="Restore Node" />
+                                </form>
+                            {% endif %}
+                        {% else %}
+                            {% if node.is_stuck_registration %}
+                                <a href="{% url 'nodes:restart-stuck-registrations' guid=node.id %}"
+                                   data-toggle="modal" data-target="#confirmRestartRegistration"
+                                   class="btn btn-warning">
+                                    Restart Registration
+                                </a>
+                                <a href="{% url 'nodes:remove-stuck-registrations' guid=node.id %}"
+                                   data-toggle="modal" data-target="#confirmRemoveRegistration"
+                                   class="btn btn-danger">
+                                    Remove Registration
+                                </a>
+                            {% endif %}
+
+                        {% endif %}
+                    {% endif %}
+                    {% if perms.osf.mark_spam %}
+                        <a href="{% url 'nodes:confirm-spam' guid=node.id %}"
+                           data-toggle="modal" data-target="#confirmSpamModal"
+                           class="btn btn-warning">
+                            Confirm Spam
+                        </a>
+                        <div class="modal" id="confirmSpamModal">
+                            <div class="modal-dialog">
+                                <div class="modal-content"></div>
+                                {# Data from above link #}
+                            </div>
+                        </div>
+                        <a href="{% url 'nodes:confirm-ham' guid=node.id %}"
+                           data-toggle="modal" data-target="#confirmHamModal"
+                           class="btn btn-default">
+                            Confirm <strong>Not</strong> Spam
+                        </a>
+                        <div class="modal" id="confirmHamModal">
+                            <div class="modal-dialog">
+                                <div class="modal-content"></div>
+                                {# Data from above link #}
+                            </div>
+                        </div>
+                    {% endif %}
+                    <a href="{% url 'nodes:reindex-share-node' guid=node.id %}"
+                       data-toggle="modal" data-target="#confirmReindexShareNode"
+                       class="btn btn-default">
+                        SHARE Reindex
                     </a>
-                    </span>
-                    <div class="modal" id="deleteModal">
+                    <div class="modal" id="confirmReindexShareNode">
                         <div class="modal-dialog">
                             <div class="modal-content"></div>
                             {# Data from above link #}
                         </div>
                     </div>
-                {% else %}
-                    <span class="col-md-2">
-                    <form method="post"
-                          action="{% url 'nodes:restore' guid=node.id %}">
-                        {% csrf_token %}
-                        <input class="btn btn-success" type="submit"
-                               value="Restore Node" />
-                    </form>
-                    </span>
-                {% endif %}
-            {% endif %}
+                    <div class="modal" id="confirmRestartRegistration">
+                        <div class="modal-dialog">
+                            <div class="modal-content"></div>
+                            {# Data from above link #}
+                        </div>
+                    </div>
+                    <div class="modal" id="confirmRemoveRegistration">
+                        <div class="modal-dialog">
+                            <div class="modal-content"></div>
+                            {# Data from above link #}
+                        </div>
+                    </div>
+                    <a href="{% url 'nodes:reindex-elastic-node' guid=node.id %}"
+                       data-toggle="modal" data-target="#confirmReindexElasticNode"
+                       class="btn btn-default">
+                        Elastic Reindex
+                    </a>
+                    <div class="modal" id="confirmReindexElasticNode">
+                        <div class="modal-dialog">
+                            <div class="modal-content"></div>
+                            {# Data from above link #}
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
         <div class="row">
             {% if node.is_registration %}
                 <h3>Registration Details</h3>
             {% else %}
                 <h3>Node Details</h3>
+            </tr>
             {% endif %}
         </div>
         <div class="row">
@@ -85,6 +166,15 @@
 
             </tr>
             <tr>
+                <td>Creator</td>
+                <td>
+                    <a href="{{ node.creator | reverse_user }}">
+                        {{ node.creator }}
+                    </a>
+                </td>
+
+            </tr>
+            <tr>
                 <td>Contributors</td>
                 <td>
                     <table class="table table-bordered table-hover">
@@ -106,23 +196,25 @@
                             </td>
                             <td>{{ user.name }}</td>
                             <td>{{ user.permission|capfirst }}</td>
-                            <td>
-                            {% if not node.is_registration %}
-                                <a href="{% url 'nodes:remove_user' node_id=node.id user_id=user.id %}"
-                                   data-toggle="modal"
-                                   data-target="#{{ user.id }}Modal"
-                                   class="btn btn-danger">
-                                    Remove
-                                </a>
-                                <div class="modal" id="{{ user.id }}Modal">
-                                    <div class="modal-dialog">
-                                        <div class="modal-content">
-                                        {# from remove_contributor.html#}
+                            {%  if perms.osf.change_node %}
+                                <td>
+                                {% if not node.is_registration %}
+                                    <a href="{% url 'nodes:remove_user' guid=node.id user_id=user.id %}"
+                                       data-toggle="modal"
+                                       data-target="#{{ user.id }}Modal"
+                                       class="btn btn-danger">
+                                        Remove
+                                    </a>
+                                    <div class="modal" id="{{ user.id }}Modal">
+                                        <div class="modal-dialog">
+                                            <div class="modal-content">
+                                            {# from remove_contributor.html#}
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
+                                {% endif %}
+                                </td>
                             {% endif %}
-                            </td>
                         </tr>
                     {% endfor %}
                     </tbody>
@@ -153,6 +245,7 @@
                             <td>{{ child.title }}</td>
                             <td>{{ child.public }}</td>
                             <td>{{ child.number_contributors }}</td>
+                            {%  if perms.osf.delete_node %}
                             <td>
                                 {% if not child.is_registration %}
                                     {% if child.deleted %}
@@ -179,6 +272,7 @@
                                     {% endif %}
                                 {% endif %}
                             </td>
+                        {% endif %}
                         </tr>
                     {% endfor %}
                     </tbody>
@@ -189,7 +283,28 @@
                 <td>Registration</td>
                 <td>
                     {% if not node.is_registration %}
-                        {{ node.is_registration }}
+                        <table class="table table-bordered table-hover">
+                                <thead>
+                                <tr>
+                                    <td>Registration</td>
+                                    <td>Date Created</td>
+                                    <td>Pending</td>
+                                    <td>Withdrawn</td>
+                                    <td>Embargo</td>
+                                </tr>
+                                </thead>
+                                <tbody>
+                                {% for registration in node.registrations %}
+                                <tr>
+                                    <td><a href="{{ registration.id | reverse_node }}">{{ registration.id }}</a></td>
+                                    <td>{{ registration.date_created | date }}</td>
+                                    <td>{{ registration.pending_registration }}</td>
+                                    <td>{{ registration.withdrawn }}</td>
+                                    <td>{{ registration.embargo }}</td>
+                                </tr>
+                        {% endfor %}
+                                </tbody>
+                            </table>
                     {% else %}
                         <table class="table table-bordered table-hover">
                         <thead>
@@ -204,6 +319,10 @@
                                 <td>{{ node.date_created | date }}</td>
                             </tr>
                             <tr>
+                                <td>Datetime Registered</td>
+                                <td>{{ node.registered_date | date:"F j, Y P" }}</td>
+                            </tr>
+                            <tr>
                                 <td>Pending</td>
                                 <td>{{ node.pending_registration }}</td>
                             </tr>
@@ -213,11 +332,73 @@
                             </tr>
                             <tr>
                                 <td>Embargo</td>
-                                <td>{{ node.embargo }}</td>
+                                <td>
+                                    <div class="row">
+                                        <div class="col-md-10">
+                                            <span id="table-view">
+                                                {{ node.embargo }}
+                                            </span>
+                                            <span class="form-view" style="display:none;">
+                                                <form id="embargo-update-form" class="row">
+                                                    {% csrf_token %}
+                                                    <div class="col-md-6">
+                                                        <input id='datepicker' type='datetime' name="date" class="form-control" value={{node.embargo_formatted}} />
+                                                    </div>
+                                                    <div class="col-md-6">
+                                                        <input id='embargo-update-submit' class="form-button btn btn-danger" type="submit" value="Update embargo"/>
+                                                    </div>
+                                                </form>
+                                            </span>
+                                        </div>
+                                        <div class="col-md-2">
+                                            <a id="show-modify-form">Edit</a>
+                                        </div>
+                                    </div>
+                                    <span id="date-validation" class="help-block"></span>
+                                </td>
                             </tr>
+                            {% if node.registered_from is not None %}
+                            <tr>
+                                <td>Registered From</td>
+                                <td><a href="{% url 'nodes:node' guid=node.registered_from %}">{{ node.registered_from }}</a></td>
+                            </tr>
+                            {% endif %}
                         </tbody>
                         </table>
+                        <div class="modal" id="update-embargo-modal">
+                            <div class="modal-dialog">
+                                <form class="well">
+                                    <div class="modal-header">
+                                        <button type="button" class="close" data-dismiss="modal">x</button>
+                                        <h3>Are you sure you want to update this embargo?</h3>
+                                    </div>
+                                    <div class="modal-body">
+                                        Make sure you have confirmed this change with all the project admins.
+                                    </div>
+                                    <div class="modal-footer">
+                                        <input class="btn btn-danger" type="submit" value="Confirm" />
+                                        <button type="button" class="btn btn-default" data-dismiss="modal">
+                                            Cancel
+                                        </button>
+                                    </div></form>
+                            </div>
+                        </div>
                     {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td>SPAM Pro Tip</td>
+                    <td>{{ node.spam_pro_tip }}</td>
+                <td>
+            </tr>
+            <tr>
+                <td>SPAM Status</td>
+                <td>{% include "nodes/spam_status.html" with resource=node %}</td>
+            </tr>
+            <tr>
+                <td>SPAM Data</td>
+                <td>
+                    <pre>{{ node.spam_data }}</pre>
                 </td>
             </tr>
         </tbody>
@@ -225,3 +406,11 @@
         </div>
     </div>
 {% endblock content %}
+
+{% block bottom_js %}
+<script>
+    window.templateVars = {
+        'updateEmbargoUrl': '{% url 'nodes:update_embargo' guid=node.id %}',
+    }
+</script>
+{% endblock %}

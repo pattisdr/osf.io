@@ -5,10 +5,11 @@ require('jquery-blockui');
 var Raven = require('raven-js');
 var moment = require('moment');
 var URI = require('URIjs');
+var Cookie  = require('js-cookie');
 var bootbox = require('bootbox');
-var iconmap = require('js/iconmap');
 var lodashGet = require('lodash.get');
-
+var KeenTracker = require('js/keen');
+var linkify = require('linkifyjs/html');
 
 // TODO: For some reason, this require is necessary for custom ko validators to work
 // Why?!
@@ -87,12 +88,111 @@ var ajaxJSON = function(method, url, options) {
         ajaxFields.xhrFields =  {
             withCredentials: true
         };
+        // Add X-CSRFToken to v2 requests
+        if (window.contextVars.apiV2Domain &&
+            window.contextVars.csrfCookieName &&
+            url.match(new RegExp('^' + window.contextVars.apiV2Domain))) {
+              ajaxFields.headers = {
+                  'X-CSRFToken': Cookie.get(window.contextVars.csrfCookieName),
+              };
+        }
     }
     $.extend(true, ajaxFields, opts.fields);
 
     return $.ajax(ajaxFields);
 };
 
+ /**
+  * Squashes APIv2 data.attributes to top level JSON for treebeard
+  *
+  * @param {Object} data JSON data
+  * @return {Object data}
+  */
+  var squashAPIAttributes = function(data) {
+    $.each(data.data, function(i, obj) {
+        var savedAttributes = obj.attributes;
+        delete obj.attributes;
+        $.extend(true, obj, savedAttributes);
+    });
+    return data;
+};
+
+/**
+ * Returns a promise of an array of ajaxJSON response objects
+ */
+var getAllPagesAjaxJSON = function(method, url, options) {
+    var responses = [];
+    var fetch = function(method, url, options) {
+        var request = ajaxJSON(method, url, options);
+        request.done(function(response) {
+            deferred.notify(response);
+            responses = responses.concat(response);
+            if (response.links.next !== null) {
+                fetch(method, response.links.next, options);
+            } else {
+                deferred.resolve(responses);
+            }
+        });
+        request.fail(function(xhr, status, error) {
+            deferred.reject(error);
+        });
+    };
+    var deferred = new $.Deferred();
+    fetch(method, url, options);
+    return deferred.promise();
+};
+
+/**
+ * Takes an array of response objects and returns a single object
+ * @param {Array of Objects}
+ * @return {Object data}
+ */
+var mergePagesAjaxJSON = function(pages) {
+    var mergedData = {};
+    $.each(pages, function(page) {
+        $.each(pages[page].data, function(n) {
+            var node = pages[page].data[n];
+            mergedData[node.id] = node;
+        });
+    });
+    return mergedData;
+};
+
+/**
+ * Takes an array of response objects and returns just the children from the parent
+ * @param {Array of Objects}`
+ * @return {Object data}
+ */
+var getAllNodeChildrenFromNodeList = function(parent, nodeList) {
+    var tree = {};
+    var re = /\/v2\/nodes\/(.*)\//;
+
+    $.each(nodeList, function(n) {
+        var parent = 'root';
+        if ('parent' in nodeList[n].relationships) {
+            parent = nodeList[n].relationships.parent.links.related.href.match(re)[1];
+        }
+        if (!(n in tree)) {
+            tree[n] = [];
+        }
+        if (!(parent in tree)) {
+            tree[parent] = [];
+        }
+        tree[parent].push(n);
+    });
+
+    var children = {};
+    var remaining = [parent];
+    while (remaining.length > 0) {
+        var node = remaining.pop();
+        for (var c in tree[node]){
+            var child = tree[node][c];
+            remaining.push([child]);
+            children[child] = nodeList[child];
+        }
+    }
+    return children;
+};
 
 /**
 * Posts JSON data.
@@ -190,8 +290,28 @@ var setXHRAuthorization = function (xhr, options) {
 };
 
 var errorDefaultShort = 'Unable to resolve';
-var errorDefaultLong = 'OSF was unable to resolve your request. If this issue persists, ' +
-    'please report it to <a href="mailto:support@osf.io">support@osf.io</a>.';
+
+function osfSupportEmail() {
+    if(window.contextVars){
+        return window.contextVars.osfSupportEmail;
+    }
+    // currently have problem with osfLanguage.js doesn't have window imported,
+    // change this hard coded address later when we have improvement to that
+    return 'support@osf.io';
+}
+
+function osfSupportLink() {
+    return '<a href="mailto:' + osfSupportEmail() + '">' + osfSupportEmail() +'</a>';
+}
+
+function refreshOrSupport() {
+    return 'Please refresh the page and try again or contact ' + osfSupportLink() + ' if the problem persists.';
+}
+
+var errorDefaultLong = function(){
+    return 'OSF was unable to resolve your request. If this issue persists, ' +
+        'please report it to ' + osfSupportLink() + '.';
+};
 
 var handleAddonApiHTTPError = function(error){
     var response;
@@ -201,14 +321,14 @@ var handleAddonApiHTTPError = function(error){
         response = '';
     }
     var title = response.message_short || errorDefaultShort;
-    var message = response.message_long || errorDefaultLong;
+    var message = response.message_long || errorDefaultLong();
 
     $.osf.growl(title, message);
 };
 
 var handleJSONError = function(response) {
     var title = (response.responseJSON && response.responseJSON.message_short) || errorDefaultShort;
-    var message = (response.responseJSON && response.responseJSON.message_long) || errorDefaultLong;
+    var message = (response.responseJSON && response.responseJSON.message_long) || errorDefaultLong();
     // We can reach this error handler when the user leaves a page while a request is pending. In that
     // case, response.status === 0, and we don't want to show an error message.
     if (response && response.status && response.status >= 400) {
@@ -269,6 +389,16 @@ var mapByProperty = function(list, attr) {
     });
 };
 
+
+/**
+ * Replaces encoded & with decoded values
+ */
+var decodeText = function(text) {
+    if(typeof text === 'string') {
+        return text.replace(/&amp;/g, '&');
+    }
+    return text;
+};
 
 /**
   * Return whether or not a value is an email address.
@@ -381,29 +511,6 @@ var debounce = function(func, wait, immediate) {
 
     return result;
   };
-};
-
-///////////
-// Piwik //
-///////////
-
-var trackPiwik = function(host, siteId, cvars, useCookies) {
-    cvars = Array.isArray(cvars) ? cvars : [];
-    useCookies = typeof(useCookies) !== 'undefined' ? useCookies : false;
-    try {
-        var piwikTracker = window.Piwik.getTracker(host + 'piwik.php', siteId);
-        piwikTracker.enableLinkTracking(true);
-        for(var i=0; i<cvars.length;i++)
-        {
-            piwikTracker.setCustomVariable.apply(null, cvars[i]);
-        }
-        if (!useCookies) {
-            piwikTracker.disableCookies();
-        }
-        piwikTracker.trackPageView();
-
-    } catch(err) { return false; }
-    return true;
 };
 
 /**
@@ -582,7 +689,7 @@ function humanFileSize(bytes, si) {
 /**
 *  returns a random name from this list to use as a confirmation string
 */
-var _confirmationString = function() {
+var getConfirmationString = function() {
     // TODO: Generate a random string here instead of using pre-set values
     //       per Jeff, use ~10 characters
     var scientists = [
@@ -661,7 +768,7 @@ var confirmDangerousAction = function (options) {
     //       sustained attention and will prevent the user from copy/pasting a
     //       random string.
 
-    var confirmationString = _confirmationString();
+    var confirmationString = getConfirmationString();
 
     // keep the users' callback for re-use; we'll pass ours to bootbox
     var callback = options.callback;
@@ -767,9 +874,9 @@ var any = function(listOfBools, check) {
     return false;
 };
 
-/** 
+/**
  * A helper for creating a style-guide conformant bootbox modal. Returns a promise.
- * @param {String} title: 
+ * @param {String} title:
  * @param {String} message:
  * @param {String} actionButtonLabel:
  * @param {Object} options: optional options
@@ -879,6 +986,17 @@ var extractContributorNamesFromAPIData = function(contributor){
 // Google analytics event tracking on the dashboard/my projects pages
 var trackClick = function(category, action, label){
     window.ga('send', 'event', category, action, label);
+
+    KeenTracker.getInstance().trackPrivateEvent(
+        'front-end-events', {
+            interaction: {
+                category: category,
+                action: action,
+                label: label,
+            },
+        }
+    );
+
     //in order to make the href redirect work under knockout onclick binding
     return true;
 };
@@ -895,12 +1013,61 @@ function onScrollToBottom(element, callback) {
     });
 }
 
+
+/**
+ * Return the current domain as a string, e.g. 'http://localhost:5000'
+ */
+function getDomain(location) {
+    var ret = '';
+    var loc = location || window.location;
+    var hostname = loc.hostname;
+    var protocol = hostname === 'localhost' ? 'http://' : 'https://';
+    var port = loc.port;
+    ret = protocol + hostname;
+    if (port) {
+        ret += ':' + port;
+    }
+    return ret;
+}
+
+/**
+ * Utility function to convert absolute URLs to relative urls
+ * See:
+ *      http://stackoverflow.com/questions/736513/how-do-i-parse-a-url-into-hostname-and-path-in-javascript
+ * This method have no effect on external urls.
+ * @param url {string} url to be converted
+ * @returns {string} converted relative url
+ */
+function toRelativeUrl(url, window) {
+    var parser = document.createElement('a');
+    parser.href = url;
+    var relative_url = url;
+    if (window.location.hostname === parser.hostname){
+        relative_url = parser.pathname + parser.search + parser.hash;
+    }
+    return relative_url;
+}
+
+/**
+ * Utility function to render links in plain text to HTML a tags
+ * @param content {string} text to be converted
+ * @returns {string} linkified text
+ */
+function linkifyText(content) {
+    var linkifyOpts = { target: function (href, type) { return type === 'url' ? '_top' : null; } };
+    return linkify(content);
+}
+
 // Also export these to the global namespace so that these can be used in inline
 // JS. This is used on the /goodbye page at the moment.
 module.exports = window.$.osf = {
     postJSON: postJSON,
     putJSON: putJSON,
     ajaxJSON: ajaxJSON,
+    getAllPagesAjaxJSON: getAllPagesAjaxJSON,
+    mergePagesAjaxJSON: mergePagesAjaxJSON,
+    getAllNodeChildrenFromNodeList: getAllNodeChildrenFromNodeList,
+    squashAPIAttributes: squashAPIAttributes,
     setXHRAuthorization: setXHRAuthorization,
     handleAddonApiHTTPError: handleAddonApiHTTPError,
     handleJSONError: handleJSONError,
@@ -913,7 +1080,6 @@ module.exports = window.$.osf = {
     mapByProperty: mapByProperty,
     isEmail: isEmail,
     urlParams: urlParams,
-    trackPiwik: trackPiwik,
     applyBindings: applyBindings,
     FormattableDate: FormattableDate,
     throttle: throttle,
@@ -935,5 +1101,13 @@ module.exports = window.$.osf = {
     trackClick: trackClick,
     findContribName: findContribName,
     extractContributorNamesFromAPIData: extractContributorNamesFromAPIData,
-    onScrollToBottom: onScrollToBottom
+    onScrollToBottom: onScrollToBottom,
+    getDomain: getDomain,
+    toRelativeUrl: toRelativeUrl,
+    linkifyText: linkifyText,
+    getConfirmationString: getConfirmationString,
+    decodeText: decodeText,
+    osfSupportEmail: osfSupportEmail,
+    osfSupportLink: osfSupportLink,
+    refreshOrSupport: refreshOrSupport,
 };

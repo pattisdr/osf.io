@@ -1,14 +1,12 @@
 'use strict';
 
 require('css/log-feed.css');
-var $ = require('jquery');  // jQuery
 var m = require('mithril'); // exposes mithril methods, useful for redraw etc.
-var oop = require('js/oop');
+var $ = require('jquery');
 var $osf = require('js/osfHelpers');
 var mHelpers = require('js/mithrilHelpers');
 var Raven = require('raven-js');
 var LogText = require('js/logTextParser');
-var Paginator = require('js/paginator');
 
 var MAX_PAGES_ON_PAGINATOR = 7;
 var MAX_PAGES_ON_PAGINATOR_SIDE = 5;
@@ -20,7 +18,7 @@ var _buildLogUrl = function(node, page, limitLogs) {
     var logPage = page || 1;
     var urlPrefix = (node.isRegistration || node.is_registration) ? 'registrations' : 'nodes';
     var size = limitLogs ? LOG_PAGE_SIZE_LIMITED : LOG_PAGE_SIZE;
-    var query = { 'page[size]': size, 'page': logPage, 'embed': ['original_node', 'user', 'linked_node', 'template_node'], 'profile_image_size': PROFILE_IMAGE_SIZE};
+    var query = { 'page[size]': size, 'page': logPage, 'embed': ['original_node', 'user', 'linked_node', 'linked_registration', 'template_node'], 'profile_image_size': PROFILE_IMAGE_SIZE};
     var viewOnly = $osf.urlParams().view_only;
     if (viewOnly) {
         query.view_only = viewOnly;
@@ -70,8 +68,7 @@ var LogFeed = {
                 }, function(xhr, textStatus, error) {
                     self.failed = true;
                     self.logRequestPending(false);
-                    var message = 'Error retrieving logs for ' + self.node.id;
-                    Raven.captureMessage(message, {extra: {url: url, textStatus: textStatus, error: error}});
+                    Raven.captureMessage('Error retrieving logs', {extra: {url: url, textStatus: textStatus, error: error}});
                 }
             );
         };
@@ -88,6 +85,7 @@ var LogFeed = {
     view : function (ctrl) {
 
         var i;
+        var OSF_SUPPORT_EMAIL = $osf.osfSupportEmail();
         ctrl.paginators([]);
         if (ctrl.totalPages() > 1 && !ctrl.limitLogs) {
             // previous page
@@ -140,14 +138,14 @@ var LogFeed = {
                 });
             }
             // one ellipse at the beginning
-            else if (ctrl.currentPage() > ctrl.totalPages() - MAX_PAGES_ON_PAGINATOR_SIDE) {
+            else if (ctrl.currentPage() > ctrl.totalPages() - MAX_PAGES_ON_PAGINATOR_SIDE + 2) {
                 ctrl.paginators().push({
                     text: '...',
                     url: function() { }
                 });
-                for (i = ctrl.totalPages() - MAX_PAGES_ON_PAGINATOR_SIDE; i < ctrl.totalPages() - 1; i++) {
+                for (i = ctrl.totalPages() - MAX_PAGES_ON_PAGINATOR_SIDE + 2; i <= ctrl.totalPages() - 1; i++) {
                     ctrl.paginators().push({
-                        text: i + 1,
+                        text: i,
                         url: function() {
                             ctrl.pageToGet(parseInt(this.text));
                             if (ctrl.pageToGet() !== ctrl.currentPage()) {
@@ -202,12 +200,12 @@ var LogFeed = {
             // Error message if the log request fails
             ctrl.failed ? m('p', [
                 'Unable to retrieve logs at this time. Please refresh the page or contact ',
-                m('a', {'href': 'mailto:support@osf.io'}, 'support@osf.io'),
+                m('a', {'href': 'mailto:' + OSF_SUPPORT_EMAIL}, OSF_SUPPORT_EMAIL),
                 ' if the problem persists.'
             ]) :
             // Show OSF spinner while there is a pending log request
             ctrl.logRequestPending() ?  m('.spinner-loading-wrapper', [
-                m('.logo-spin.logo-lg'),
+                m('.ball-scale.ball-scale-blue', [m('div')]),
                 m('p.m-t-sm.fg-load-message', 'Loading logs...')
             ]) :
             // Display each log item (text and user image)
@@ -220,7 +218,7 @@ var LogFeed = {
                     image = m('img', { src : item.embeds.user.errors[0].meta.profile_image});
                 }
                 return m('.db-activity-item', [
-                    m('', [m('.db-log-avatar.m-r-xs', image), m.component(LogText, item)]),
+                    m('', [m('.db-log-avatar.db-log-avatar-project-overview.m-r-xs', image), m('span.p-l-sm.p-r-sm', ''), m.component(LogText.LogText, item)]),
                     m('.text-right', m('span.text-muted.m-r-xs', item.attributes.formattableDate.local))
                 ]);
             }) : '',

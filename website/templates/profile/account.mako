@@ -2,12 +2,6 @@
 <%inherit file="base.mako"/>
 
 <%def name="title()">Account Settings</%def>
-
-<%def name="stylesheets()">
-   ${parent.stylesheets()}
-   <link rel="stylesheet" href='/static/css/pages/account-setting-page.css'>
-</%def>
-
 <%def name="content()">
     <% from website import settings %>
     <div id="accountSettings">
@@ -70,7 +64,7 @@
                                             <span class="fa fa-info-circle" data-bind="tooltip: {title: 'Merging accounts will move all projects and components associated with two emails into one account. All projects and components will be displayed under the email address listed as primary.',
                                              placement: 'bottom', container : 'body'}"></span>
                                             </p>
-                  
+
                                             <div class="form-group">
                                                 ## email input verification is not supported on safari
                                               <input placeholder="Email address" type="email" data-bind="value: emailInput" class="form-control" required maxlength="254">
@@ -88,23 +82,136 @@
                         </table>
                     </div>
                 </div>
+                % if storage_flag_is_active:
+                    <div class="panel panel-default">
+                        <div class="panel-heading clearfix"><h3 class="panel-title">Default Storage Location</h3></div>
+                        <div class="panel-body">
+                            <form id="updateDefaultStorageLocation" data-bind="submit: $root.updateDefaultStorageLocation.bind($root)" role="form">
+                                <div class="form-group">
+                                    <select class="form-control" data-bind="options: locations, value: locationSelected, optionsText: function(item) { return item.name }">
+                                    </select>
+                                    <div class="help-block">
+                                        <p>
+                                            This location will be applied to new projects and components. It will not affect existing projects and components.
+                                        </p>
+                                    </div>
+                                </div>
+                                <p class="text-muted"></p>
+                                <button class="btn btn-primary" type="submit">Update location</button>
+                            </form>
+                        </div>
+                    </div>
+                % endif
+                <div id="externalIdentity" class="panel panel-default">
+                    <div class="panel-heading clearfix"><h3 class="panel-title">Connected Identities</h3></div>
+                    <div class="panel-body">
+                        <p> Connected identities allow you to log in to the OSF via a third-party service. <br/>
+                        You can revoke these authorizations here.</p>
+                        <hr />
+                        % if not external_identity:
+                        <p >You have not authorized any external services to log in to the OSF.</p>
+                        % endif
+                        <tbody>
+                        % for identity in external_identity:
+                        <div id="externalLogin-${identity}">
+                            % for id in external_identity[identity]:
+                            <div><tr>
+                                <td>
+                                    ${identity}: ${id} (
+                                    % if external_identity[identity][id] == "VERIFIED":
+                                        Verified
+                                    % else:
+                                        Pending
+                                    % endif
+                                    )
+                                </td>
+                                <td>
+                                    <a data-bind="click: $root.removeIdentity.bind($root, '${id}')"><i class="fa fa-times text-danger pull-right"></i></a>
+                                </td>
+                            </tr></div>
+                            % if not loop.last:
+                            <hr />
+                            % endif
+                            % endfor
+                        </div>
+                        % endfor
+                        </tbody>
+                    </div>
+                </div>
                 <div id="changePassword" class="panel panel-default">
                     <div class="panel-heading clearfix"><h3 class="panel-title">Change Password</h3></div>
                     <div class="panel-body">
                         <form id="changePasswordForm" role="form" action="${ web_url_for('user_account_password') }" method="post">
                             <div class="form-group">
                                 <label for="old_password">Old password</label>
-                                <input type="password" class="form-control" name="old_password" required>
+                                <input
+                                    type="password"
+                                    class="form-control"
+                                    id="changePassword"
+                                    placeholder="Old Password"
+                                    name="old_password"
+                                    data-bind="
+                                        textInput: oldPassword,
+                                        value: oldPassword,
+                                        event: {
+                                            blur: trim.bind($data, password)
+                                        }"
+                                >
+                                <p class="help-block" data-bind="validationMessage: oldPassword" style="display: none;"></p>
                             </div>
                             <div class="form-group">
                                 <label for="new_password">New password</label>
-                                <input type="password" class="form-control" name="new_password" required>
+                                <input
+                                    type="password"
+                                    class="form-control"
+                                    id="resetPassword"
+                                    placeholder="New Password"
+                                    name="new_password"
+                                    data-bind="
+                                        textInput: typedPassword,
+                                        value: password,
+                                        event: {
+                                            blur: trim.bind($data, password)
+                                        }"
+                                >
+                                <div class="row" data-bind="visible: typedPassword().length > 0">
+                                    <div class="col-xs-8">
+                                        <div class="progress create-password">
+                                            <div class="progress-bar progress-bar-sm" role="progressbar" data-bind="attr: passwordComplexityInfo().attr"></div>
+                                        </div>
+                                    </div>
+                                    <div class="col-xs-4 f-w-xl">
+                                        <!-- ko if: passwordFeedback() -->
+                                        <p id="front-password-info" data-bind="text: passwordComplexityInfo().text, attr: passwordComplexityInfo().text_attr"></p>
+                                        <!-- /ko -->
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <!-- ko if: passwordFeedback() -->
+                                    <p class="help-block osf-box-lt p-xs" data-bind="validationMessage: password" style="display: none;"></p>
+                                    <p class="osf-box-lt " data-bind="css : { 'p-xs': passwordFeedback().warning }, visible: typedPassword().length > 0, text: passwordFeedback().warning"></p>
+                                    <!-- /ko -->
+                                </div>
                             </div>
                             <div class="form-group">
                                 <label for="confirm_password">Confirm new password</label>
-                                <input type="password" class="form-control" name="confirm_password" required>
+                                <input
+                                    type="password"
+                                    class="form-control"
+                                    id="resetPasswordConfirmation"
+                                    placeholder="Verify Password"
+                                    name="confirm_password"
+                                    data-bind="
+                                        value: passwordConfirmation,
+                                        event: {
+                                            blur: trim.bind($data, passwordConfirmation)
+                                        }"
+                                >
+                                <p class="help-block" data-bind="validationMessage: passwordConfirmation" style="display: none;"></p>
                             </div>
-                            <button type="submit" class="btn btn-primary">Update password</button>
+                            ## TODO: [#OSF-6764] change so that password strength submit validation happens in knockout on the form, not with this disable
+                            <button type="submit" class="btn btn-primary" data-bind="disable: !password.isValid()">Update password</button>
                         </form>
                     </div>
                 </div>
@@ -129,15 +236,11 @@
                 <div id="deactivateAccount" class="panel panel-default">
                     <div class="panel-heading clearfix"><h3 class="panel-title">Deactivate Account</h3></div>
                     <div class="panel-body">
-                        %if not requested_deactivation:
-                            <p class="alert alert-warning"><strong>Warning:</strong> This action is irreversible.</p>
-                        %endif
+                        <p class="alert alert-warning"><strong>Warning:</strong> Once your deactivation has been approved the effects are irreversible.</p>
                         <p>Deactivating your account will remove you from all public projects to which you are a contributor. Your account will no longer be associated with OSF projects, and your work on the OSF will be inaccessible.</p>
-                        %if not requested_deactivation:
-                             <a class="btn btn-danger" data-bind="click: submit, css: success() === true ? 'disabled' : ''">Request deactivation</a>
-                        %else:
-                             <p><b>Your account is currently pending deactivation.</b></p>
-                        %endif
+                        <p data-bind="click: cancel, visible: requestPending()"><b>Your account is currently pending deactivation.</b></p>
+                        <a class="btn btn-danger" data-bind="click: submit, visible: !requestPending()">Request deactivation</a>
+                        <a class="btn btn-success" data-bind="click: cancel, visible: requestPending()">Cancel deactivation request</a>
                     </div>
                 </div>
             </div>
@@ -162,6 +265,13 @@
 </%def>
 
 <%def name="javascript_bottom()">
+    <script type="text/javascript">
+        window.contextVars = $.extend(true, {}, window.contextVars, {
+            username: ${user_name | sjson, n},
+            requestedDeactivation: ${requested_deactivation | sjson, n}
+        });
+    </script>
+    ${parent.javascript_bottom()}
     ## Webpack bundles
     % for js_asset in addons_js:
       <script src="${js_asset | webpack_asset}"></script>

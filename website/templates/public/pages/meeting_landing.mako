@@ -1,6 +1,12 @@
 <%inherit file="base.mako"/>
 
 <%def name="title()">Meetings</%def>
+
+<%def name="nav()">
+    <%namespace name="nav_helper" file="nav.mako" />
+    ${nav_helper.nav(service_name='MEETINGS', service_url='/meetings/', service_support_url='https://openscience.zendesk.com/hc/en-us/categories/360001550933')}
+</%def>
+
 <%def name="stylesheets()">
     ${parent.stylesheets()}
     <link rel="stylesheet" href="/static/css/pages/meeting-landing-page.css">
@@ -16,11 +22,12 @@
 </%def>
 
 <%def name="content()">
+    <div id="osfScheduledBanner"></div>
     <div class="osf-meeting-header-img">
         <div class="osf-meeting-header">
             <div class="container ">
             <div class="text-center m-b-lg">
-                <h1>OSF for Meetings</h1>
+                <h1><img src="/static/img/meeting-page/osf_meetings_white.png" alt="Logo for OSF meeting" style="width: 80%"></h1>
                 <h3>A <strong>free poster and presentation sharing service</strong> for academic meetings and conferences</h3>
             </div>
                 <div class="network-img"> </div>
@@ -38,8 +45,8 @@
                     </div>
                     <div class="collapse" id="osf-meeting-register">
                         <div class="m-lg osf-box-lt p-md text-left">
-                            <p>OSF for Meetings is a product that we offer to academic conferences at no cost. To request poster and talk hosting for a conference:</p>
-                                <p class="text-center"><strong> Email us at <a href="mailto:contact@cos.io">contact@cos.io</a> </strong></p>
+                            <p>OSF Meetings is a product that we offer to academic conferences at no cost. To request poster and talk hosting for a conference:</p>
+                                <p class="text-center"><strong> Submit this <a href="https://docs.google.com/forms/d/e/1FAIpQLSeBq4CfC5CjTBz49TP2dO9ZIsQc6QAAJFUoUbkS767Le9twLw/viewform">set-up form</a> </strong></p>
                              <p>We'll review and add your conference within one business day.</p>
                         </div>
                     </div>
@@ -61,7 +68,7 @@
 
                             <ul>
                                 <li>Find the email address for your conference by clicking on its name in the list below</li>
-                                <li>Send your materials to the OSF for Meetings email address for your conference</li>
+                                <li>Send your materials to the OSF Meetings email address for your conference</li>
                             </ul>
 
                             <p> We’ll create an OSF project for you. You'll get a permanent link to your presentation, plus analytics about who has viewed and downloaded your work.</p>
@@ -78,16 +85,6 @@
         <div class="row m-v-lg">
             <div class="col-md-12">
                 <div role="tabpanel">
-                    <!-- Nav tabs -->
-                    <ul class="nav nav-tabs m-b-md" role="tablist">
-                        <li role="presentation" class="active">
-                            <a href="#meetings" aria-controls="meetings" role="tab" data-toggle="tab">All meetings</a>
-                        </li>
-                        <li role="presentation">
-                            <a href="#submissions" aria-controls="submissions" role="tab" data-toggle="tab">All submissions</a>
-                        </li>
-                    </ul>
-                    <!-- Tab panes -->
                     <div class="tab-content">
                         <div role="tabpanel" class="tab-pane active" id="meetings">
                             <p>
@@ -99,7 +96,9 @@
 
                             <div id="submissions-grid">
                                 <div id="allMeetingsLoader" class="spinner-loading-wrapper">
-                                    <div class="logo-spin logo-lg"></div>
+                                    <div class="ball-scale ball-scale-blue">
+                                        <div></div>
+                                    </div>
                                     <p class="m-t-sm fg-load-message"> Loading submissions...</p>
                                 </div>
                             </div>
@@ -140,7 +139,7 @@
         </div>
 
         <div class="row text-center m-b-md">
-            <h2> Who uses OSF for Meetings?</h2>
+            <h2> Who uses OSF Meetings?</h2>
         </div>
         <div class="row org-logo m-b-lg">
             <div class="col-sm-3 col-xs-6  text-center">

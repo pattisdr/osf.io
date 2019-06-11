@@ -8,7 +8,6 @@ import logging
 import os
 
 from flask import request, make_response
-import lxml.html
 from mako.lookup import TemplateLookup
 from mako.template import Template
 import markupsafe
@@ -32,7 +31,7 @@ _TPL_LOOKUP = TemplateLookup(
     ],
     directories=[
         TEMPLATE_DIR,
-        os.path.join(settings.BASE_PATH, 'addons/'),
+        settings.ADDON_PATH,
     ],
     module_directory='/tmp/mako_modules'
 )
@@ -48,7 +47,7 @@ _TPL_LOOKUP_SAFE = TemplateLookup(
     ],
     directories=[
         TEMPLATE_DIR,
-        os.path.join(settings.BASE_PATH, 'addons/'),
+        settings.ADDON_PATH,
     ],
     module_directory='/tmp/mako_modules',
 )
@@ -460,13 +459,18 @@ class WebRenderer(Renderer):
         if error.redirect_url is not None:
             return redirect(error.redirect_url)
 
+        # Check for custom error template
+        error_template = self.error_template
+        if getattr(error, 'template', None):
+            error_template = error.template
+
         # Render error page
         # todo: use message / data from exception in error page
         error_data = error.to_data()
         return self.render(
             error_data,
             None,
-            template_name=self.error_template
+            template_name=error_template
         ), error.code
 
     def render_element(self, element, data):
@@ -554,22 +558,6 @@ class WebRenderer(Renderer):
             rendered = renderer(self.template_dir, template_name, data, trust=self.trust)
         except IOError:
             return '<div>Template {} not found.</div>'.format(template_name)
-
-        html = lxml.html.fragment_fromstring(rendered, create_parent='remove')
-
-        for element in html.findall('.//*[@mod-meta]'):
-
-            # Render nested template
-            template_rendered, is_replace = self.render_element(element, data)
-
-            original = lxml.html.tostring(element)
-            if is_replace:
-                replacement = template_rendered
-            else:
-                replacement = original
-                replacement = replacement.replace('><', '>' + template_rendered + '<')
-
-            rendered = rendered.replace(original, replacement)
 
         ## Parse HTML using html5lib; lxml is too strict and e.g. throws
         ## errors if missing parent container; htmlparser mangles whitespace

@@ -1,4 +1,3 @@
-var $ = require('jquery');
 var m = require('mithril');
 
 var collaborative = (typeof WebSocket !== 'undefined' && typeof sharejs !== 'undefined');
@@ -28,6 +27,16 @@ var ShareJSDoc = function(shareWSUrl, metadata, editor, observables) {
     self.observables = observables;
 
 
+    if (!collaborative) {
+        if (typeof WebSocket === 'undefined') {
+            self.observables.status('unsupported');
+        } else {
+            self.observables.status('disconnected');
+        }
+        return;
+    }
+
+
     // Requirements load order is specific in this case to compensate
     // for older browsers.
     var ReconnectingWebSocket = require('reconnectingWebsocket');
@@ -45,14 +54,6 @@ var ShareJSDoc = function(shareWSUrl, metadata, editor, observables) {
     var canEdit = true;
 
     function whenReady() {
-        if (!collaborative) {
-            if (typeof WebSocket === 'undefined') {
-                self.observables.status('unsupported');
-            } else {
-                self.observables.status('disconnected');
-            }
-            return;
-        }
 
         // Create a text document if one does not exist
         if (!doc.type) {
@@ -80,6 +81,9 @@ var ShareJSDoc = function(shareWSUrl, metadata, editor, observables) {
 
     // Send user metadata
     function register() {
+        // our shareJS explicitly wants 'userGravatar' and not our more general 'userProfileImage'
+        // see https://github.com/CenterForOpenScience/sharejs/search?utf8=%E2%9C%93&q=gravatar&type=
+        metadata.userGravatar = metadata.userProfileImage;
         socket.send(JSON.stringify(metadata));
     }
 

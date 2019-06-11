@@ -19,10 +19,8 @@ function resolveToggle(item) {
 }
 
 function resolveIcon(item) {
-    var componentIcons = iconmap.componentIcons;
-    var projectIcons = iconmap.projectIcons;
+    var icons = iconmap.projectComponentIcons;
     function returnView(category) {
-        var icons = componentIcons[category] ? componentIcons : projectIcons;
         return m('span', { 'class' : icons[category]});
     }
     if (item.data.kind === 'component' && item.parent().data.title === 'Component Wiki Pages') {
@@ -58,7 +56,7 @@ function WikiMenu(data, wikiID, canEdit) {
                 width: '100%'
             }];
         },
-        onload: function() {
+        ondataload: function() {
             var tb = this;  // jshint ignore: line
             for (var i = 0; i < tb.treeData.children.length; i++) {
                 var parent = tb.treeData.children[i];

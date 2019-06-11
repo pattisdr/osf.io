@@ -1,31 +1,87 @@
+import pytz
 
-from rest_framework import generics
-from rest_framework import permissions as drf_permissions
-from rest_framework.exceptions import NotAuthenticated, NotFound
-from django.contrib.auth.models import AnonymousUser
+from django.apps import apps
+from django.db.models import Exists, F, OuterRef, Q
 
-from modularodm import Q
-
-from framework.auth.oauth_scopes import CoreScopes
-
-from website.models import User, Node, ExternalAccount
-
-from api.base import permissions as base_permissions
-from api.base.utils import get_object_or_error
-from api.base.exceptions import Conflict
-from api.base.serializers import AddonAccountSerializer
-from api.base.views import JSONAPIBaseView
-from api.base.filters import ODMFilterMixin, ListFilterMixin
-from api.base.parsers import JSONAPIRelationshipParser, JSONAPIRelationshipParserForRegularJSON
-from api.nodes.serializers import NodeSerializer
-from api.institutions.serializers import InstitutionSerializer
-from api.registrations.serializers import RegistrationSerializer
-from api.base.utils import default_node_list_query, default_node_permission_query
 from api.addons.views import AddonSettingsMixin
+from api.base import permissions as base_permissions
+from api.base.exceptions import Conflict, UserGone
+from api.base.filters import ListFilterMixin, PreprintFilterMixin
+from api.base.parsers import (
+    JSONAPIRelationshipParser,
+    JSONAPIRelationshipParserForRegularJSON,
+    JSONAPIMultipleRelationshipsParser,
+    JSONAPIMultipleRelationshipsParserForRegularJSON,
+)
+from api.base.serializers import get_meta_type, AddonAccountSerializer
+from api.base.utils import (
+    default_node_list_queryset,
+    default_node_list_permission_queryset,
+    get_object_or_error,
+    get_user_auth,
+    hashids,
+    is_truthy,
+)
+from api.base.views import JSONAPIBaseView, WaterButlerMixin
+from api.base.throttling import SendEmailThrottle, SendEmailDeactivationThrottle
+from api.institutions.serializers import InstitutionSerializer
+from api.nodes.filters import NodesFilterMixin, UserNodesFilterMixin
+from api.nodes.serializers import DraftRegistrationSerializer
+from api.nodes.utils import NodeOptimizationMixin
+from api.preprints.serializers import PreprintSerializer
+from api.registrations.serializers import RegistrationSerializer
 
-from .serializers import UserSerializer, UserAddonSettingsSerializer, UserDetailSerializer, UserInstitutionsRelationshipSerializer
-from .permissions import ReadOnlyOrCurrentUser, ReadOnlyOrCurrentUserRelationship, CurrentUser
-
+from api.users.permissions import (
+    CurrentUser, ReadOnlyOrCurrentUser,
+    ReadOnlyOrCurrentUserRelationship,
+    ClaimUserPermission,
+)
+from api.users.serializers import (
+    UserAddonSettingsSerializer,
+    UserDetailSerializer,
+    UserIdentitiesSerializer,
+    UserInstitutionsRelationshipSerializer,
+    UserSerializer,
+    UserEmail,
+    UserEmailsSerializer,
+    UserNodeSerializer,
+    UserSettingsSerializer,
+    UserSettingsUpdateSerializer,
+    UserQuickFilesSerializer,
+    UserAccountExportSerializer,
+    ReadEmailUserDetailSerializer,
+    UserChangePasswordSerializer,
+)
+from django.contrib.auth.models import AnonymousUser
+from django.http import JsonResponse
+from django.utils import timezone
+from framework.auth.core import get_user
+from framework.auth.views import send_confirm_email
+from framework.auth.oauth_scopes import CoreScopes, normalize_scopes
+from framework.auth.exceptions import ChangePasswordError
+from framework.utils import throttle_period_expired
+from framework.sessions.utils import remove_sessions_for_user
+from framework.exceptions import PermissionsError, HTTPError
+from rest_framework import permissions as drf_permissions
+from rest_framework import generics
+from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.exceptions import NotAuthenticated, NotFound, ValidationError, Throttled
+from osf.models import (
+    Contributor,
+    DraftRegistration,
+    ExternalAccount,
+    Guid,
+    QuickFilesNode,
+    AbstractNode,
+    Preprint,
+    Node,
+    Registration,
+    OSFUser,
+    Email,
+)
+from website import mails, settings
+from website.project.views.contributor import send_claim_email, send_claim_registered_email
 
 class UserMixin(object):
     """Mixin with convenience methods for retrieving the current user based on the
@@ -37,76 +93,63 @@ class UserMixin(object):
 
     def get_user(self, check_permissions=True):
         key = self.kwargs[self.user_lookup_url_kwarg]
+        # If Contributor is in self.request.parents,
+        # then this view is getting called due to an embedded request (contributor embedding user)
+        # We prefer to access the user from the contributor object and take advantage
+        # of the query cache
+        if hasattr(self.request, 'parents') and len(self.request.parents.get(Contributor, {})) == 1:
+            # We expect one parent contributor view, so index into the first item
+            contrib_id, contrib = self.request.parents[Contributor].items()[0]
+            user = contrib.user
+            if user.is_disabled:
+                raise UserGone(user=user)
+            # Make sure that the contributor ID is correct
+            if user._id == key:
+                if check_permissions:
+                    self.check_object_permissions(self.request, user)
+                return get_object_or_error(
+                    OSFUser.objects.filter(id=user.id).annotate(default_region=F('addons_osfstorage_user_settings__default_region___id')).exclude(default_region=None),
+                    request=self.request,
+                    display_name='user',
+                )
+
+        if self.kwargs.get('is_embedded') is True:
+            if key in self.request.parents[OSFUser]:
+                return self.request.parents[OSFUser].get(key)
+
         current_user = self.request.user
 
-        if key == 'me':
-            if isinstance(current_user, AnonymousUser):
+        if isinstance(current_user, AnonymousUser):
+            if key == 'me':
                 raise NotAuthenticated
-            else:
-                return self.request.user
 
-        obj = get_object_or_error(User, key, 'user')
+        elif key == 'me' or key == current_user._id:
+            return get_object_or_error(
+                OSFUser.objects.filter(id=current_user.id).annotate(default_region=F('addons_osfstorage_user_settings__default_region___id')).exclude(default_region=None),
+                request=self.request,
+                display_name='user',
+            )
+
+        obj = get_object_or_error(OSFUser, key, self.request, 'user')
+
         if check_permissions:
             # May raise a permission denied
             self.check_object_permissions(self.request, obj)
         return obj
 
 
-class UserList(JSONAPIBaseView, generics.ListAPIView, ODMFilterMixin):
-    """List of users registered on the OSF. *Read-only*.
-
-    Paginated list of users ordered by the date they registered.  Each resource contains the full representation of the
-    user, meaning additional requests to an individual user's detail view are not necessary.
-
-    Note that if an anonymous view_only key is being used, user information will not be serialized, and the id will be
-    an empty string. Relationships to a user object will not show in this case, either.
-
-    The subroute [`/me/`](me/) is a special endpoint that always points to the currently logged-in user.
-
-    ##User Attributes
-
-    <!--- Copied Attributes From UserDetail -->
-
-    OSF User entities have the "users" `type`.
-
-        name               type               description
-        ========================================================================================
-        full_name          string             full name of the user; used for display
-        given_name         string             given name of the user; for bibliographic citations
-        middle_names       string             middle name of user; for bibliographic citations
-        family_name        string             family name of user; for bibliographic citations
-        suffix             string             suffix of user's name for bibliographic citations
-        date_registered    iso8601 timestamp  timestamp when the user's account was created
-
-    ##Links
-
-    See the [JSON-API spec regarding pagination](http://jsonapi.org/format/1.0/#fetching-pagination).
-
-    ##Actions
-
-    *None*.
-
-    ##Query Params
-
-    + `page=<Int>` -- page number of results to view, default 1
-
-    + `filter[<fieldname>]=<Str>` -- fields and values to filter the search results on.
-
-    Users may be filtered by their `id`, `full_name`, `given_name`, `middle_names`, or `family_name`.
-
-    + `profile_image_size=<Int>` -- Modifies `/links/profile_image_url` of the user entities so that it points to
-    the user's profile image scaled to the given size in pixels.  If left blank, the size depends on the image provider.
-
-    #This Request/Response
-
+class UserList(JSONAPIBaseView, generics.ListAPIView, ListFilterMixin):
+    """The documentation for this endpoint can be found [here](https://developer.osf.io/#operation/users_list).
     """
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
+        base_permissions.RequiresScopedRequestOrReadOnly,
         base_permissions.TokenHasScope,
     )
 
     required_read_scopes = [CoreScopes.USERS_READ]
-    required_write_scopes = [CoreScopes.USERS_WRITE]
+    required_write_scopes = [CoreScopes.NULL]
+    model_class = apps.get_model('osf.OSFUser')
 
     serializer_class = UserSerializer
 
@@ -114,97 +157,18 @@ class UserList(JSONAPIBaseView, generics.ListAPIView, ODMFilterMixin):
     view_category = 'users'
     view_name = 'user-list'
 
-    # overrides ODMFilterMixin
-    def get_default_odm_query(self):
-        return (
-            Q('is_registered', 'eq', True) &
-            Q('is_merged', 'ne', True) &
-            Q('date_disabled', 'eq', None)
-        )
+    def get_default_queryset(self):
+        if self.request.version >= '2.3':
+            return OSFUser.objects.filter(is_registered=True, date_disabled__isnull=True, merged_by__isnull=True)
+        return OSFUser.objects.filter(is_registered=True, date_disabled__isnull=True)
 
-    # overrides ListAPIView
+    # overrides ListCreateAPIView
     def get_queryset(self):
-        # TODO: sort
-        query = self.get_query_from_request()
-        return User.find(query)
+        return self.get_queryset_from_request()
 
 
 class UserDetail(JSONAPIBaseView, generics.RetrieveUpdateAPIView, UserMixin):
-    """Details about a specific user. *Writeable*.
-
-    The User Detail endpoint retrieves information about the user whose id is the final part of the path.  If `me`
-    is given as the id, the record of the currently logged-in user will be returned.  The returned information includes
-    the user's bibliographic information and the date the user registered.
-
-    Note that if an anonymous view_only key is being used, user information will not be serialized, and the id will be
-    an empty string. Relationships to a user object will not show in this case, either.
-
-    ##Attributes
-
-    OSF User entities have the "users" `type`.
-
-        name               type               description
-        ========================================================================================
-        full_name          string             full name of the user; used for display
-        given_name         string             given name of the user; for bibliographic citations
-        middle_names       string             middle name of user; for bibliographic citations
-        family_name        string             family name of user; for bibliographic citations
-        suffix             string             suffix of user's name for bibliographic citations
-        date_registered    iso8601 timestamp  timestamp when the user's account was created
-
-    ##Relationships
-
-    ###Nodes
-
-    A list of all nodes the user has contributed to.  If the user id in the path is the same as the logged-in user, all
-    nodes will be visible.  Otherwise, you will only be able to see the other user's publicly-visible nodes.
-
-    ##Links
-
-        self:               the canonical api endpoint of this user
-        html:               this user's page on the OSF website
-        profile_image_url:  a url to the user's profile image
-
-    ##Actions
-
-    ###Update
-
-        Method:        PUT / PATCH
-        URL:           /links/self
-        Query Params:  <none>
-        Body (JSON):   {
-                         "data": {
-                           "type": "users",   # required
-                           "id":   {user_id}, # required
-                           "attributes": {
-                             "full_name":    {full_name},    # mandatory
-                             "given_name":   {given_name},   # optional
-                             "middle_names": {middle_names}, # optional
-                             "family_name":  {family_name},  # optional
-                             "suffix":       {suffix}        # optional
-                           }
-                         }
-                       }
-        Success:       200 OK + node representation
-
-    To update your user profile, issue a PUT request to either the canonical URL of your user resource (as given in
-    `/links/self`) or to `/users/me/`.  Only the `full_name` attribute is required.  Unlike at signup, the given, middle,
-    and family names will not be inferred from the `full_name`.  Currently, only `full_name`, `given_name`,
-    `middle_names`, `family_name`, and `suffix` are updateable.
-
-    A PATCH request issued to this endpoint will behave the same as a PUT request, but does not require `full_name` to
-    be set.
-
-    **NB:** If you PUT/PATCH to the `/users/me/` endpoint, you must still provide your full user id in the `id` field of
-    the request.  We do not support using the `me` alias in request bodies at this time.
-
-    ##Query Params
-
-    + `profile_image_size=<Int>` -- Modifies `/links/profile_image_url` so that it points the image scaled to the given
-    size in pixels.  If left blank, the size depends on the image provider.
-
-    #This Request/Response
-
+    """The documentation for this endpoint can be found [here](https://developer.osf.io/#operation/users_read).
     """
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
@@ -218,6 +182,14 @@ class UserDetail(JSONAPIBaseView, generics.RetrieveUpdateAPIView, UserMixin):
     view_name = 'user-detail'
 
     serializer_class = UserDetailSerializer
+    parser_classes = (JSONAPIMultipleRelationshipsParser, JSONAPIMultipleRelationshipsParserForRegularJSON,)
+
+    def get_serializer_class(self):
+        if self.request.auth:
+            scopes = self.request.auth.attributes['accessTokenScope']
+            if (CoreScopes.USER_EMAIL_READ in normalize_scopes(scopes) and self.request.user == self.get_user()):
+                return ReadEmailUserDetailSerializer
+        return UserDetailSerializer
 
     # overrides RetrieveAPIView
     def get_object(self):
@@ -232,33 +204,7 @@ class UserDetail(JSONAPIBaseView, generics.RetrieveUpdateAPIView, UserMixin):
 
 
 class UserAddonList(JSONAPIBaseView, generics.ListAPIView, ListFilterMixin, UserMixin):
-    """List of addons authorized by this user *Read-only*
-
-    Paginated list of user addons ordered by their `id` or `addon_short_name`.
-
-    ###Permissions
-
-    <Addon>UserSettings are visible only to the user that "owns" them.
-
-    ## <Addon\>UserSettings Attributes
-
-    OSF <Addon\>UserSettings entities have the "user_addons" `type`, and their `id` indicates the addon
-    service provider (eg. `box`, `googledrive`, etc).
-
-        name                type        description
-        =====================================================================================
-        user_has_auth       boolean     does this user have access to use an ExternalAccount?
-
-    ##Links
-
-    See the [JSON-API spec regarding pagination](http://jsonapi.org/format/1.0/#fetching-pagination).
-
-        self:  the canonical api endpoint of this user_addon
-        accounts: dict keyed on an external_account_id
-            nodes_connected:    list of canonical api endpoints of connected nodes
-            account:            canonical api endpoint for this account
-
-    #This Request/Response
+    """The documentation for this endpoint can be found [here](https://developer.osf.io/#operation/users_addons_list).
     """
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
@@ -273,6 +219,8 @@ class UserAddonList(JSONAPIBaseView, generics.ListAPIView, ListFilterMixin, User
     view_category = 'users'
     view_name = 'user-addons'
 
+    ordering = ('-id',)
+
     def get_queryset(self):
         qs = [addon for addon in self.get_user().get_addons() if 'accounts' in addon.config.configs]
         qs.sort()
@@ -280,31 +228,7 @@ class UserAddonList(JSONAPIBaseView, generics.ListAPIView, ListFilterMixin, User
 
 
 class UserAddonDetail(JSONAPIBaseView, generics.RetrieveAPIView, UserMixin, AddonSettingsMixin):
-    """Detail of an individual addon authorized by this user *Read-only*
-
-    ##Permissions
-
-    <Addon>UserSettings are visible only to the user that "owns" them.
-
-    ## <Addon\>UserSettings Attributes
-
-    OSF <Addon\>UserSettings entities have the "user_addons" `type`, and their `id` indicates the addon
-    service provider (eg. `box`, `googledrive`, etc).
-
-        name                type        description
-        =====================================================================================
-        user_has_auth       boolean     does this user have access to use an ExternalAccount?
-
-    ##Links
-
-    See the [JSON-API spec regarding pagination](http://jsonapi.org/format/1.0/#fetching-pagination).
-
-        self:  the canonical api endpoint of this user_addon
-        accounts: dict keyed on an external_account_id
-            nodes_connected:    list of canonical api endpoints of connected nodes
-            account:            canonical api endpoint for this account
-
-    #This Request/Response
+    """The documentation for this endpoint can be found [here](https://developer.osf.io/#operation/users_addons_read).
     """
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
@@ -320,34 +244,11 @@ class UserAddonDetail(JSONAPIBaseView, generics.RetrieveAPIView, UserMixin, Addo
     view_name = 'user-addon-detail'
 
     def get_object(self):
-        return self.get_addon_settings()
+        return self.get_addon_settings(check_object_permissions=False)
 
 
 class UserAddonAccountList(JSONAPIBaseView, generics.ListAPIView, UserMixin, AddonSettingsMixin):
-    """List of an external_accounts authorized by this user *Read-only*
-
-    ##Permissions
-
-    ExternalAccounts are visible only to the user that has ownership of them.
-
-    ## ExternalAccount Attributes
-
-    OSF ExternalAccount entities have the "external_accounts" `type`, with `id` indicating the
-    `external_account_id` according to the OSF
-
-        name            type        description
-        =====================================================================================================
-        display_name    string      Display name on the third-party service
-        profile_url     string      Link to users profile on third-party service *presence varies by service*
-        provider        string      short_name of third-party service provider
-
-    ##Links
-
-    See the [JSON-API spec regarding pagination](http://jsonapi.org/format/1.0/#fetching-pagination).
-
-        self:  the canonical api endpoint of this external_account
-
-    #This Request/Response
+    """The documentation for this endpoint can be found [here](https://developer.osf.io/#operation/Users_addon_accounts_list).
     """
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
@@ -362,34 +263,13 @@ class UserAddonAccountList(JSONAPIBaseView, generics.ListAPIView, UserMixin, Add
     view_category = 'users'
     view_name = 'user-external_accounts'
 
+    ordering = ('-date_last_refreshed',)
+
     def get_queryset(self):
-        return self.get_addon_settings().external_accounts
+        return self.get_addon_settings(check_object_permissions=False).external_accounts
 
 class UserAddonAccountDetail(JSONAPIBaseView, generics.RetrieveAPIView, UserMixin, AddonSettingsMixin):
-    """Detail of an individual external_account authorized by this user *Read-only*
-
-    ##Permissions
-
-    ExternalAccounts are visible only to the user that has ownership of them.
-
-    ## ExternalAccount Attributes
-
-    OSF ExternalAccount entities have the "external_accounts" `type`, with `id` indicating the
-    `external_account_id` according to the OSF
-
-        name            type        description
-        =====================================================================================================
-        display_name    string      Display name on the third-party service
-        profile_url     string      Link to users profile on third-party service *presence varies by service*
-        provider        string      short_name of third-party service provider
-
-    ##Links
-
-    See the [JSON-API spec regarding pagination](http://jsonapi.org/format/1.0/#fetching-pagination).
-
-        self:  the canonical api endpoint of this external_account
-
-    #This Request/Response
+    """The documentation for this endpoint can be found [here](https://developer.osf.io/#operation/Users_addon_accounts_read).
     """
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
@@ -405,97 +285,119 @@ class UserAddonAccountDetail(JSONAPIBaseView, generics.RetrieveAPIView, UserMixi
     view_name = 'user-external_account-detail'
 
     def get_object(self):
-        user_settings = self.get_addon_settings()
+        user_settings = self.get_addon_settings(check_object_permissions=False)
         account_id = self.kwargs['account_id']
 
         account = ExternalAccount.load(account_id)
-        if not (account and account in user_settings.external_accounts):
+        if not (account and user_settings.external_accounts.filter(id=account.id).exists()):
             raise NotFound('Requested addon unavailable')
         return account
 
 
-class UserNodes(JSONAPIBaseView, generics.ListAPIView, UserMixin, ODMFilterMixin):
-    """List of nodes that the user contributes to. *Read-only*.
-
-    Paginated list of nodes that the user contributes to ordered by `date_modified`.  User registrations are not available
-    at this endpoint. Each resource contains the full representation of the node, meaning additional requests to an individual
-    node's detail view are not necessary. If the user id in the path is the same as the logged-in user, all nodes will be
-    visible.  Otherwise, you will only be able to see the other user's publicly-visible nodes.  The special user id `me`
-    can be used to represent the currently logged-in user.
-
-    ##Node Attributes
-
-    <!--- Copied Attributes from NodeDetail -->
-
-    OSF Node entities have the "nodes" `type`.
-
-        name                            type               description
-        =================================================================================
-        title                           string             title of project or component
-        description                     string             description of the node
-        category                        string             node category, must be one of the allowed values
-        date_created                    iso8601 timestamp  timestamp that the node was created
-        date_modified                   iso8601 timestamp  timestamp when the node was last updated
-        tags                            array of strings   list of tags that describe the node
-        current_user_permissions        array of strings   list of strings representing the permissions for the current user on this node
-        registration                    boolean            is this a registration? (always false - may be deprecated in future versions)
-        fork                            boolean            is this node a fork of another node?
-        public                          boolean            has this node been made publicly-visible?
-        collection                      boolean            is this a collection? (always false - may be deprecated in future versions)
-
-    ##Links
-
-    See the [JSON-API spec regarding pagination](http://jsonapi.org/format/1.0/#fetching-pagination).
-
-    ##Actions
-
-    *None*.
-
-    ##Query Params
-
-    + `page=<Int>` -- page number of results to view, default 1
-
-    + `filter[<fieldname>]=<Str>` -- fields and values to filter the search results on.
-
-    <!--- Copied Query Params from NodeList -->
-
-    Nodes may be filtered by their `id`, `title`, `category`, `description`, `public`, `tags`, `date_created`, `date_modified`,
-    `root`, `parent`, and `contributors`.  Most are string fields and will be filtered using simple substring matching.  `public`
-    is a boolean, and can be filtered using truthy values, such as `true`, `false`, `0`, or `1`.  Note that quoting `true`
-    or `false` in the query will cause the match to fail regardless.  `tags` is an array of simple strings.
-
-
-    #This Request/Response
-
+class UserNodes(JSONAPIBaseView, generics.ListAPIView, UserMixin, UserNodesFilterMixin, NodeOptimizationMixin):
+    """The documentation for this endpoint can be found [here](https://developer.osf.io/#operation/users_nodes_list).
     """
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
         base_permissions.TokenHasScope,
     )
 
+    model_class = AbstractNode
+
     required_read_scopes = [CoreScopes.USERS_READ, CoreScopes.NODE_BASE_READ]
     required_write_scopes = [CoreScopes.USERS_WRITE, CoreScopes.NODE_BASE_WRITE]
 
-    serializer_class = NodeSerializer
+    serializer_class = UserNodeSerializer
     view_category = 'users'
     view_name = 'user-nodes'
 
-    ordering = ('-date_modified',)
+    ordering = ('-last_logged',)
 
-    # overrides ODMFilterMixin
-    def get_default_odm_query(self):
+    # overrides NodesFilterMixin
+    def get_default_queryset(self):
         user = self.get_user()
-        query = Q('contributors', 'eq', user) & default_node_list_query()
         if user != self.request.user:
-            query &= default_node_permission_query(self.request.user)
-        return query
+            return default_node_list_permission_queryset(user=self.request.user, model_cls=Node).filter(contributor__user__id=user.id)
+        return self.optimize_node_queryset(default_node_list_queryset(model_cls=Node).filter(contributor__user__id=user.id))
 
     # overrides ListAPIView
     def get_queryset(self):
-        return Node.find(self.get_query_from_request())
+        return (
+            self.get_queryset_from_request()
+            .select_related('node_license')
+            .include('contributor__user__guids', 'root__guids', limit_includes=10)
+        )
+
+
+class UserQuickFiles(JSONAPIBaseView, generics.ListAPIView, WaterButlerMixin, UserMixin, ListFilterMixin):
+
+    permission_classes = (
+        drf_permissions.IsAuthenticatedOrReadOnly,
+        base_permissions.TokenHasScope,
+    )
+
+    ordering = ('-last_touched')
+
+    required_read_scopes = [CoreScopes.USERS_READ]
+    required_write_scopes = [CoreScopes.USERS_WRITE]
+
+    serializer_class = UserQuickFilesSerializer
+    view_category = 'users'
+    view_name = 'user-quickfiles'
+
+    def get_node(self, check_object_permissions):
+        return QuickFilesNode.objects.get_for_user(self.get_user(check_permissions=False))
+
+    def get_default_queryset(self):
+        self.kwargs[self.path_lookup_url_kwarg] = '/'
+        self.kwargs[self.provider_lookup_url_kwarg] = 'osfstorage'
+        files_list = self.fetch_from_waterbutler()
+
+        return files_list.children.prefetch_related('versions', 'tags').include('guids')
+
+    # overrides ListAPIView
+    def get_queryset(self):
+        return self.get_queryset_from_request()
+
+
+class UserPreprints(JSONAPIBaseView, generics.ListAPIView, UserMixin, PreprintFilterMixin):
+    """The documentation for this endpoint can be found [here](https://developer.osf.io/#operation/users_preprints_list).
+    """
+
+    permission_classes = (
+        drf_permissions.IsAuthenticatedOrReadOnly,
+        base_permissions.TokenHasScope,
+    )
+
+    ordering = ('-created')
+    model_class = AbstractNode
+
+    required_read_scopes = [CoreScopes.USERS_READ, CoreScopes.NODE_PREPRINTS_READ]
+    required_write_scopes = [CoreScopes.USERS_WRITE, CoreScopes.NODE_PREPRINTS_WRITE]
+
+    serializer_class = PreprintSerializer
+    view_category = 'users'
+    view_name = 'user-preprints'
+
+    def get_default_queryset(self):
+        # the user who is requesting
+        auth = get_user_auth(self.request)
+        auth_user = getattr(auth, 'user', None)
+
+        # the user data being requested
+        target_user = self.get_user(check_permissions=False)
+
+        # Permissions on the list objects are handled by the query
+        default_qs = Preprint.objects.filter(_contributors__guids___id=target_user._id).exclude(machine_state='initial')
+        return self.preprints_queryset(default_qs, auth_user, allow_contribs=False)
+
+    def get_queryset(self):
+        return self.get_queryset_from_request()
 
 
 class UserInstitutions(JSONAPIBaseView, generics.ListAPIView, UserMixin):
+    """The documentation for this endpoint can be found [here](https://developer.osf.io/#operation/users_institutions_list).
+    """
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
         base_permissions.TokenHasScope,
@@ -508,96 +410,26 @@ class UserInstitutions(JSONAPIBaseView, generics.ListAPIView, UserMixin):
     view_category = 'users'
     view_name = 'user-institutions'
 
+    ordering = ('-pk', )
+
     def get_default_odm_query(self):
         return None
 
     def get_queryset(self):
         user = self.get_user()
-        return user.affiliated_institutions
+        return user.affiliated_institutions.all()
 
 
-class UserRegistrations(UserNodes):
-    """List of registrations that the user contributes to. *Read-only*.
-
-    Paginated list of registrations that the user contributes to.  Each resource contains the full representation of the
-    registration, meaning additional requests to an individual registration's detail view are not necessary. If the user
-    id in the path is the same as the logged-in user, all nodes will be visible.  Otherwise, you will only be able to
-    see the other user's publicly-visible nodes.  The special user id `me` can be used to represent the currently
-    logged-in user.
-
-    A withdrawn registration will display a limited subset of information, namely, title, description,
-    date_created, registration, withdrawn, date_registered, withdrawal_justification, and registration supplement. All
-    other fields will be displayed as null. Additionally, the only relationships permitted to be accessed for a withdrawn
-    registration are the contributors - other relationships will return a 403.
-
-    ##Registration Attributes
-
-    <!--- Copied Attributes from RegistrationList -->
-
-    Registrations have the "registrations" `type`.
-
-        name                            type               description
-        =======================================================================================================
-        title                           string             title of the registered project or component
-        description                     string             description of the registered node
-        category                        string             bode category, must be one of the allowed values
-        date_created                    iso8601 timestamp  timestamp that the node was created
-        date_modified                   iso8601 timestamp  timestamp when the node was last updated
-        tags                            array of strings   list of tags that describe the registered node
-        current_user_permissions        array of strings   list of strings representing the permissions for the current user on this node
-        fork                            boolean            is this project a fork?
-        registration                    boolean            has this project been registered? (always true - may be deprecated in future versions)
-        collection                      boolean            is this registered node a collection? (always false - may be deprecated in future versions)
-        public                          boolean            has this registration been made publicly-visible?
-        withdrawn                       boolean            has this registration been withdrawn?
-        date_registered                 iso8601 timestamp  timestamp that the registration was created
-        embargo_end_date                iso8601 timestamp  when the embargo on this registration will be lifted (if applicable)
-        withdrawal_justification        string             reasons for withdrawing the registration
-        pending_withdrawal              boolean            is this registration pending withdrawal?
-        pending_withdrawal_approval     boolean            is this registration pending approval?
-        pending_embargo_approval        boolean            is the associated Embargo awaiting approval by project admins?
-        registered_meta                 dictionary         registration supplementary information
-        registration_supplement         string             registration template
-
-
-    ##Relationships
-
-    ###Registered from
-
-    The registration is branched from this node.
-
-    ###Registered by
-
-    The registration was initiated by this user.
-
-    ###Other Relationships
-
-    See documentation on registered_from detail view.  A registration has many of the same properties as a node.
-
-    ##Links
-
-    See the [JSON-API spec regarding pagination](http://jsonapi.org/format/1.0/#fetching-pagination).
-
-    ##Actions
-
-    *None*.
-
-    ##Query Params
-
-    + `page=<Int>` -- page number of results to view, default 1
-
-    + `filter[<fieldname>]=<Str>` -- fields and values to filter the search results on.
-
-    <!--- Copied Query Params from NodeList -->
-
-     Registrations may be filtered by their `id`, `title`, `category`, `description`, `public`, `tags`, `date_created`, `date_modified`,
-    `root`, `parent`, and `contributors`.  Most are string fields and will be filtered using simple substring matching.  `public`
-    is a boolean, and can be filtered using truthy values, such as `true`, `false`, `0`, or `1`.  Note that quoting `true`
-    or `false` in the query will cause the match to fail regardless.  `tags` is an array of simple strings.
-
-    #This Request/Response
-
+class UserRegistrations(JSONAPIBaseView, generics.ListAPIView, UserMixin, NodesFilterMixin):
+    """The documentation for this endpoint can be found [here](https://developer.osf.io/#operation/users_registrations_list).
     """
+    permission_classes = (
+        drf_permissions.IsAuthenticatedOrReadOnly,
+        base_permissions.TokenHasScope,
+    )
+
+    model_class = Registration
+
     required_read_scopes = [CoreScopes.USERS_READ, CoreScopes.NODE_REGISTRATIONS_READ]
     required_write_scopes = [CoreScopes.USERS_WRITE, CoreScopes.NODE_REGISTRATIONS_WRITE]
 
@@ -605,29 +437,52 @@ class UserRegistrations(UserNodes):
     view_category = 'users'
     view_name = 'user-registrations'
 
-    # overrides ODMFilterMixin
-    def get_default_odm_query(self):
+    ordering = ('-modified',)
+
+    # overrides NodesFilterMixin
+    def get_default_queryset(self):
         user = self.get_user()
         current_user = self.request.user
+        qs = default_node_list_permission_queryset(user=current_user, model_cls=Registration)
+        return qs.filter(contributor__user__id=user.id)
 
-        query = (
-            Q('is_collection', 'ne', True) &
-            Q('is_deleted', 'ne', True) &
-            Q('is_registration', 'eq', True) &
-            Q('contributors', 'eq', user._id)
+    # overrides ListAPIView
+    def get_queryset(self):
+        return self.get_queryset_from_request().select_related('node_license').include('contributor__user__guids', 'root__guids', limit_includes=10)
+
+class UserDraftRegistrations(JSONAPIBaseView, generics.ListAPIView, UserMixin):
+    permission_classes = (
+        drf_permissions.IsAuthenticated,
+        base_permissions.TokenHasScope,
+        CurrentUser,
+    )
+
+    required_read_scopes = [CoreScopes.USERS_READ, CoreScopes.NODE_DRAFT_REGISTRATIONS_READ]
+    required_write_scopes = [CoreScopes.USERS_WRITE, CoreScopes.NODE_DRAFT_REGISTRATIONS_WRITE]
+
+    serializer_class = DraftRegistrationSerializer
+    view_category = 'users'
+    view_name = 'user-draft-registrations'
+
+    ordering = ('-modified',)
+
+    def get_queryset(self):
+        user = self.get_user()
+        contrib_qs = Contributor.objects.filter(node=OuterRef('pk'), user__id=user.id, admin=True)
+        node_qs = Node.objects.annotate(admin=Exists(contrib_qs)).filter(admin=True).exclude(is_deleted=True)
+        return DraftRegistration.objects.filter(
+            Q(registered_node__isnull=True) |
+            Q(registered_node__is_deleted=True),
+            branched_from__in=list(node_qs),
+            deleted__isnull=True,
         )
-        permission_query = Q('is_public', 'eq', True)
-        if not current_user.is_anonymous():
-            permission_query = (permission_query | Q('contributors', 'eq', current_user._id))
-        query = query & permission_query
-        return query
 
 
 class UserInstitutionsRelationship(JSONAPIBaseView, generics.RetrieveDestroyAPIView, UserMixin):
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
         base_permissions.TokenHasScope,
-        ReadOnlyOrCurrentUserRelationship
+        ReadOnlyOrCurrentUserRelationship,
     )
 
     required_read_scopes = [CoreScopes.USERS_READ]
@@ -642,8 +497,8 @@ class UserInstitutionsRelationship(JSONAPIBaseView, generics.RetrieveDestroyAPIV
     def get_object(self):
         user = self.get_user(check_permissions=False)
         obj = {
-            'data': user.affiliated_institutions,
-            'self': user
+            'data': user.affiliated_institutions.all(),
+            'self': user,
         }
         self.check_object_permissions(self.request, obj)
         return obj
@@ -651,14 +506,401 @@ class UserInstitutionsRelationship(JSONAPIBaseView, generics.RetrieveDestroyAPIV
     def perform_destroy(self, instance):
         data = self.request.data['data']
         user = self.request.user
-        current_institutions = {inst._id for inst in user.affiliated_institutions}
+        current_institutions = set(user.affiliated_institutions.values_list('_id', flat=True))
 
         # DELETEs normally dont get type checked
         # not the best way to do it, should be enforced everywhere, maybe write a test for it
         for val in data:
-            if val['type'] != self.serializer_class.Meta.type_:
+            if val['type'] != get_meta_type(self.serializer_class, self.request):
                 raise Conflict()
         for val in data:
             if val['id'] in current_institutions:
                 user.remove_institution(val['id'])
         user.save()
+
+
+class UserIdentitiesList(JSONAPIBaseView, generics.ListAPIView, UserMixin):
+    """
+    The documentation for this endpoint can be found [here](https://developer.osf.io/#operation/external_identities_list).
+    """
+    permission_classes = (
+        base_permissions.TokenHasScope,
+        drf_permissions.IsAuthenticatedOrReadOnly,
+        CurrentUser,
+    )
+
+    serializer_class = UserIdentitiesSerializer
+
+    required_read_scopes = [CoreScopes.USER_SETTINGS_READ]
+    required_write_scopes = [CoreScopes.NULL]
+
+    view_category = 'users'
+    view_name = 'user-identities-list'
+
+    # overrides ListAPIView
+    def get_queryset(self):
+        user = self.get_user()
+        identities = []
+        for key, value in user.external_identity.items():
+            identities.append({'_id': key, 'external_id': list(value.keys())[0], 'status': list(value.values())[0]})
+
+        return identities
+
+
+class UserIdentitiesDetail(JSONAPIBaseView, generics.RetrieveDestroyAPIView, UserMixin):
+    """
+    The documentation for this endpoint can be found [here](https://developer.osf.io/#operation/external_identities_detail).
+    """
+    permission_classes = (
+        base_permissions.TokenHasScope,
+        drf_permissions.IsAuthenticatedOrReadOnly,
+        CurrentUser,
+    )
+
+    required_read_scopes = [CoreScopes.USER_SETTINGS_READ]
+    required_write_scopes = [CoreScopes.USER_SETTINGS_WRITE]
+
+    serializer_class = UserIdentitiesSerializer
+
+    view_category = 'users'
+    view_name = 'user-identities-detail'
+
+    def get_object(self):
+        user = self.get_user()
+        identity_id = self.kwargs['identity_id']
+        try:
+            identity = user.external_identity[identity_id]
+        except KeyError:
+            raise NotFound('Requested external identity could not be found.')
+
+        return {'_id': identity_id, 'external_id': identity.keys()[0], 'status': identity.values()[0]}
+
+    def perform_destroy(self, instance):
+        user = self.get_user()
+        identity_id = self.kwargs['identity_id']
+        try:
+            user.external_identity.pop(identity_id)
+        except KeyError:
+            raise NotFound('Requested external identity could not be found.')
+
+        user.save()
+
+
+class UserAccountExport(JSONAPIBaseView, generics.CreateAPIView, UserMixin):
+    permission_classes = (
+        drf_permissions.IsAuthenticatedOrReadOnly,
+        base_permissions.TokenHasScope,
+        CurrentUser,
+    )
+
+    required_read_scopes = [CoreScopes.NULL]
+    required_write_scopes = [CoreScopes.USER_SETTINGS_WRITE]
+
+    view_category = 'users'
+    view_name = 'user-account-export'
+
+    serializer_class = UserAccountExportSerializer
+    throttle_classes = (SendEmailThrottle, )
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = self.get_user()
+        mails.send_mail(
+            to_addr=settings.OSF_SUPPORT_EMAIL,
+            mail=mails.REQUEST_EXPORT,
+            user=user,
+            can_change_preferences=False,
+        )
+        user.email_last_sent = timezone.now()
+        user.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class UserChangePassword(JSONAPIBaseView, generics.CreateAPIView, UserMixin):
+    permission_classes = (
+        drf_permissions.IsAuthenticatedOrReadOnly,
+        base_permissions.TokenHasScope,
+        CurrentUser,
+    )
+
+    required_read_scopes = [CoreScopes.NULL]
+    required_write_scopes = [CoreScopes.USER_SETTINGS_WRITE]
+
+    view_category = 'users'
+    view_name = 'user_password'
+
+    serializer_class = UserChangePasswordSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = self.get_user()
+        existing_password = request.data['existing_password']
+        new_password = request.data['new_password']
+
+        # It has been more than 1 hour since last invalid attempt to change password. Reset the counter for invalid attempts.
+        if throttle_period_expired(user.change_password_last_attempt, settings.TIME_RESET_CHANGE_PASSWORD_ATTEMPTS):
+            user.reset_old_password_invalid_attempts()
+
+        # There have been more than 3 failed attempts and throttle hasn't expired.
+        if user.old_password_invalid_attempts >= settings.INCORRECT_PASSWORD_ATTEMPTS_ALLOWED and not throttle_period_expired(
+            user.change_password_last_attempt, settings.CHANGE_PASSWORD_THROTTLE,
+        ):
+            time_since_throttle = (timezone.now() - user.change_password_last_attempt.replace(tzinfo=pytz.utc)).total_seconds()
+            wait_time = settings.CHANGE_PASSWORD_THROTTLE - time_since_throttle
+            raise Throttled(wait=wait_time)
+
+        try:
+            # double new password for confirmation because validation is done on the front-end.
+            user.change_password(existing_password, new_password, new_password)
+        except ChangePasswordError as error:
+            # A response object must be returned instead of raising an exception to avoid rolling back the transaction
+            # and losing the incrementation of failed password attempts
+            user.save()
+            return JsonResponse(
+                {'errors': [{'detail': message} for message in error.messages]},
+                status=400,
+                content_type='application/vnd.api+json; application/json',
+            )
+
+        user.save()
+        remove_sessions_for_user(user)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class UserSettings(JSONAPIBaseView, generics.RetrieveUpdateAPIView, UserMixin):
+    permission_classes = (
+        drf_permissions.IsAuthenticatedOrReadOnly,
+        base_permissions.TokenHasScope,
+        CurrentUser,
+    )
+
+    required_read_scopes = [CoreScopes.USER_SETTINGS_READ]
+    required_write_scopes = [CoreScopes.USER_SETTINGS_WRITE]
+    throttle_classes = (SendEmailDeactivationThrottle, )
+
+    view_category = 'users'
+    view_name = 'user_settings'
+
+    serializer_class = UserSettingsSerializer
+
+    # overrides RetrieveUpdateAPIView
+    def get_serializer_class(self):
+        if self.request.method in ('PUT', 'PATCH'):
+            return UserSettingsUpdateSerializer
+        return UserSettingsSerializer
+
+    # overrides RetrieveUpdateAPIView
+    def get_object(self):
+        return self.get_user()
+
+
+class ClaimUser(JSONAPIBaseView, generics.CreateAPIView, UserMixin):
+    permission_classes = (
+        base_permissions.TokenHasScope,
+        ClaimUserPermission,
+    )
+
+    required_read_scopes = [CoreScopes.NULL]  # Tokens should not be able to access this
+    required_write_scopes = [CoreScopes.NULL]  # Tokens should not be able to access this
+
+    view_category = 'users'
+    view_name = 'claim-user'
+
+    def _send_claim_email(self, *args, **kwargs):
+        """ This avoids needing to reimplement all of the logic in the sender methods.
+        When v1 is more fully deprecated, those send hooks should be reworked to not
+        rely upon a flask context and placed in utils (or elsewhere).
+
+        :param bool registered: Indicates which sender to call (passed in as keyword)
+        :param *args: Positional arguments passed to senders
+        :param **kwargs: Keyword arguments passed to senders
+        :return: None
+        """
+        from website.app import app
+        from website.routes import make_url_map
+        try:
+            make_url_map(app)
+        except AssertionError:
+            # Already mapped
+            pass
+        ctx = app.test_request_context()
+        ctx.push()
+        if kwargs.pop('registered', False):
+            send_claim_registered_email(*args, **kwargs)
+        else:
+            send_claim_email(*args, **kwargs)
+        ctx.pop()
+
+    def post(self, request, *args, **kwargs):
+        claimer = request.user
+        email = (request.data.get('email', None) or '').lower().strip()
+        record_id = (request.data.get('id', None) or '').lower().strip()
+        if not record_id:
+            raise ValidationError('Must specify record "id".')
+        claimed_user = self.get_user(check_permissions=True)  # Ensures claimability
+        if claimed_user.is_disabled:
+            raise ValidationError('Cannot claim disabled account.')
+        try:
+            record_referent = Guid.objects.get(_id=record_id).referent
+        except Guid.DoesNotExist:
+            raise NotFound('Unable to find specified record.')
+
+        try:
+            unclaimed_record = claimed_user.unclaimed_records[record_referent._id]
+        except KeyError:
+            if isinstance(record_referent, Preprint) and record_referent.node and record_referent.node._id in claimed_user.unclaimed_records:
+                record_referent = record_referent.node
+                unclaimed_record = claimed_user.unclaimed_records[record_referent._id]
+            else:
+                raise NotFound('Unable to find specified record.')
+
+        if claimer.is_anonymous and email:
+            claimer = get_user(email=email)
+            try:
+                if claimer and claimer.is_registered:
+                    self._send_claim_email(claimer, claimed_user, record_referent, registered=True)
+                else:
+                    self._send_claim_email(email, claimed_user, record_referent, notify=True, registered=False)
+            except HTTPError as e:
+                raise ValidationError(e.data['message_long'])
+        elif isinstance(claimer, OSFUser):
+            if unclaimed_record.get('referrer_id', '') == claimer._id:
+                raise ValidationError('Referrer cannot claim user.')
+            try:
+                self._send_claim_email(claimer, claimed_user, record_referent, registered=True)
+            except HTTPError as e:
+                raise ValidationError(e.data['message_long'])
+
+        else:
+            raise ValidationError('Must either be logged in or specify claim email.')
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class UserEmailsList(JSONAPIBaseView, generics.ListAPIView, generics.CreateAPIView, UserMixin, ListFilterMixin):
+    permission_classes = (
+        drf_permissions.IsAuthenticatedOrReadOnly,
+        base_permissions.TokenHasScope,
+        CurrentUser,
+    )
+
+    required_read_scopes = [CoreScopes.USER_SETTINGS_READ]
+    required_write_scopes = [CoreScopes.USER_SETTINGS_WRITE]
+
+    throttle_classes = (SendEmailThrottle, )
+
+    view_category = 'users'
+    view_name = 'user-emails'
+
+    serializer_class = UserEmailsSerializer
+
+    def get_default_queryset(self):
+        user = self.get_user()
+        serialized_emails = []
+        for email in user.emails.all():
+            primary = email.address == user.username
+            hashed_id = hashids.encode(email.id)
+            serialized_email = UserEmail(email_id=hashed_id, address=email.address, confirmed=True, verified=True, primary=primary)
+            serialized_emails.append(serialized_email)
+        email_verifications = user.email_verifications or {}
+        for token, detail in email_verifications.iteritems():
+            is_merge = Email.objects.filter(address=detail['email']).exists()
+            serialized_unconfirmed_email = UserEmail(
+                email_id=token,
+                address=detail['email'],
+                confirmed=detail['confirmed'],
+                verified=False,
+                primary=False,
+                is_merge=is_merge,
+            )
+            serialized_emails.append(serialized_unconfirmed_email)
+
+        return serialized_emails
+
+    # overrides ListAPIView
+    def get_queryset(self):
+        return self.get_queryset_from_request()
+
+
+class UserEmailsDetail(JSONAPIBaseView, generics.RetrieveUpdateDestroyAPIView, UserMixin):
+    permission_classes = (
+        drf_permissions.IsAuthenticatedOrReadOnly,
+        base_permissions.TokenHasScope,
+        CurrentUser,
+    )
+
+    required_read_scopes = [CoreScopes.USER_SETTINGS_READ]
+    required_write_scopes = [CoreScopes.USER_SETTINGS_WRITE]
+
+    view_category = 'users'
+    view_name = 'user-email-detail'
+
+    serializer_class = UserEmailsSerializer
+
+    # Overrides RetrieveUpdateDestroyAPIView
+    def get_object(self):
+        email_id = self.kwargs['email_id']
+        user = self.get_user()
+        email = None
+
+        # check to see if it's a confirmed email with hashed id
+        decoded_id = hashids.decode(email_id)
+        if decoded_id:
+            try:
+                email = user.emails.get(id=decoded_id[0])
+            except Email.DoesNotExist:
+                email = None
+            else:
+                primary = email.address == user.username
+                address = email.address
+                confirmed = True
+                verified = True
+                is_merge = False
+
+        # check to see if it's an unconfirmed email with a token
+        elif user.unconfirmed_emails:
+            try:
+                email = user.email_verifications[email_id]
+                address = email['email']
+                confirmed = email['confirmed']
+                verified = False
+                primary = False
+                is_merge = Email.objects.filter(address=address).exists()
+            except KeyError:
+                email = None
+
+        if not email:
+            raise NotFound
+
+        # check for resend confirmation email query parameter in a GET request
+        if self.request.method == 'GET' and is_truthy(self.request.query_params.get('resend_confirmation')):
+            if not confirmed and settings.CONFIRM_REGISTRATIONS_BY_EMAIL:
+                if throttle_period_expired(user.email_last_sent, settings.SEND_EMAIL_THROTTLE):
+                    send_confirm_email(user, email=address, renew=True)
+                    user.email_last_sent = timezone.now()
+                    user.save()
+
+        return UserEmail(email_id=email_id, address=address, confirmed=confirmed, verified=verified, primary=primary, is_merge=is_merge)
+
+    def get(self, request, *args, **kwargs):
+        response = super(UserEmailsDetail, self).get(request, *args, **kwargs)
+        if is_truthy(self.request.query_params.get('resend_confirmation')):
+            user = self.get_user()
+            email_id = kwargs.get('email_id')
+            if user.unconfirmed_emails and user.email_verifications.get(email_id):
+                response.status = response.status_code = status.HTTP_202_ACCEPTED
+        return response
+
+    # Overrides RetrieveUpdateDestroyAPIView
+    def perform_destroy(self, instance):
+        user = self.get_user()
+        email = instance.address
+        if instance.confirmed and instance.verified:
+            try:
+                user.remove_email(email)
+            except PermissionsError as e:
+                raise ValidationError(e.args[0])
+        else:
+            user.remove_unconfirmed_email(email)
+            user.save()

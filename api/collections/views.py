@@ -1,32 +1,48 @@
-from modularodm import Q
+from guardian.core import ObjectPermissionChecker
+from django.contrib.contenttypes.models import ContentType
+from django.db.models import Q
 from rest_framework import generics, permissions as drf_permissions
-from rest_framework.exceptions import ValidationError, NotFound, PermissionDenied
+from rest_framework.exceptions import ValidationError, PermissionDenied
 
 from framework.auth.oauth_scopes import CoreScopes
-
 from api.base import generic_bulk_views as bulk_views
 from api.base import permissions as base_permissions
-from api.base.filters import ODMFilterMixin
+from api.base.filters import ListFilterMixin
 from api.base.views import JSONAPIBaseView
+from api.base.views import BaseLinkedList
 from api.base.views import LinkedNodesRelationship
+from api.nodes.utils import NodeOptimizationMixin
 
 from api.base.utils import get_object_or_error, is_bulk_request, get_user_auth
+from api.collections.permissions import (
+    CollectionWriteOrPublic,
+    CollectionWriteOrPublicForPointers,
+    CollectionWriteOrPublicForRelationshipPointers,
+    CanSubmitToCollectionOrPublic,
+    CanUpdateDeleteCGMOrPublic,
+    ReadOnlyIfCollectedRegistration,
+)
 from api.collections.serializers import (
+    CollectionSubmissionSerializer,
+    CollectionSubmissionCreateSerializer,
     CollectionSerializer,
     CollectionDetailSerializer,
     CollectionNodeLinkSerializer,
+    CollectedNodeRelationshipSerializer,
+    CollectedPreprintsRelationshipSerializer,
+    CollectedRegistrationsRelationshipSerializer,
 )
 from api.nodes.serializers import NodeSerializer
-
-from api.nodes.permissions import (
-    ContributorOrPublic,
-    ReadOnlyIfRegistration,
-    ContributorOrPublicForPointers,
+from api.preprints.serializers import PreprintSerializer
+from api.registrations.serializers import RegistrationSerializer
+from osf.models import (
+    AbstractNode,
+    CollectionSubmission,
+    Collection,
+    Node,
+    Registration,
+    Preprint,
 )
-
-from website.exceptions import NodeStateError
-from website.models import Node, Pointer
-from website.util.permissions import ADMIN
 
 
 class CollectionMixin(object):
@@ -35,28 +51,32 @@ class CollectionMixin(object):
     """
 
     serializer_class = CollectionSerializer
-    node_lookup_url_kwarg = 'collection_id'
+    obj_lookup_url_kwarg = 'collection_id'
 
-    def get_node(self, check_object_permissions=True):
-        node = get_object_or_error(
-            Node,
-            self.kwargs[self.node_lookup_url_kwarg],
-            display_name='collection'
+    def get_collection(self, check_object_permissions=True):
+        collection = get_object_or_error(
+            Collection,
+            self.kwargs[self.obj_lookup_url_kwarg],
+            self.request,
+            display_name='collection',
         )
-        # Nodes that are folders/collections are treated as a separate resource, so if the client
-        # requests a non-collection through a collection endpoint, we return a 404
-        if not node.is_collection:
-            raise NotFound
         # May raise a permission denied
         if check_object_permissions:
-            self.check_object_permissions(self.request, node)
-        return node
+            self.check_object_permissions(self.request, collection)
+        return collection
+
+    def collection_preprints(self, collection, user):
+        return Preprint.objects.can_view(
+            Preprint.objects.filter(
+                guids__in=collection.guid_links.all(), deleted__isnull=True,
+            ), user=user,
+        )
 
 
-class CollectionList(JSONAPIBaseView, bulk_views.BulkUpdateJSONAPIView, bulk_views.BulkDestroyJSONAPIView, bulk_views.ListBulkCreateJSONAPIView, ODMFilterMixin):
+class CollectionList(JSONAPIBaseView, bulk_views.BulkUpdateJSONAPIView, bulk_views.BulkDestroyJSONAPIView, bulk_views.ListBulkCreateJSONAPIView, ListFilterMixin, CollectionMixin):
     """Organizer Collections organize projects and components. *Writeable*.
 
-    Paginated list of Project Organizer Collections ordered by their `date_modified`.
+    Paginated list of Project Organizer Collections ordered by their `modified`.
     Each resource contains the full representation of the project organizer collection, meaning additional
     requests to an individual Organizer Collection's detail view are not necessary.
 
@@ -117,6 +137,7 @@ class CollectionList(JSONAPIBaseView, bulk_views.BulkUpdateJSONAPIView, bulk_vie
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
         base_permissions.TokenHasScope,
+        CollectionWriteOrPublic,
     )
 
     required_read_scopes = [CoreScopes.ORGANIZER_COLLECTIONS_BASE_READ]
@@ -125,39 +146,30 @@ class CollectionList(JSONAPIBaseView, bulk_views.BulkUpdateJSONAPIView, bulk_vie
     serializer_class = CollectionSerializer
     view_category = 'collections'
     view_name = 'collection-list'
-    model_class = Node
+    model_class = Collection
 
-    ordering = ('-date_modified', )  # default ordering
+    ordering = ('-modified', )  # default ordering
 
-    # overrides ODMFilterMixin
-    def get_default_odm_query(self):
-        base_query = (
-            Q('is_deleted', 'ne', True) &
-            Q('is_collection', 'eq', True)
-        )
+    def get_default_queryset(self):
         user = self.request.user
-        permission_query = Q('is_public', 'eq', True)
-        if not user.is_anonymous():
-            permission_query = (Q('is_public', 'eq', True) | Q('contributors', 'eq', user._id))
-
-        query = base_query & permission_query
-        return query
+        if not user.is_anonymous:
+            return Collection.objects.filter(creator=user, deleted__isnull=True)
+        return Collection.objects.filter(is_public=True, deleted__isnull=True)
 
     # overrides ListBulkCreateJSONAPIView, BulkUpdateJSONAPIView
     def get_queryset(self):
         # For bulk requests, queryset is formed from request body.
         if is_bulk_request(self.request):
-            query = Q('_id', 'in', [node['id'] for node in self.request.data])
-
             auth = get_user_auth(self.request)
-            nodes = Node.find(query)
-            for node in nodes:
-                if not node.can_edit(auth):
+            collection_ids = [coll['id'] for coll in self.request.data]
+            collections = Collection.objects.filter(guids___id__in=collection_ids)
+            checker = ObjectPermissionChecker(auth.user)
+            for collection in collections:
+                if not checker.has_perm('write_collection', collection):
                     raise PermissionDenied
-            return nodes
+            return collections
         else:
-            query = self.get_query_from_request()
-            return Node.find(query)
+            return self.get_queryset_from_request()
 
     # overrides ListBulkCreateJSONAPIView, BulkUpdateJSONAPIView, BulkDestroyJSONAPIView
     def get_serializer_class(self):
@@ -181,20 +193,16 @@ class CollectionList(JSONAPIBaseView, bulk_views.BulkUpdateJSONAPIView, bulk_vie
 
     # overrides BulkDestroyJSONAPIView
     def allow_bulk_destroy_resources(self, user, resource_list):
-        """User must have admin permissions to delete nodes."""
-        for node in resource_list:
-            if not node.has_permission(user, ADMIN):
+        """User must have admin permissions to delete collections."""
+        checker = ObjectPermissionChecker(user)
+        for collection in resource_list:
+            if not checker.has_perm('admin_collection', collection):
                 return False
         return True
 
     # Overrides BulkDestroyJSONAPIView
     def perform_destroy(self, instance):
-        auth = get_user_auth(self.request)
-        try:
-            instance.remove_node(auth=auth)
-        except NodeStateError as err:
-            raise ValidationError(err.message)
-        instance.save()
+        instance.delete()
 
 
 class CollectionDetail(JSONAPIBaseView, generics.RetrieveUpdateDestroyAPIView, CollectionMixin):
@@ -269,7 +277,7 @@ class CollectionDetail(JSONAPIBaseView, generics.RetrieveUpdateDestroyAPIView, C
     """
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
-        ContributorOrPublic,
+        CollectionWriteOrPublic,
         base_permissions.TokenHasScope,
     )
 
@@ -282,23 +290,83 @@ class CollectionDetail(JSONAPIBaseView, generics.RetrieveUpdateDestroyAPIView, C
 
     # overrides RetrieveUpdateDestroyAPIView
     def get_object(self):
-        return self.get_node()
+        return self.get_collection()
 
     # overrides RetrieveUpdateDestroyAPIView
     def perform_destroy(self, instance):
-        auth = get_user_auth(self.request)
-        node = self.get_object()
-        try:
-            node.remove_node(auth=auth)
-        except NodeStateError as err:
-            raise ValidationError(err.message)
-        node.save()
+        collection = self.get_object()
+        collection.delete()
+
+class CollectedMetaList(JSONAPIBaseView, generics.ListCreateAPIView, CollectionMixin, ListFilterMixin):
+    permission_classes = (
+        drf_permissions.IsAuthenticatedOrReadOnly,
+        CanSubmitToCollectionOrPublic,
+        base_permissions.TokenHasScope,
+    )
+    required_read_scopes = [CoreScopes.COLLECTED_META_READ]
+    required_write_scopes = [CoreScopes.COLLECTED_META_WRITE]
+
+    model_class = CollectionSubmission
+    serializer_class = CollectionSubmissionSerializer
+    view_category = 'collected-metadata'
+    view_name = 'collected-metadata-list'
+
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return CollectionSubmissionCreateSerializer
+        else:
+            return CollectionSubmissionSerializer
+
+    def get_default_queryset(self):
+        return self.get_collection().collectionsubmission_set.all()
+
+    def get_queryset(self):
+        return self.get_queryset_from_request()
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        collection = self.get_collection()
+        serializer.save(creator=user, collection=collection)
 
 
-class LinkedNodesList(JSONAPIBaseView, generics.ListAPIView, CollectionMixin):
+class CollectedMetaDetail(JSONAPIBaseView, generics.RetrieveUpdateDestroyAPIView, CollectionMixin):
+    permission_classes = (
+        drf_permissions.IsAuthenticatedOrReadOnly,
+        CanUpdateDeleteCGMOrPublic,
+        base_permissions.TokenHasScope,
+    )
+    required_read_scopes = [CoreScopes.COLLECTED_META_READ]
+    required_write_scopes = [CoreScopes.COLLECTED_META_WRITE]
+
+    serializer_class = CollectionSubmissionSerializer
+    view_category = 'collected-metadata'
+    view_name = 'collected-metadata-detail'
+
+    # overrides RetrieveAPIView
+    def get_object(self):
+        cgm = get_object_or_error(
+            CollectionSubmission,
+            Q(collection=Collection.load(self.kwargs['collection_id']), guid___id=self.kwargs['cgm_id']),
+            self.request,
+            'submission',
+        )
+        # May raise a permission denied
+        self.check_object_permissions(self.request, cgm)
+        return cgm
+
+    def perform_destroy(self, instance):
+        # Skip collection permission check -- perms class checks when getting CGM
+        collection = self.get_collection(check_object_permissions=False)
+        collection.remove_object(instance)
+
+    def perform_update(self, serializer):
+        serializer.save()
+
+
+class LinkedNodesList(BaseLinkedList, CollectionMixin, NodeOptimizationMixin):
     """List of nodes linked to this node. *Read-only*.
 
-    Linked nodes are the nodes pointed to by node links. This view will probably replace node_links in the near future.
+    Linked nodes are the project/component nodes pointed to by node links. This view will probably replace node_links in the near future.
 
     <!--- Copied Spiel from NodeDetail -->
 
@@ -345,28 +413,20 @@ class LinkedNodesList(JSONAPIBaseView, generics.ListAPIView, CollectionMixin):
     """
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
-        ContributorOrPublic,
-        ReadOnlyIfRegistration,
+        CollectionWriteOrPublic,
         base_permissions.TokenHasScope,
     )
-
-    required_read_scopes = [CoreScopes.NODE_LINKS_READ]
-    required_write_scopes = [CoreScopes.NODE_LINKS_WRITE]
-
     serializer_class = NodeSerializer
     view_category = 'collections'
     view_name = 'linked-nodes'
 
-    model_class = Pointer
+    ordering = ('-modified',)
 
     def get_queryset(self):
         auth = get_user_auth(self.request)
-        return sorted([
-            pointer.node for pointer in
-            self.get_node().nodes_pointer
-            if not pointer.node.is_deleted and not pointer.node.is_collection and
-            pointer.node.can_view(auth)
-        ], key=lambda n: n.date_modified, reverse=True)
+        node_ids = self.get_collection().guid_links.filter(content_type_id=ContentType.objects.get_for_model(Node).id).values_list('object_id', flat=True)
+        nodes = Node.objects.filter(id__in=node_ids, is_deleted=False).can_view(user=auth.user, private_link=auth.private_link).order_by('-modified')
+        return self.optimize_node_queryset(nodes)
 
     # overrides APIView
     def get_parser_context(self, http_request):
@@ -378,8 +438,135 @@ class LinkedNodesList(JSONAPIBaseView, generics.ListAPIView, CollectionMixin):
         return res
 
 
+class LinkedRegistrationsList(BaseLinkedList, CollectionMixin):
+    """List of registrations linked to this node. *Read-only*.
+
+    Linked registrations are the registration nodes pointed to by node links.
+
+    <!--- Copied Spiel from RegistrationDetail -->
+    Registrations are read-only snapshots of a project. This view shows details about the given registration.
+
+    Each resource contains the full representation of the registration, meaning additional requests to an individual
+    registration's detail view are not necessary. A withdrawn registration will display a limited subset of information,
+    namely, title, description, created, registration, withdrawn, date_registered, withdrawal_justification, and
+    registration supplement. All other fields will be displayed as null. Additionally, the only relationships permitted
+    to be accessed for a withdrawn registration are the contributors - other relationships will return a 403.
+
+    ##Linked Registration Attributes
+
+    <!--- Copied Attributes from RegistrationDetail -->
+
+    Registrations have the "registrations" `type`.
+
+        name                            type               description
+        =======================================================================================================
+        title                           string             title of the registered project or component
+        description                     string             description of the registered node
+        category                        string             bode category, must be one of the allowed values
+        date_created                    iso8601 timestamp  timestamp that the node was created
+        date_modified                   iso8601 timestamp  timestamp when the node was last updated
+        tags                            array of strings   list of tags that describe the registered node
+        current_user_can_comment        boolean            Whether the current user is allowed to post comments
+        current_user_permissions        array of strings   list of strings representing the permissions for the current user on this node
+        fork                            boolean            is this project a fork?
+        registration                    boolean            has this project been registered? (always true - may be deprecated in future versions)
+        collection                      boolean            is this registered node a collection? (always false - may be deprecated in future versions)
+        node_license                    object             details of the license applied to the node
+        year                            string             date range of the license
+        copyright_holders               array of strings   holders of the applied license
+        public                          boolean            has this registration been made publicly-visible?
+        withdrawn                       boolean            has this registration been withdrawn?
+        date_registered                 iso8601 timestamp  timestamp that the registration was created
+        embargo_end_date                iso8601 timestamp  when the embargo on this registration will be lifted (if applicable)
+        withdrawal_justification        string             reasons for withdrawing the registration
+        pending_withdrawal              boolean            is this registration pending withdrawal?
+        pending_withdrawal_approval     boolean            is this registration pending approval?
+        pending_embargo_approval        boolean            is the associated Embargo awaiting approval by project admins?
+        registered_meta                 dictionary         registration supplementary information
+        registration_supplement         string             registration template
+
+    ##Links
+
+    See the [JSON-API spec regarding pagination](http://jsonapi.org/format/1.0/#fetching-pagination).
+
+    ##Query Params
+
+    + `page=<Int>` -- page number of results to view, default 1
+
+    + `filter[<fieldname>]=<Str>` -- fields and values to filter the search results on.
+
+    Nodes may be filtered by their `title`, `category`, `description`, `public`, `registration`, or `tags`.  `title`,
+    `description`, and `category` are string fields and will be filtered using simple substring matching.  `public` and
+    `registration` are booleans, and can be filtered using truthy values, such as `true`, `false`, `0`, or `1`.  Note
+    that quoting `true` or `false` in the query will cause the match to fail regardless.  `tags` is an array of simple strings.
+
+    #This Request/Response
+    """
+    permission_classes = (
+        drf_permissions.IsAuthenticatedOrReadOnly,
+        CollectionWriteOrPublic,
+        ReadOnlyIfCollectedRegistration,
+        base_permissions.TokenHasScope,
+    )
+    serializer_class = RegistrationSerializer
+    view_category = 'collections'
+    view_name = 'linked-registrations'
+
+    ordering = ('-modified',)
+
+    def get_queryset(self):
+        auth = get_user_auth(self.request)
+        return Registration.objects.filter(guids__in=self.get_collection().guid_links.all(), is_deleted=False).can_view(user=auth.user, private_link=auth.private_link).order_by('-modified')
+
+    # overrides APIView
+    def get_parser_context(self, http_request):
+        """
+        Tells parser that we are creating a relationship
+        """
+        res = super(LinkedRegistrationsList, self).get_parser_context(http_request)
+        res['is_relationship'] = True
+        return res
+
+
+class LinkedPreprintsList(BaseLinkedList, CollectionMixin):
+    """List of preprints linked to this collection. *Read-only*.
+    """
+    permission_classes = (
+        drf_permissions.IsAuthenticatedOrReadOnly,
+        CollectionWriteOrPublic,
+        base_permissions.TokenHasScope,
+    )
+    serializer_class = PreprintSerializer
+    view_category = 'collections'
+    view_name = 'linked-preprints'
+
+    ordering = ('-modified',)
+
+    def get_queryset(self):
+        auth = get_user_auth(self.request)
+        return self.collection_preprints(self.get_collection(), auth.user)
+
+    # overrides APIView
+    def get_parser_context(self, http_request):
+        """
+        Tells parser that we are creating a relationship
+        """
+        res = super(LinkedPreprintsList, self).get_parser_context(http_request)
+        res['is_relationship'] = True
+        return res
+
+
 class NodeLinksList(JSONAPIBaseView, bulk_views.BulkDestroyJSONAPIView, bulk_views.ListBulkCreateJSONAPIView, CollectionMixin):
     """Node Links to other nodes. *Writeable*.
+
+    # Deprecated
+
+    The use of /collections/ID/node_links/ is deprecated in favor of linked_nodes, linked_registrations or a combination of both.
+
+    ## Known Issue
+
+    Linked nodes of type 'registrations' will be returned with an error 'Not found.' in the {embeds: target_node: {}} object.
+
 
     Node Links act as pointers to other nodes. Unlike Forks, they are not copies of nodes;
     Node Links are a direct reference to the node that they point to.
@@ -422,8 +609,8 @@ class NodeLinksList(JSONAPIBaseView, bulk_views.BulkDestroyJSONAPIView, bulk_vie
     """
     permission_classes = (
         drf_permissions.IsAuthenticatedOrReadOnly,
-        ContributorOrPublic,
-        ReadOnlyIfRegistration,
+        CollectionWriteOrPublic,
+        ReadOnlyIfCollectedRegistration,
         base_permissions.TokenHasScope,
     )
 
@@ -433,24 +620,20 @@ class NodeLinksList(JSONAPIBaseView, bulk_views.BulkDestroyJSONAPIView, bulk_vie
     serializer_class = CollectionNodeLinkSerializer
     view_category = 'collections'
     view_name = 'node-pointers'
-    model_class = Pointer
+    model_class = CollectionSubmission
+
+    ordering = ('-modified',)
 
     def get_queryset(self):
-        return [
-            pointer for pointer in
-            self.get_node().nodes_pointer
-            if not pointer.node.is_deleted and not pointer.node.is_collection
-        ]
+        return self.get_collection().collectionsubmission_set.filter(guid___id__in=AbstractNode.objects.filter(guids__in=self.get_collection().guid_links.all(), is_deleted=False).values_list('guids___id', flat=True))
 
     # Overrides BulkDestroyJSONAPIView
     def perform_destroy(self, instance):
-        auth = get_user_auth(self.request)
-        node = self.get_node()
+        collection = self.get_collection()
         try:
-            node.rm_pointer(instance, auth=auth)
+            collection.remove_object(instance)
         except ValueError as err:  # pointer doesn't belong to node
-            raise ValidationError(err.message)
-        node.save()
+            raise ValidationError(str(err))
 
     # overrides ListCreateAPIView
     def get_parser_context(self, http_request):
@@ -497,10 +680,10 @@ class NodeLinksDetail(JSONAPIBaseView, generics.RetrieveDestroyAPIView, Collecti
     #This Request/Response
     """
     permission_classes = (
-        ContributorOrPublicForPointers,
+        CollectionWriteOrPublicForPointers,
         drf_permissions.IsAuthenticatedOrReadOnly,
         base_permissions.TokenHasScope,
-        ReadOnlyIfRegistration,
+        ReadOnlyIfCollectedRegistration,
     )
 
     required_read_scopes = [CoreScopes.NODE_LINKS_READ]
@@ -514,9 +697,10 @@ class NodeLinksDetail(JSONAPIBaseView, generics.RetrieveDestroyAPIView, Collecti
     def get_object(self):
         node_link_lookup_url_kwarg = 'node_link_id'
         node_link = get_object_or_error(
-            Pointer,
+            CollectionSubmission,
             self.kwargs[node_link_lookup_url_kwarg],
-            'node link'
+            self.request,
+            'node link',
         )
         # May raise a permission denied
         self.kwargs['node_id'] = self.kwargs['collection_id']
@@ -525,14 +709,13 @@ class NodeLinksDetail(JSONAPIBaseView, generics.RetrieveDestroyAPIView, Collecti
 
     # overrides DestroyAPIView
     def perform_destroy(self, instance):
-        auth = get_user_auth(self.request)
-        node = self.get_node()
+        collection = self.get_collection()
         pointer = self.get_object()
         try:
-            node.rm_pointer(pointer, auth=auth)
+            collection.remove_object(pointer.guid.referent)
         except ValueError as err:  # pointer doesn't belong to node
-            raise ValidationError(err.message)
-        node.save()
+            raise ValidationError(str(err))
+        collection.save()
 
 
 class CollectionLinkedNodesRelationship(LinkedNodesRelationship, CollectionMixin):
@@ -550,7 +733,7 @@ class CollectionLinkedNodesRelationship(LinkedNodesRelationship, CollectionMixin
         Query Params:  <none>
         Body (JSON):   {
                          "data": [{
-                           "type": "linked_nodes",   # required
+                           "type": "nodes",   # required
                            "id": <node_id>   # required
                          }]
                        }
@@ -568,7 +751,7 @@ class CollectionLinkedNodesRelationship(LinkedNodesRelationship, CollectionMixin
         Query Params:  <none>
         Body (JSON):   {
                          "data": [{
-                           "type": "linked_nodes",   # required
+                           "type": "nodes",   # required
                            "id": <node_id>   # required
                          }]
                        }
@@ -589,7 +772,7 @@ class CollectionLinkedNodesRelationship(LinkedNodesRelationship, CollectionMixin
         Query Params:  <none>
         Body (JSON):   {
                          "data": [{
-                           "type": "linked_nodes",   # required
+                           "type": "nodes",   # required
                            "id": <node_id>   # required
                          }]
                        }
@@ -598,6 +781,152 @@ class CollectionLinkedNodesRelationship(LinkedNodesRelationship, CollectionMixin
     This requires edit permission on the node. This will delete any node_links that have a
     corresponding node_id in the request.
     """
+    permission_classes = (
+        CollectionWriteOrPublicForRelationshipPointers,
+        drf_permissions.IsAuthenticatedOrReadOnly,
+        base_permissions.TokenHasScope,
+        ReadOnlyIfCollectedRegistration,
+    )
+    serializer_class = CollectedNodeRelationshipSerializer
 
     view_category = 'collections'
     view_name = 'collection-node-pointer-relationship'
+
+    def get_object(self):
+        collection = self.get_collection(check_object_permissions=False)
+        auth = get_user_auth(self.request)
+        obj = {
+            'data': [
+                pointer for pointer in
+                Node.objects.filter(
+                    guids__in=collection.guid_links.all(), is_deleted=False,
+                ).can_view(
+                    user=auth.user, private_link=auth.private_link,
+                ).order_by('-modified')
+            ], 'self': collection,
+        }
+        self.check_object_permissions(self.request, obj)
+        return obj
+
+    def perform_destroy(self, instance):
+        data = self.request.data['data']
+        current_pointers = {pointer._id: pointer for pointer in instance['data']}
+        collection = instance['self']
+        for val in data:
+            if val['id'] in current_pointers:
+                collection.remove_object(current_pointers[val['id']])
+
+
+class CollectionLinkedPreprintsRelationship(CollectionLinkedNodesRelationship):
+    """ Relationship Endpoint for Collection -> Linked Preprints relationships
+    """
+    permission_classes = (
+        CollectionWriteOrPublicForRelationshipPointers,
+        drf_permissions.IsAuthenticatedOrReadOnly,
+        base_permissions.TokenHasScope,
+    )
+    serializer_class = CollectedPreprintsRelationshipSerializer
+
+    view_category = 'collections'
+    view_name = 'collection-preprint-pointer-relationship'
+
+    def get_object(self):
+        collection = self.get_collection(check_object_permissions=False)
+        auth = get_user_auth(self.request)
+        obj = {
+            'data': [
+                pointer for pointer in self.collection_preprints(collection, auth.user)
+            ], 'self': collection,
+        }
+        self.check_object_permissions(self.request, obj)
+        return obj
+
+
+class CollectionLinkedRegistrationsRelationship(CollectionLinkedNodesRelationship):
+    """ Relationship Endpoint for Collection -> Linked Registration relationships
+
+    Used to set, remove, update and retrieve the ids of the linked registrations attached to this collection. For each id, there
+    exists a node link that contains that node.
+
+    ##Actions
+
+    ###Create
+
+        Method:        POST
+        URL:           /links/self
+        Query Params:  <none>
+        Body (JSON):   {
+                         "data": [{
+                           "type": "registrations",   # required
+                           "id": <node_id>   # required
+                         }]
+                       }
+        Success:       201
+
+    This requires both edit permission on the collection, and for the user that is
+    making the request to be able to read the registrations requested. Data can contain any number of
+    node identifiers. This will create a node_link for all node_ids in the request that
+    do not currently have a corresponding node_link in this collection.
+
+    ###Update
+
+        Method:        PUT || PATCH
+        URL:           /links/self
+        Query Params:  <none>
+        Body (JSON):   {
+                         "data": [{
+                           "type": "registrations",   # required
+                           "id": <node_id>   # required
+                         }]
+                       }
+        Success:       200
+
+    This requires both edit permission on the collection, and for the user that is
+    making the request to be able to read the registrations requested. Data can contain any number of
+    node identifiers. This will replace the contents of the node_links for this collection with
+    the contents of the request. It will delete all node links that don't have a node_id in the data
+    array, create node links for the node_ids that don't currently have a node id, and do nothing
+    for node_ids that already have a corresponding node_link. This means a update request with
+    {"data": []} will remove all node_links in this collection
+
+    ###Destroy
+
+        Method:        DELETE
+        URL:           /links/self
+        Query Params:  <none>
+        Body (JSON):   {
+                         "data": [{
+                           "type": "registrations",   # required
+                           "id": <node_id>   # required
+                         }]
+                       }
+        Success:       204
+
+    This requires edit permission on the node. This will delete any node_links that have a
+    corresponding node_id in the request.
+    """
+    permission_classes = (
+        CollectionWriteOrPublicForRelationshipPointers,
+        drf_permissions.IsAuthenticatedOrReadOnly,
+        base_permissions.TokenHasScope,
+        ReadOnlyIfCollectedRegistration,
+    )
+
+    serializer_class = CollectedRegistrationsRelationshipSerializer
+    view_name = 'collection-registration-pointer-relationship'
+
+    def get_object(self):
+        collection = self.get_collection(check_object_permissions=False)
+        auth = get_user_auth(self.request)
+        obj = {
+            'data': [
+                pointer for pointer in
+                Registration.objects.filter(
+                    guids__in=collection.guid_links.all(), is_deleted=False,
+                ).can_view(
+                    user=auth.user, private_link=auth.private_link,
+                ).order_by('-modified')
+            ], 'self': collection,
+        }
+        self.check_object_permissions(self.request, obj)
+        return obj

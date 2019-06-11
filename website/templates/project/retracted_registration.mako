@@ -1,3 +1,4 @@
+<%namespace name="contributor_list" file="../util/contributor_list.mako" />
 <div id="projectScope">
     <header class="subhead" id="overview">
 
@@ -14,11 +15,7 @@
                     <ol>Anonymous Contributors</ol>
                 % else:
                     <ol>
-                        <div mod-meta='{
-                            "tpl": "util/render_contributors.mako",
-                            "uri": "${ node["api_url"] }get_contributors/",
-                            "replace": true
-                        }'></div>
+                        ${contributor_list.render_contributors_full(contributors=node['contributors'])}
                     </ol>
                 % endif
                 % if node['is_fork']:
@@ -26,7 +23,7 @@
                     <span data-bind="text: dateForked.local, tooltip: {title: dateForked.utc}"></span>
                 % endif
                 <p>
-                  Registration Supplement:
+                  Registration Form:
                   % for meta_schema in node.get('registered_schemas', []):
                   <span> ${meta_schema['schema_name']}</span>
                   % if len(node['registered_schemas']) > 1:
@@ -35,8 +32,25 @@
                   % endfor
                 </p>
                 <br />
-                Date Created: <span data-bind="text: dateCreated.local, tooltip: {title: dateCreated.utc}" class="date node-date-created"></span>
-                | Date Registered:  <span data-bind="text: dateRegistered.local, tooltip: {title: dateRegistered.utc}" class="date node-date-registered"></span>
+                Date Created:
+                <span data-bind="text: dateCreated.local, tooltip: {title: dateCreated.utc}" class="date node-date-created"></span>
+                <br/>
+                Date Registered:
+                <span data-bind="text: dateRegistered.local, tooltip: {title: dateRegistered.utc}" class="date node-date-registered"></span>
+                <br/>
+                Date Withdrawn:
+                % if node['date_retracted']:
+                    <span data-bind="text: dateRetracted.local, tooltip: {title: dateRetracted.utc}" class="date node-date-retracted"></span>
+                % else:
+                    Not available
+                % endif
+                <span data-bind="if: hasDoi()" class="scripted">
+                  <p>
+                    <span data-bind="text:identifier"></span>:
+                  DOI <span data-bind="text: doi"></span>
+                      <span data-bind="if: hasArk()" class="scripted">| ARK <span data-bind="text: ark"></span></span>
+                   </p>
+                </span>
 
                 % if parent_node['id']:
                     <br />Category: <span class="node-category">${ node['category'] }</span>

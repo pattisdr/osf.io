@@ -2,11 +2,13 @@
 
 from framework.auth import signals as auth
 from website.project import signals as project
-from website.addons.base import signals as event
+from addons.base import signals as event
 from website.conferences import signals as conference
+from website.reviews import signals as reviews
 
 ALL_SIGNALS = [
     project.comment_added,
+    project.mention_added,
     project.unreg_contributor_added,
     project.contributor_added,
     project.contributor_removed,
@@ -19,4 +21,5 @@ ALL_SIGNALS = [
     auth.unconfirmed_user_created,
     event.file_updated,
     conference.osf4m_user_created,
+    reviews.reviews_email
 ]

@@ -7,21 +7,25 @@ from website.archiver import (
     ARCHIVER_NETWORK_ERROR,
     ARCHIVER_SIZE_EXCEEDED,
     ARCHIVER_FILE_NOT_FOUND,
+    ARCHIVER_FORCED_FAILURE,
 )
-from website.archiver.model import ArchiveJob
 
 from website import (
     mails,
     settings
 )
+from osf.utils.sanitize import unescape_entities
 
-def send_archiver_size_exceeded_mails(src, user, stat_result):
+
+def send_archiver_size_exceeded_mails(src, user, stat_result, url):
     mails.send_mail(
-        to_addr=settings.SUPPORT_EMAIL,
+        to_addr=settings.OSF_SUPPORT_EMAIL,
         mail=mails.ARCHIVE_SIZE_EXCEEDED_DESK,
         user=user,
         src=src,
-        stat_result=stat_result
+        stat_result=stat_result,
+        can_change_preferences=False,
+        url=url,
     )
     mails.send_mail(
         to_addr=user.username,
@@ -33,13 +37,15 @@ def send_archiver_size_exceeded_mails(src, user, stat_result):
     )
 
 
-def send_archiver_copy_error_mails(src, user, results):
+def send_archiver_copy_error_mails(src, user, results, url):
     mails.send_mail(
-        to_addr=settings.SUPPORT_EMAIL,
+        to_addr=settings.OSF_SUPPORT_EMAIL,
         mail=mails.ARCHIVE_COPY_ERROR_DESK,
         user=user,
         src=src,
         results=results,
+        url=url,
+        can_change_preferences=False,
     )
     mails.send_mail(
         to_addr=user.username,
@@ -51,13 +57,15 @@ def send_archiver_copy_error_mails(src, user, results):
         mimetype='html',
     )
 
-def send_archiver_file_not_found_mails(src, user, results):
+def send_archiver_file_not_found_mails(src, user, results, url):
     mails.send_mail(
-        to_addr=settings.SUPPORT_EMAIL,
+        to_addr=settings.OSF_SUPPORT_EMAIL,
         mail=mails.ARCHIVE_FILE_NOT_FOUND_DESK,
+        can_change_preferences=False,
         user=user,
         src=src,
         results=results,
+        url=url,
     )
     mails.send_mail(
         to_addr=user.username,
@@ -69,13 +77,15 @@ def send_archiver_file_not_found_mails(src, user, results):
         mimetype='html',
     )
 
-def send_archiver_uncaught_error_mails(src, user, results):
+def send_archiver_uncaught_error_mails(src, user, results, url):
     mails.send_mail(
-        to_addr=settings.SUPPORT_EMAIL,
+        to_addr=settings.OSF_SUPPORT_EMAIL,
         mail=mails.ARCHIVE_UNCAUGHT_ERROR_DESK,
         user=user,
         src=src,
         results=results,
+        can_change_preferences=False,
+        url=url,
     )
     mails.send_mail(
         to_addr=user.username,
@@ -89,14 +99,17 @@ def send_archiver_uncaught_error_mails(src, user, results):
 
 
 def handle_archive_fail(reason, src, dst, user, result):
+    url = settings.INTERNAL_DOMAIN + src._id
     if reason == ARCHIVER_NETWORK_ERROR:
-        send_archiver_copy_error_mails(src, user, result)
+        send_archiver_copy_error_mails(src, user, result, url)
     elif reason == ARCHIVER_SIZE_EXCEEDED:
-        send_archiver_size_exceeded_mails(src, user, result)
+        send_archiver_size_exceeded_mails(src, user, result, url)
     elif reason == ARCHIVER_FILE_NOT_FOUND:
-        send_archiver_file_not_found_mails(src, user, result)
+        send_archiver_file_not_found_mails(src, user, result, url)
+    elif reason == ARCHIVER_FORCED_FAILURE:  # Forced failure using scripts.force_fail_registration
+        pass
     else:  # reason == ARCHIVER_UNCAUGHT_ERROR
-        send_archiver_uncaught_error_mails(src, user, result)
+        send_archiver_uncaught_error_mails(src, user, result, url)
     dst.root.sanction.forcibly_reject()
     dst.root.sanction.save()
     dst.root.delete_registration_tree(save=True)
@@ -128,8 +141,9 @@ def link_archive_provider(node, user):
     :param user: target user (currently unused, but left in for future-proofing
     the code for use with archive providers other than OSF Storage)
     """
-    addon = node.get_or_add_addon(settings.ARCHIVE_PROVIDER, auth=Auth(user))
-    addon.on_add()
+    addon = node.get_or_add_addon(settings.ARCHIVE_PROVIDER, auth=Auth(user), log=False)
+    if hasattr(addon, 'on_add'):
+        addon.on_add()
     node.save()
 
 def aggregate_file_tree_metadata(addon_short_name, fileobj_metadata, user):
@@ -157,8 +171,9 @@ def aggregate_file_tree_metadata(addon_short_name, fileobj_metadata, user):
         )
 
 def before_archive(node, user):
+    from osf.models import ArchiveJob
     link_archive_provider(node, user)
-    job = ArchiveJob(
+    job = ArchiveJob.objects.create(
         src_node=node.registered_from,
         dst_node=node,
         initiator=user
@@ -180,6 +195,7 @@ def _do_get_file_map(file_tree):
 
 def _memoize_get_file_map(func):
     cache = {}
+
     @functools.wraps(func)
     def wrapper(node):
         if node._id not in cache:
@@ -203,14 +219,19 @@ def get_file_map(node, file_map):
             yield (key, value, node_id)
 
 def find_registration_file(value, node):
-    from website.models import Node
-
+    from osf.models import AbstractNode
     orig_sha256 = value['sha256']
-    orig_name = value['selectedFileName']
+    orig_name = unescape_entities(
+        value['selectedFileName'],
+        safe={
+            '&lt;': '<',
+            '&gt;': '>'
+        }
+    )
     orig_node = value['nodeId']
     file_map = get_file_map(node)
     for sha256, value, node_id in file_map:
-        registered_from_id = Node.load(node_id).registered_from._id
+        registered_from_id = AbstractNode.load(node_id).registered_from._id
         if sha256 == orig_sha256 and registered_from_id == orig_node and orig_name == value['name']:
             return value, node_id
     return None, None

@@ -1,15 +1,13 @@
 # -*- coding: utf-8 -*-
 
+from django.db import transaction
 import mailchimp
 
 from framework import sentry
 from framework.celery_tasks import app
-from framework.auth.core import User
 from framework.celery_tasks.handlers import queued_task
 from framework.auth.signals import user_confirmed
-
-from framework.transactions.context import transaction
-
+from osf.models import OSFUser
 from website import settings
 
 
@@ -35,9 +33,9 @@ def get_list_name_from_id(list_id):
 
 @queued_task
 @app.task
-@transaction()
+@transaction.atomic
 def subscribe_mailchimp(list_name, user_id):
-    user = User.load(user_id)
+    user = OSFUser.load(user_id)
     m = get_mailchimp_api()
     list_id = get_list_id_from_name(list_name=list_name)
 
@@ -56,7 +54,7 @@ def subscribe_mailchimp(list_name, user_id):
             update_existing=True,
         )
 
-    except mailchimp.ValidationError as error:
+    except (mailchimp.ValidationError, mailchimp.ListInvalidBounceMemberError) as error:
         sentry.log_exception()
         sentry.log_message(error.message)
         user.mailchimp_mailing_lists[list_name] = False
@@ -75,10 +73,19 @@ def unsubscribe_mailchimp(list_name, user_id, username=None, send_goodbye=True):
 
     :raises: ListNotSubscribed if user not already subscribed
     """
-    user = User.load(user_id)
+    user = OSFUser.load(user_id)
     m = get_mailchimp_api()
     list_id = get_list_id_from_name(list_name=list_name)
-    m.lists.unsubscribe(id=list_id, email={'email': username or user.username}, send_goodbye=send_goodbye)
+
+    # pass the error for unsubscribing a user from the mailchimp who has already been unsubscribed
+    # and allow update mailing_list user field
+    try:
+        m.lists.unsubscribe(
+            id=list_id, email={'email': username or user.username},
+            send_goodbye=send_goodbye
+        )
+    except mailchimp.ListNotSubscribedError:
+        pass
 
     # Update mailing_list user field
     if user.mailchimp_mailing_lists is None:
@@ -90,7 +97,7 @@ def unsubscribe_mailchimp(list_name, user_id, username=None, send_goodbye=True):
 
 @queued_task
 @app.task
-@transaction()
+@transaction.atomic
 def unsubscribe_mailchimp_async(list_name, user_id, username=None, send_goodbye=True):
     """ Same args as unsubscribe_mailchimp, used to have the task be run asynchronously
     """

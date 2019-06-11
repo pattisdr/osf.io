@@ -30,10 +30,10 @@ def assets(ctx, dev=False, watch=False):
     """
     if os.getcwd() != HERE:
         os.chdir(HERE)
-    npm = 'npm install'
+    command = 'yarn install --frozen-lockfile'
     if not dev:
-        npm += ' --production'
-    ctx.run(npm, echo=True)
+        command += ' --production'
+    ctx.run(command, echo=True)
     bower_install(ctx)
     # Always set clean=False to prevent possible mistakes
     # on prod
@@ -75,5 +75,5 @@ def bower_install(ctx):
     if os.getcwd() != HERE:
         os.chdir(HERE)
     bower_bin = os.path.join(HERE, 'node_modules', 'bower', 'bin', 'bower')
-    ctx.run('{} prune'.format(bower_bin), echo=True)
-    ctx.run('{} install'.format(bower_bin), echo=True)
+    ctx.run('{} prune --allow-root'.format(bower_bin), echo=True)
+    ctx.run('{} install --allow-root'.format(bower_bin), echo=True)

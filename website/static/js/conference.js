@@ -1,4 +1,3 @@
-var $ = require('jquery');
 var m = require('mithril');
 var osfHelpers = require('js/osfHelpers');
 var Treebeard = require('treebeard');
@@ -54,7 +53,7 @@ function Meeting(data) {
                     folderIcons : false,
                     filter : true,
                     sortInclude : true,
-                    custom : function() { return m('a', { href : item.data.nodeUrl, target : '_blank' }, item.data.title ); }
+                    custom : function() { return m('a', { href : item.data.nodeUrl }, item.data.title ); }
 
                 },
                 {
@@ -62,7 +61,7 @@ function Meeting(data) {
                     folderIcons : false,
                     filter : true,
                     sortInclude : true,
-                    custom : function() { return m('a', { href : item.data.authorUrl, target : '_blank'}, item.data.author ); }
+                    custom : function() { return m('a', { href : item.data.authorUrl }, item.data.author ); }
                 },
                 {
                     data : 'category',  // Data field name

@@ -2,22 +2,24 @@
 # encoding: utf-8
 
 import logging
-import datetime
+import math
 import time
+from django.utils import timezone
 
-from modularodm import Q
+import django
 from oauthlib.oauth2 import OAuth2Error
 from dateutil.relativedelta import relativedelta
+django.setup()
 
 from framework.celery_tasks import app as celery_app
 
 from scripts import utils as scripts_utils
 
 from website.app import init_app
-from website.addons.box.model import Box
-from website.addons.googledrive.model import GoogleDriveProvider
-from website.addons.mendeley.model import Mendeley
-from website.oauth.models import ExternalAccount
+from addons.box.models import Provider as Box
+from addons.googledrive.models import GoogleDriveProvider
+from addons.mendeley.models import Mendeley
+from osf.models import ExternalAccount
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -34,9 +36,10 @@ def look_up_provider(addon_short_name):
 def get_targets(delta, addon_short_name):
     # NOTE: expires_at is the  access_token's expiration date,
     # NOT the refresh token's
-    return ExternalAccount.find(
-        Q('expires_at', 'lt', datetime.datetime.utcnow() - delta) &
-        Q('provider', 'eq', addon_short_name)
+    return ExternalAccount.objects.filter(
+        expires_at__lt=timezone.now() - delta,
+        date_last_refreshed__lt=timezone.now() - delta,
+        provider=addon_short_name
     )
 
 def main(delta, Provider, rate_limit, dry_run):
@@ -57,10 +60,10 @@ def main(delta, Provider, rate_limit, dry_run):
         )
         if not dry_run:
             if allowance < 1:
-                try: 
+                try:
                     time.sleep(rate_limit[1] - (time.time() - last_call))
-                except ValueError:
-                    pass  # ValueError indicates a negative sleep time
+                except (ValueError, IOError):
+                    pass  # Value/IOError indicates negative sleep time in Py 3.5/2.7, respectively
                 allowance = rate_limit[0]
 
             allowance -= 1
@@ -88,13 +91,10 @@ def run_main(addons=None, rate_limit=(5, 1), dry_run=True):
     if not dry_run:
         scripts_utils.add_file_logger(logger, __file__)
     for addon in addons:
-        try:
-            days = int(addons[addon]) - 3 # refresh tokens that expire this in the next three days
-        except (ValueError, TypeError):
-            days = 11  # OAuth2 spec's default refresh token expiry time is 14 days
+        days = math.ceil(int(addons[addon])*0.75)
         delta = relativedelta(days=days)
         Provider = look_up_provider(addon)
         if not Provider:
-            logger.error('Unable to find Provider class for addon {}'.format(addon_short_name))
+            logger.error('Unable to find Provider class for addon {}'.format(addon))
         else:
             main(delta, Provider, rate_limit, dry_run=dry_run)

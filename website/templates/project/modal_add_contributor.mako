@@ -17,30 +17,30 @@
                                 <div class="input-group m-b-sm">
                                     <input class='form-control'
                                             data-bind="value:query"
-                                            placeholder='Search by name' autofocus/>
+                                            placeholder='Search by name or user profile information' autofocus/>
                                     <span class="input-group-btn">
                                         <input type="submit" value="Search" class="btn btn-default">
                                     </span>
                                 </div>
-                            </div>
-                        </div>
-                    <hr />
-                        <div class="row search-contributor-links">
-                            <div class="col-md-12">
-                                <div>
-                                    <!-- ko if:parentId -->
-                                        <a class="f-w-lg" data-bind="click:importFromParent, text:'Import contributors from ' + parentTitle"></a>
-                                    <!-- /ko -->
+                                <div class="row search-contributor-links">
+                                    <div class="col-md-12">
+                                        <div style='margin-left: 5px'>
+                                            <!-- ko if:parentId -->
+                                                <a class="f-w-lg" data-bind="click: startSearchParent, text:'Import contributors from ' + parentTitle"></a>
+                                            <!-- /ko -->
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
+                    <hr />
                     </form>
 
 
                     <!-- Choose which to add -->
                     <div class="row">
 
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <div>
                                 <span class="modal-subheader">Results</span>
                                 <a data-bind="visible: addAllVisible, click:addAll">Add all</a>
@@ -49,7 +49,7 @@
                             <div data-bind="html: notification().message, css: 'alert alert-' + notification().level"></div>
                             <!-- /ko -->
                             <!-- ko if: doneSearching -->
-                            <table class="table-condensed">
+                            <table class="table-condensed table-hover">
                                 <thead data-bind="visible: foundResults">
                                 </thead>
                                 <tbody data-bind="foreach:{data:results, as: 'contributor', afterRender:addTips}">
@@ -69,10 +69,10 @@
                                         </td>
                                         <td>
                                             <!-- height and width are explicitly specified for faster rendering -->
-                                            <img data-bind="attr: {src: contributor.gravatar_url}" height=35 width=35 />
+                                            <img data-bind="attr: {src: contributor.profile_image_url}" height=35 width=35 />
                                         </td>
-                                        <td width="75%">
-                                            <a data-bind = "attr: {href: contributor.profile_url}" target="_blank">
+                                        <td width="75%" >
+                                            <a  data-bind="attr: {href: contributor.profile_url}" target="_blank">
                                                 <span data-bind= "text:contributor.fullname"></span>
                                             </a><br>
 
@@ -92,14 +92,75 @@
                                                     </span><br>
                                                 </span>
 
-                                                <span class= 'small'
+                                                <span>
+                                                    <span class= 'small'
                                                       data-bind= "text: contributor.displayProjectsInCommon">
+                                                    </span><br>
+                                                </span>
+                                                <span data-bind="visible: contributor.social.personal">
+                                                    <a data-bind="attr: {href: contributor.social.personal}" data-toggle="tooltip" title="Personal Website"  target="_blank">
+                                                        <i class="fa fa-globe social-icons fa-lg"></i>
+                                                    </a>
                                                 </span>
 
+                                                <span data-bind="visible: contributor.social.twitter">
+                                                    <a data-bind="attr: {href: contributor.social.twitter}" data-toggle="tooltip" title="Twitter" target="_blank">
+                                                        <i class="fa fa-twitter social-icons fa-lg"></i>
+                                                    </a>
+                                                </span>
+                                                <span data-bind="visible: contributor.social.github">
+                                                    <a data-bind="attr: {href: contributor.social.github}" data-toggle="tooltip" title="Github" target="_blank">
+                                                        <i class="fa fa-github-alt social-icons fa-lg"></i>
+                                                    </a>
+                                                </span>
+                                                <span data-bind="visible: contributor.social.linkedIn" >
+                                                    <a data-bind="attr: {href: contributor.social.linkedIn}" data-toggle="tooltip" title="LinkedIn" target="_blank">
+                                                        <i class="fa fa-linkedin social-icons fa-lg"></i>
+                                                    </a>
+                                                </span>
+                                                <span data-bind="visible: contributor.social.scholar">
+                                                    <a data-bind="attr: {href: contributor.social.scholar}" data-toggle="tooltip" title="Google Scholar" target="_blank">
+                                                        <img class="social-icons fa-lg" src="/static/img/googlescholar.png">
+                                                    </a>
+                                                </span>
+                                                <span data-bind="visible: contributor.social.impactStory">
+                                                    <a data-bind="attr: {href: contributor.social.impactStory}" data-toggle="tooltip" title="ImpactStory" target="_blank">
+                                                        <i class="fa fa-info-circle social-icons fa-lg"></i>
+                                                    </a>
+                                                </span>
+                                                <span data-bind="visible: contributor.social.orcid">
+                                                    <a data-bind="attr: {href: contributor.social.orcid}" data-toggle="tooltip" title="ORCiD" target="_blank">
+                                                        <i class="fa social-icons fa-lg">iD</i>
+                                                    </a>
+                                                </span>
+                                                <span data-bind="visible: contributor.social.researcherId">
+                                                    <a data-bind="attr: {href: contributor.social.researcherId}" data-toggle="tooltip" title="ResearcherID" target="_blank">
+                                                        <i class="fa social-icons fa-lg">R</i>
+                                                    </a>
+                                                </span>
+                                                <span data-bind="visible: contributor.social.researchGate">
+                                                    <a data-bind="attr: {href: contributor.social.researchGate}" data-toggle="tooltip" title="ResearchGate" target="_blank">
+                                                        <img class="social-icons p-b-xs" src="/static/img/researchgate.jpg"></i>
+                                                    </a>
+                                                </span>
+                                                <span data-bind="visible: contributor.social.academiaInstitution + social.academiaProfileID">
+                                                    <a data-bind="attr: {href: contributor.social.academiaInstitution + social.academiaProfileID}" data-toggle="tooltip" title="Academia" target="_blank">
+                                                        <i class="fa social-icons fa-lg">A</i>
+                                                    </a>
+                                                </span>
+                                                <span data-bind="visible: contributor.social.baiduScholar">
+                                                    <a data-bind="attr: {href: contributor.social.baiduScholar}" data-toggle="tooltip" title="Baidu Scholar" target="_blank">
+                                                        <img class="social-icons fa-lg" src="/static/img/baiduscholar.png">
+                                                    </a>
+                                                </span>
+                                                <span data-bind="visible: contributor.social.ssrn">
+                                                    <a data-bind="attr: {href: contributor.social.ssrn}" data-toggle="tooltip" title="SSRN" target="_blank">
+                                                        <img class="social-icons fa-lg" src="/static/img/SSRN.png">
+                                                    </a>
+                                                </span>
                                             <span
                                                     class='text-muted'
                                                     data-bind="visible: !contributor.registered">(unregistered)</span>
-
                                         </td>
 
                                     </tr>
@@ -115,31 +176,52 @@
                                         <li data-bind="css: style"><a href="#" data-bind="click: handler, text: text"></a></li>
                                     </ul>
                                     <p>
-                                        <a href="#" data-bind="click:gotoInvite">Add <strong><em data-bind="text: query"></em></strong> as an unregistered contributor</a>.
+                                        <div data-bind='ifnot: emailSearch'>
+                                            <a href="#" data-bind="click:gotoInvite">Add <strong><em data-bind="text: query"></em></strong> as an unregistered contributor</a>.
+                                        </div>
                                     </p>
                                 </div>
                                 <div data-bind="if: showLoading">
                                     <p class="text-muted">Searching contributors...</p>
                                 </div>
-                                    <div data-bind="if: noResults">
-                                        No results found. Try a more specific search or
+                                <div data-bind="if: noResults">
+                                    <div data-bind='if: emailSearch'>
+                                      No results found. Try a more specific search.
+                                    </div>
+                                    <div data-bind='ifnot: emailSearch'>
+                                      No results found. Try a more specific search
+                                    </div>
+                                    <div data-bind="ifnot: emailSearch"> or
                                         <a href="#" data-bind="click:gotoInvite">add <strong><em data-bind="text: query"></em></strong> as an unregistered contributor</a>.
                                     </div>
+                                </div>
+                                <div data-bind="if: emailSearch">
+                                    <p>It looks like you are trying to search by email address. Please try your search again using your collaborator's name. You will be able to add users without OSF accounts as unregistered contributors.</p>
+                                </div>
                             </div>
                         </div><!-- ./col-md -->
 
-                        <div class="col-md-6">
+                        <div class="col-md-8">
                             <div>
                                 <span class="modal-subheader">Adding</span>
                                 <a data-bind="visible: removeAllVisible, click:removeAll">Remove all</a>
                             </div>
 
                             <!-- TODO: Duplication here: Put this in a KO template -->
-                            <table class="table-condensed">
-                                <thead data-bind="visible: selection().length">
+                            <table class="table-condensed table-hover">
+                                <thead class="keep-all" data-bind="visible: selection().length">
                                     <th width="10%"></th>
-                                    <th width="15%"></th>
-                                    <th>Name</th>
+                                    <th width="10%"></th>
+                                    <th width="30%">Name</th>
+                                    <th>
+                                        Bibliographic Contributor
+                                        <i class="fa fa-question-circle visibility-info"
+                                           data-toggle="popover"
+                                           data-title="Bibliographic Contributor Information"
+                                           data-container="body"
+                                           data-placement="right"
+                                           data-html="true">
+                                        </i>
                                     <th>
                                         Permissions
                                         <i class="fa fa-question-circle permission-info"
@@ -160,7 +242,7 @@
                                         </td>
                                         <td>
                                             <!-- height and width are explicitly specified for faster rendering -->
-                                            <img data-bind="attr: {src: contributor.gravatar_url || '/static/img/unreg_gravatar.png'}" height=35 width=35 />
+                                            <img data-bind="attr: {src: contributor.profile_image_url || '/static/img/unreg_profile_image.png'}" height=35 width=35 />
                                         </td>
 
                                         <td>
@@ -169,6 +251,12 @@
                                             <span
                                                     class='text-muted'
                                                     data-bind="visible: !contributor.registered">(unregistered)</span>
+                                        </td>
+                                        <td>
+                                            <input
+                                                type="checkbox" class="biblio visible-filter"
+                                                data-bind="checked: contributor.visible"
+                                            />
                                         </td>
 
                                         <td>
@@ -184,7 +272,6 @@
                         </div>
 
                     </div>
-
                 </div>
                 <!-- Component selection page -->
                 <div data-bind="visible:page()=='which'">
@@ -215,7 +302,9 @@
                     <div class="osf-treebeard">
                         <div id="addContributorsTreebeard">
                             <div class="spinner-loading-wrapper">
-                                <div class="logo-spin logo-md"></div>
+                                <div class="ball-scale ball-scale-blue">
+                                    <div></div>
+                                </div>
                                 <p class="m-t-sm fg-load-message"> Loading projects and components...  </p>
                             </div>
                         </div>
@@ -252,7 +341,7 @@
                 <span data-bind="if: page() === 'invite'">
                     <button class="btn btn-primary" data-bind='click:selectWhom'>Back</button>
                     <button class='btn btn-success'
-                         data-bind='click: postInvite'
+                         data-bind='click: postInvite, enable:canSubmit'
                                     type="submit">Add</button>
                 </span>
 
@@ -270,4 +359,3 @@
         </div><!-- end modal-content -->
     </div><!-- end modal-dialog -->
 </div><!-- end modal -->
-

@@ -9,7 +9,10 @@ var ko = require('knockout');
 var Raven = require('raven-js');
 var bootbox = require('bootbox');
 var moment = require('moment');
-var History = require('exports?History!history');
+var lodashHas = require('lodash.has');
+var lodashSet = require('lodash.set');
+var lodashIncludes = require('lodash.includes');
+var History = require('exports-loader?History!history');
 
 require('js/koHelpers');
 
@@ -24,9 +27,6 @@ var RegistrationModal = require('js/registrationModal');
 
 // This value should match website.settings.DRAFT_REGISTRATION_APPROVAL_PERIOD
 var DRAFT_REGISTRATION_MIN_EMBARGO_DAYS = 10;
-var DRAFT_REGISTRATION_MIN_EMBARGO_TIMESTAMP = new Date().getTime() + (
-        DRAFT_REGISTRATION_MIN_EMBARGO_DAYS * 24 * 60 * 60 * 1000
-);
 
 var VALIDATORS = {
     required: {
@@ -39,6 +39,9 @@ var VALIDATOR_LOOKUP = {};
 $.each(VALIDATORS, function(key, value) {
     VALIDATOR_LOOKUP[value.message] = value;
 });
+
+// Extensions that lose data bind if re-created.
+var CACHED_EXTENSIONS = ['osf-author-import'];
 
 /**
  * @class Comment
@@ -179,6 +182,8 @@ var Question = function(questionSchema, data) {
     self.description = questionSchema.description || '';
     self.help = questionSchema.help;
     self.options = questionSchema.options || [];
+    self.fileLimit = questionSchema.fileLimit;
+    self.fileDescription = questionSchema.fileDescription;
     self.properties = questionSchema.properties || [];
     self.match = questionSchema.match || '';
 
@@ -207,6 +212,9 @@ var Question = function(questionSchema, data) {
         value = self.data.value();
     } else {
         value = self.data.value || null;
+        if(value) {
+            value = $osf.decodeText(value);
+        }
     }
 
     if (self.type === 'choose' && self.format === 'multiselect') {
@@ -501,11 +509,15 @@ MetaSchema.prototype.askConsent = function(pre) {
             $osf.unblock();
             bootbox.hideAll();
             ret.resolve();
+            $(document.body).removeClass('background-unscrollable');
+            $('.modal').removeClass('modal-scrollable');
         },
         cancel: function() {
             $osf.unblock();
             bootbox.hideAll();
             ret.reject();
+            $(document.body).removeClass('background-unscrollable');
+            $('.modal').removeClass('modal-scrollable');
         }
     };
 
@@ -513,9 +525,15 @@ MetaSchema.prototype.askConsent = function(pre) {
         size: 'large',
         message: function() {
             ko.renderTemplate('preRegistrationConsent', viewModel, {}, this);
+            $(document.body).addClass('background-unscrollable');
         }
     });
 
+    $('.bootbox-close-button.close').click(function() {
+        $(document.body).removeClass('background-unscrollable');
+        $('.modal').removeClass('modal-scrollable');
+    });
+    $('.modal').addClass('modal-scrollable');
     return ret.promise();
 };
 
@@ -582,7 +600,7 @@ var Draft = function(params, metaSchema) {
         }).length > 0;
     });
 
-    self.completion = ko.computed(function() {
+    self.completion = ko.pureComputed(function() {
         var complete = 0;
         var questions = self.metaSchema.flatQuestions()
                 .filter(function(question) {
@@ -594,6 +612,20 @@ var Draft = function(params, metaSchema) {
             }
         });
         return Math.ceil(100 * (complete / questions.length));
+    });
+
+    self.isComplete = ko.pureComputed(function() {
+        var complete = true;
+        var questions = self.metaSchema.flatQuestions()
+                .filter(function(question) {
+                    return question.required;
+                });
+        $.each(questions, function(_, question) {
+            if (!question.isComplete()) {
+                complete = false;
+            }
+        });
+        return complete;
     });
 };
 Draft.prototype.getUnseenComments = function() {
@@ -610,16 +642,20 @@ Draft.prototype.preRegisterPrompts = function(response, confirm) {
     var validator = null;
     if (self.metaSchema.requiresApproval) {
         validator = {
-            validator: function(value) {
-                return (new Date(value)).getTime() > DRAFT_REGISTRATION_MIN_EMBARGO_TIMESTAMP;
+            validator: function(end) {
+                var min = moment().add(DRAFT_REGISTRATION_MIN_EMBARGO_DAYS, 'days');
+                return end.isAfter(min);
             },
             message: 'Embargo end date must be at least ' + DRAFT_REGISTRATION_MIN_EMBARGO_DAYS + ' days in the future.'
         };
     }
     var preRegisterPrompts = response.prompts || [];
-    
+    preRegisterPrompts.unshift('Registrations cannot be modified or deleted once completed.');
+
     var registrationModal = new RegistrationModal.ViewModel(
-        confirm, preRegisterPrompts, validator
+        confirm, preRegisterPrompts, validator, {
+            requiresApproval: self.requiresApproval()
+        }
     );
     registrationModal.show();
 };
@@ -692,34 +728,59 @@ Draft.prototype.registerWithoutReview = function() {
 Draft.prototype.register = function(url, data) {
     var self = this;
 
-    $osf.block();
-    var request = $osf.postJSON(url, data);
-    request
-        .done(function(response) {
-            if (response.status === 'initiated') {
-                window.location.assign(response.urls.registrations);
+    var nodeIds = data.nodesToRegister.map(function (node) {
+        return node.id;
+    });
+
+    var payload = {
+        'data': {
+            'type': 'registrations',
+            'attributes': {
+                'draft_registration': window.contextVars.draft.pk,
+                'registration_choice': data.registrationChoice,
+                'children': nodeIds
             }
-        })
-        .fail(function() {
-            bootbox.alert({
-                title: 'Registration failed',
-                message: language.registerFail,
-                callback: function() {
-                    $osf.unblock();
-                    if (self.urls.registrations) {
-                        window.location.assign(self.urls.registrations);
-                    }
-                },
-                buttons: {
-                    ok: {
-                        label: 'Back to project',
-                    }
+        }
+    };
+
+    if(data.embargoEndDate){
+        payload.data.attributes.lift_embargo = data.embargoEndDate.format('YYYY-MM-DDThh:mm:ss');
+    }
+
+    $osf.block();
+    var request = $osf.ajaxJSON(
+        'POST',
+        url,
+        {
+            isCors: true,
+            data: payload
+         }
+    ).done(function(response) {
+        window.location.assign(response.data.links.html);
+    }).fail(function(response) {
+        var errorMessage;
+        if(response.status === 400){
+            errorMessage = response.responseJSON.errors[0].detail;
+        } else {
+            errorMessage = language.registerFail;
+        }
+
+        bootbox.alert({
+            title: 'Registration failed',
+            message: errorMessage,
+            callback: function() {
+                $osf.unblock();
+            },
+            buttons: {
+                ok: {
+                    label: 'Back to project',
                 }
-            });
-        })
-        .always(function() {
-            $osf.unblock();
+            }
         });
+    }).always(function(){
+        $osf.unblock();
+    });
+
     return request;
 };
 Draft.prototype.submitForReview = function() {
@@ -778,6 +839,7 @@ var RegistrationEditor = function(urls, editorId, preview) {
     self.readonly = ko.observable(false);
 
     self.draft = ko.observable();
+    self.pk = null;
 
     self.currentQuestion = ko.observable();
     self.showValidation = ko.observable(false);
@@ -885,7 +947,7 @@ var RegistrationEditor = function(urls, editorId, preview) {
 		$elem.append(
 		    $('<span class="col-md-12">').append(
 			$('<p class="breaklines"><small><em>' + $osf.htmlEscape(question.description) + '</em></small></p>'),
-                            $('<span class="well col-xs-12">').append(value)
+                            $('<span class="well breaklines col-xs-12">').append(value)
 		));
             }
 	    return $elem;
@@ -909,6 +971,7 @@ RegistrationEditor.prototype.init = function(draft) {
     var self = this;
 
     self.draft(draft);
+    self.pk = draft.pk;
     var metaSchema = draft ? draft.metaSchema: null;
 
     self.saveManager = null;
@@ -981,7 +1044,15 @@ RegistrationEditor.prototype.context = function(data, $root, preview) {
     });
 
     if (this.extensions[data.type]) {
-        return new this.extensions[data.type](data, $root, preview);
+        // osf-author-import loses binding when re-created. Hence, this kludge.
+        if (lodashIncludes(CACHED_EXTENSIONS, data.type)) {
+            if (!lodashHas(this, ['extCache', data.type, data.id])) {
+                lodashSet(this, ['extCache', data.type, data.id], new this.extensions[data.type](data, $root.pk, preview));
+            }
+            return this.extCache[data.type][data.id];
+        } else {
+            return new this.extensions[data.type](data, $root.pk, preview);
+        }
     }
     return data;
 };
@@ -1213,241 +1284,6 @@ RegistrationEditor.prototype.rejectDraft = function() {
     });
 };
 
-/**
- * @class RegistrationManager
- * Model for listing DraftRegistrations
- *
- * @param {Object} node: optional data to instatiate model with
- * @param {String} draftsSelector: DOM node to bind VM to
- * @param {Object} urls:
- * @param {String} urls.list:
- * @param {String} urls.get:
- * @param {String} urls.delete:
- * @param {String} urls.edit:
- * @param {String} urls.schemas:
- **/
-var RegistrationManager = function(node, draftsSelector, urls, createButton) {
-    var self = this;
-
-    self.node = node;
-    self.draftsSelector = draftsSelector;
-
-    self.urls = urls;
-
-    self.schemas = ko.observableArray([]);
-    self.selectedSchema = ko.computed({
-        read: function() {
-            return self.schemas().filter(function(s) {
-                return s._selected();
-            })[0];
-        },
-        write: function(schema) {
-            $.each(self.schemas(), function(_, s) {
-                s._selected(false);
-            });
-            schema._selected(true);
-        }
-    });
-    self.selectedSchemaId = ko.computed({
-        read: function() {
-            return (self.selectedSchema() || {}).id;
-        },
-        write: function(id) {
-            var schemas = self.schemas();
-            var schema = schemas.filter(function(s) {
-                return s.id === id;
-            })[0];
-            self.selectedSchema(schema);
-        }
-    });
-
-    // TODO: convert existing registration UI to frontend impl.
-    // self.registrations = ko.observable([]);
-    self.drafts = ko.observableArray([]);
-    self.hasDrafts = ko.pureComputed(function() {
-        return self.drafts().length > 0;
-    });
-
-    self.loadingSchemas = ko.observable(true);
-    self.loadingSchemas.subscribe(function(loading) {
-        if (!loading) {
-            createButton.removeClass('disabled');
-            createButton.text('New registration');
-        }
-    });
-    self.loadingDrafts = ko.observable(true);
-
-    self.preview = ko.observable(false);
-
-    // bound functions
-    self.getDraftRegistrations = $.getJSON.bind(null, self.urls.list);
-    self.getSchemas = $.getJSON.bind(null, self.urls.schemas);
-
-    if (createButton) {
-        createButton.addClass('disabled');
-        createButton.on('click', self.createDraftModal.bind(self));
-    }
-};
-RegistrationManager.prototype.init = function() {
-    var self = this;
-
-    $osf.applyBindings(self, self.draftsSelector);
-
-    var getSchemas = self.getSchemas();
-    getSchemas.done(function(response) {
-        self.schemas(
-            $.map(response.meta_schemas, function(schema) {
-                return new MetaSchema(schema);
-            })
-        );
-        self.loadingSchemas(false);
-    });
-    getSchemas.fail(function(xhr, status, error) {
-        Raven.captureMessage('Could not load registration templates', {
-            extra: {
-                url: self.urls.schemas,
-                textStatus: status,
-                error: error
-            }
-        });
-        $osf.growl('Error loading registration templates', language.loadMetaSchemaFail);
-    });
-
-    if ($osf.currentUser().isAdmin) {
-        var getDraftRegistrations = self.getDraftRegistrations();
-        getDraftRegistrations.done(function(response) {
-            var drafts = $.map(response.drafts, function(draft) {
-                return new Draft(draft);
-            });
-            drafts.sort(function(a, b) {
-                return a.initiated.getTime() < b.initiated.getTime();
-            });
-            self.drafts(drafts);
-            self.loadingDrafts(false);
-        });
-        getDraftRegistrations.fail(function(xhr, status, error) {
-            Raven.captureMessage('Could not load draft registrations', {
-                extra: {
-                    url: self.urls.list,
-                    textStatus: status,
-                    error: error
-                }
-            });
-            $osf.growl('Error loading draft registrations', language.loadDraftsFail);
-        });
-
-        var urlParams = $osf.urlParams();
-        if (urlParams.campaign && urlParams.campaign === 'prereg') {
-            $osf.block();
-            getSchemas.done(function() {
-                var preregSchema = self.schemas().filter(function(schema) {
-                    return schema.name === 'Prereg Challenge';
-                })[0];
-                preregSchema.askConsent(true).then(function() {
-                    self.selectedSchema(preregSchema);
-                    $('#newDraftRegistrationForm').submit();
-                });
-            }).always($osf.unblock);
-        }
-    }
-};
-/**
- * Confirm and delete a draft registration
- *
- * @param {Draft} draft:
- **/
-RegistrationManager.prototype.deleteDraft = function(draft) {
-    var self = this;
-
-    var url = self.urls.delete.replace('{draft_pk}', draft.pk);
-    bootbox.dialog({
-        title: 'Please confirm',
-        message: 'Are you sure you want to delete this draft registration?',
-        buttons: {
-            cancel: {
-                label: 'Cancel',
-                className: 'btn-default',
-                callback: bootbox.hideAll
-            },
-            submit: {
-                label: 'Delete',
-                className: 'btn-danger',
-                callback: function() {
-                    $.ajax({
-                        url: url,
-                        method: 'DELETE'
-                    }).then(function() {
-                        self.drafts.remove(function(item) {
-                            return item.pk === draft.pk;
-                        });
-                    }).fail(function(xhr, status, err) {
-                        Raven.captureMessage('Could not submit draft registration', {
-                            extra: {
-                                url: url,
-                                textStatus: status,
-                                error: err
-                            }
-                        });
-                        $osf.growl('Error deleting draft', language.deleteDraftFail);
-                    });
-                }
-            }
-        }
-    });
-};
-/**
- * Show the draft registration preview pane
- **/
-RegistrationManager.prototype.createDraftModal = function(selected) {
-    var self = this;
-    if (!self.selectedSchema()){
-        self.selectedSchema(self.schemas()[0]);
-    }
-
-    bootbox.dialog({
-        size: 'large',
-        title: 'Register <title>',
-        message: function() {
-            ko.renderTemplate('createDraftRegistrationModal', self, {}, this);
-        },
-        buttons: {
-            cancel: {
-                label: 'Cancel',
-                className: 'btn btn-default'
-            },
-            create: {
-                label: 'Create draft',
-                className: 'btn btn-primary',
-                callback: function(event) {
-                    var selectedSchema = self.selectedSchema();
-                    if (selectedSchema.requiresConsent) {
-                        selectedSchema.askConsent(true).then(function() {
-                            $('#newDraftRegistrationForm').submit();
-                        });
-                    }
-                    else {
-                        $('#newDraftRegistrationForm').submit();
-                    }
-                }
-            }
-        }
-    });
-};
-/**
- * Redirect to the draft edit page
- **/
-RegistrationManager.prototype.editDraft = function(draft) {
-    $osf.block();
-    window.location.assign(draft.urls.edit);
-    $osf.unblock();
-};
-RegistrationManager.prototype.previewDraft = function(draft) {
-    $osf.block();
-    window.location.assign(draft.urls.register_page);
-    $osf.unblock();
-};
-
-
 module.exports = {
     Comment: Comment,
     Question: Question,
@@ -1455,5 +1291,4 @@ module.exports = {
     MetaSchema: MetaSchema,
     Draft: Draft,
     RegistrationEditor: RegistrationEditor,
-    RegistrationManager: RegistrationManager
 };

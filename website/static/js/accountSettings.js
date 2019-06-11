@@ -24,6 +24,8 @@ var UserProfile = oop.defclass({
 
         this.id = ko.observable();
         this.emails = ko.observableArray();
+        this.defaultRegion = ko.observable();
+        this.availableRegions = ko.observableArray();
 
         this.primaryEmail = ko.pureComputed(function () {
             var emails = this.emails();
@@ -106,8 +108,7 @@ var UserProfileClient = oop.defclass({
 
             } else {
                 $osf.growl('Error', 'User profile not updated. Please refresh the page and try ' +
-                'again or contact <a href="mailto: support@osf.io">support@osf.io</a> ' +
-                'if the problem persists.', 'danger');
+                'again or contact ' + $osf.osfSupportLink() + ' if the problem persists.', 'danger');
             }
 
             Raven.captureMessage('Error fetching user profile', {
@@ -151,6 +152,8 @@ var UserProfileClient = oop.defclass({
         }
 
         profile.id(data.profile.id);
+        profile.defaultRegion(data.profile.default_region);
+        profile.availableRegions(data.profile.available_regions);
         profile.emails(
             ko.utils.arrayMap(data.profile.emails, function (emailData){
                 var email = new UserEmail({
@@ -216,7 +219,7 @@ var UserProfileViewModel = oop.extend(ChangeMessageMixin, {
                                 title: 'Confirmation email sent',
                                 message: '<em>' + safeAddr + '</em>' + ' was added to your account.' +
                                 ' You will receive a confirmation email at ' + '<em>' + safeAddr + '</em>.' +
-                                ' Please log out of this account and check your email to confirm this action.',
+                                ' Please click the link in your email to confirm this action. You will be required to enter your password.',
                                 buttons: {
                                     ok: {
                                         label: 'Close',
@@ -231,9 +234,6 @@ var UserProfileViewModel = oop.extend(ChangeMessageMixin, {
         } else {
             this.changeMessage('Email cannot be empty.', 'text-danger');
         }
-        
-        
-        
     },
     resendConfirmation: function(email){
         var self = this;
@@ -302,19 +302,134 @@ var UserProfileViewModel = oop.extend(ChangeMessageMixin, {
     }
 });
 
+var ExternalIdentityViewModel = oop.defclass({
+    constructor: function () {},
+    urls: {
+        'delete': '/api/v1/profile/logins/'
+    },
+    _removeIdentity: function(identity) {
+        var request = $osf.ajaxJSON('PATCH', this.urls.delete, {'data': {'identity': identity}});
+        request.done(function() {
+            $osf.growl('Success', 'You have revoked this connected identity.', 'success');
+            window.location.reload();
+        }.bind(this));
+        request.fail(function(xhr, status, error) {
+            $osf.growl('Error',
+                'Revocation request failed. Please contact ' + $osf.osfSupportLink() + ' if the problem persists.',
+                'danger'
+            );
+            Raven.captureMessage('Error revoking connected identity', {
+                extra: {
+                    url: this.urls.update,
+                    status: status,
+                    error: error
+                }
+            });
+        }.bind(this));
+        return request;
+    },
+    removeIdentity: function (identity) {
+        var self = this;
+        bootbox.confirm({
+            title: 'Remove authorization?',
+            message: 'Are you sure you want to remove this authorization?',
+            callback: function(confirmed) {
+                if (confirmed) {
+                    return self._removeIdentity(identity);
+                }
+            },
+            buttons:{
+                confirm:{
+                    label:'Remove',
+                    className:'btn-danger'
+                }
+            }
+        });
+    }
+});
+
+var UpdateDefaultStorageLocation = oop.defclass({
+    constructor: function() {
+        var self = this;
+        this.client = new UserProfileClient();
+        this.profile = ko.observable(new UserProfile());
+        this.locationSelected = ko.observable();
+        this.locations = ko.observableArray([]);
+
+        this.client.fetch().done(
+            function(profile) {
+                this.profile(profile);
+                // Ensure defaultRegion is at top of region list
+                this.profile().availableRegions.remove(function (item) { return item._id === self.profile().defaultRegion()._id; });
+                this.profile().availableRegions.unshift(this.profile().defaultRegion());
+                this.locations(this.profile().availableRegions());
+                this.locationSelected(this.profile().defaultRegion);
+            }.bind(this)
+        );
+    },
+    urls: {
+        'update': '/api/v1/profile/region/'
+    },
+    updateDefaultStorageLocation: function() {
+        var request = $osf.ajaxJSON('PUT', this.urls.update, {'data': {'region_id': this.locationSelected()._id}});
+        request.done(function() {
+            $osf.growl('Success', 'You have successfully changed your default storage location to <b>' + this.locationSelected().name + '</b>.', 'success');
+        }.bind(this));
+        request.fail(function(xhr, status, error) {
+            $osf.growl('Error',
+                'Your attempt to change your default storage location has failed. Please contact ' + $osf.osfSupportLink() + ' if the problem persists.',
+                'danger'
+            );
+            Raven.captureMessage('Error updating default storage location ', {
+                extra: {
+                    url: this.urls.update,
+                    status: status,
+                    error: error
+                }
+            });
+        }.bind(this));
+        return request;
+    }
+});
 
 var DeactivateAccountViewModel = oop.defclass({
     constructor: function () {
-        this.success = ko.observable(false);
+        this.requestPending = ko.observable(window.contextVars.requestedDeactivation);
     },
     urls: {
-        'update': '/api/v1/profile/deactivate/'
+        'update': '/api/v1/profile/deactivate/',
+        'cancelDeactivate': '/api/v1/profile/cancel_request_deactivation/'
     },
     _requestDeactivation: function() {
         var request = $osf.postJSON(this.urls.update, {});
         request.done(function() {
             $osf.growl('Success', 'An OSF administrator will contact you shortly to confirm your deactivation request.', 'success');
-            this.success(true);
+            this.requestPending(true);
+        }.bind(this));
+        request.fail(function(xhr, status, error) {
+            if (xhr.responseJSON.error_type === 'throttle_error') {
+                $osf.growl('Error', xhr.responseJSON.message_long, 'danger');
+            } else {
+                $osf.growl('Error',
+                    'Deactivation request failed. Please contact ' + $osf.osfSupportLink() + ' if the problem persists.',
+                    'danger'
+                );
+            }
+            Raven.captureMessage('Error requesting account deactivation', {
+                extra: {
+                    url: this.urls.update,
+                    status: status,
+                    error: error
+                }
+            });
+        }.bind(this));
+        return request;
+    },
+    _cancelRequestDeactivation: function() {
+        var request = $osf.postJSON(this.urls.cancelDeactivate, {});
+        request.done(function() {
+            $osf.growl('Success', 'An OSF account is no longer up for review.', 'success');
+            this.requestPending(false);
         }.bind(this));
         request.fail(function(xhr, status, error) {
             if (xhr.responseJSON.error_type === 'throttle_error') {
@@ -327,7 +442,7 @@ var DeactivateAccountViewModel = oop.defclass({
             }
             Raven.captureMessage('Error requesting account deactivation', {
                 extra: {
-                    url: this.urls.update,
+                    url: this.urls.rescind_deactivate,
                     status: status,
                     error: error
                 }
@@ -353,9 +468,26 @@ var DeactivateAccountViewModel = oop.defclass({
                 }
             }
         });
+    },
+    cancel: function () {
+        var self = this;
+        bootbox.confirm({
+            title: 'Cancel deactivation request?',
+            message: 'Are you sure you want to rescind your account deactivation request? This will preserve your account status.',
+            callback: function (confirmed) {
+                if (confirmed) {
+                    return self._cancelRequestDeactivation();
+                }
+            },
+            buttons: {
+                confirm: {
+                    label: 'Cancel Deactivation Request',
+                    className: 'btn-success'
+                }
+            }
+        });
     }
 });
-
 
 var ExportAccountViewModel = oop.defclass({
     constructor: function () {
@@ -375,7 +507,7 @@ var ExportAccountViewModel = oop.defclass({
                 $osf.growl('Error', xhr.responseJSON.message_long, 'danger');
             } else {
                 $osf.growl('Error',
-                    'Export request failed. Please contact <a href="mailto: support@osf.io">support@osf.io</a> if the problem persists.',
+                    'Export request failed. Please contact ' + $osf.osfSupportLink() + ' if the problem persists.',
                     'danger'
                 );
             }
@@ -411,5 +543,7 @@ var ExportAccountViewModel = oop.defclass({
 module.exports = {
     UserProfileViewModel: UserProfileViewModel,
     DeactivateAccountViewModel: DeactivateAccountViewModel,
-    ExportAccountViewModel: ExportAccountViewModel
+    ExportAccountViewModel: ExportAccountViewModel,
+    ExternalIdentityViewModel: ExternalIdentityViewModel,
+    UpdateDefaultStorageLocation: UpdateDefaultStorageLocation
 };

@@ -1,7 +1,7 @@
 from nose import tools as nt
 
 from tests.base import AdminTestCase
-from tests.factories import AuthUserFactory
+from osf_tests.factories import AuthUserFactory
 from tests.test_conferences import ConferenceFactory
 
 from admin.meetings.forms import MeetingForm, MultiEmailField
@@ -11,8 +11,8 @@ data = dict(
     edit='False',
     endpoint='short',
     name='Much longer',
-    info_url='www.something.com',
-    logo_url='osf.io/eg634',
+    info_url='http://something.com',
+    logo_url='http://osf.io/eg634',
     active='True',
     admins='zzz@email.org',
     public_projects='True',
@@ -27,6 +27,7 @@ data = dict(
     mail_subject='Awesome',
     mail_message_body='Nothings',
     mail_attachment='Again',
+    homepage_link_text='Need to add to tests',
 )
 
 
@@ -62,13 +63,13 @@ class TestMeetingForm(AdminTestCase):
 
     def test_clean_admins_okay(self):
         mod_data = dict(data)
-        mod_data.update({'admins': self.user.emails[0]})
+        mod_data.update({'admins': self.user.emails.values_list('address', flat=True).first()})
         form = MeetingForm(data=mod_data)
         nt.assert_true(form.is_valid())
 
     def test_clean_endpoint_raise_not_exist(self):
         mod_data = dict(data)
-        mod_data.update({'admins': self.user.emails[0], 'edit': 'True'})
+        mod_data.update({'admins': self.user.emails.values_list('address', flat=True).first(), 'edit': 'True'})
         form = MeetingForm(data=mod_data)
         nt.assert_in('endpoint', form.errors)
         nt.assert_equal('Meeting not found with this endpoint to update',
@@ -77,7 +78,7 @@ class TestMeetingForm(AdminTestCase):
     def test_clean_endpoint_raise_exists(self):
         conf = ConferenceFactory()
         mod_data = dict(data)
-        mod_data.update({'admins': self.user.emails[0],
+        mod_data.update({'admins': self.user.emails.values_list('address', flat=True).first(),
                          'endpoint': conf.endpoint})
         form = MeetingForm(data=mod_data)
         nt.assert_in('endpoint', form.errors)

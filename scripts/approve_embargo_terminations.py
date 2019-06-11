@@ -8,17 +8,18 @@ Run nightly, this script will approve any embargo termination
 requests for which not all admins have responded within the 48 hour window.
 Makes the Embargoed Node and its components public.
 """
-
-import datetime
-import logging
 import sys
+import logging
 
-from modularodm import Q
+import django
+from django.utils import timezone
+from django.db import transaction
+django.setup()
 
-from framework.transactions.context import TokuTransaction
 from framework.celery_tasks import app as celery_app
 
-from website import models, settings
+from osf import models
+from website import settings
 from website.app import init_app
 
 from scripts import utils as scripts_utils
@@ -27,46 +28,55 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 def get_pending_embargo_termination_requests():
-    auto_approve_time = datetime.datetime.now() - settings.EMBARGO_TERMINATION_PENDING_TIME
+    auto_approve_time = timezone.now() - settings.EMBARGO_TERMINATION_PENDING_TIME
 
-    return models.EmbargoTerminationApproval.find(
-        Q('initiation_date', 'lt', auto_approve_time) &
-        Q('state', 'eq', models.EmbargoTerminationApproval.UNAPPROVED)
+    return models.EmbargoTerminationApproval.objects.filter(
+        initiation_date__lt=auto_approve_time,
+        state=models.EmbargoTerminationApproval.UNAPPROVED
     )
 
 def main():
     pending_embargo_termination_requests = get_pending_embargo_termination_requests()
     count = 0
     for request in pending_embargo_termination_requests:
-        registration = models.Node.find_one(Q('embargo_termination_approval', 'eq', request))
+        try:
+            registration = models.Registration.objects.get(embargo_termination_approval=request)
+        except models.Registration.DoesNotExist:
+            logger.error(
+                'EmbargoTerminationApproval {} is not attached to a registration'.format(request._id)
+            )
+            continue
         if not registration.is_embargoed:
-            logger.warning("Registration {0} associated with this embargo termination request ({0}) is not embargoed.".format(
+            logger.warning('Registration {0} associated with this embargo termination request ({0}) is not embargoed.'.format(
                 registration._id,
                 request._id
             ))
             continue
         embargo = registration.embargo
         if not embargo:
-            logger.warning("No Embargo associated with this embargo termination request ({0}) on Node: {1}".format(
+            logger.warning('No Embargo associated with this embargo termination request ({0}) on Node: {1}'.format(
                 request._id,
                 registration._id
             ))
             continue
         else:
             count += 1
-            logger.info("Ending the Embargo ({0}) of Registration ({1}) early. Making the registration and all of its children public now.".format(embargo._id, registration._id))
+            logger.info('Ending the Embargo ({0}) of Registration ({1}) early. Making the registration and all of its children public now.'.format(embargo._id, registration._id))
             request._on_complete()
             registration.reload()
             assert registration.is_embargoed is False
             assert registration.is_public is True
-    logger.info("Auto-approved {0} of {1} embargo termination requests".format(count, len(pending_embargo_termination_requests)))
+    logger.info('Auto-approved {0} of {1} embargo termination requests'.format(count, len(pending_embargo_termination_requests)))
 
 @celery_app.task(name='scripts.approve_embargo_terminations')
 def run_main(dry_run=True):
     if not dry_run:
         scripts_utils.add_file_logger(logger, __file__)
     init_app(routes=False)
-    with TokuTransaction():
+    with transaction.atomic():
         main()
         if dry_run:
-            raise RuntimeError("Dry run, rolling back transaction")
+            raise RuntimeError('Dry run, rolling back transaction')
+
+if __name__ == '__main__':
+    run_main(dry_run='--dry' in sys.argv)

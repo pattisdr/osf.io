@@ -5,18 +5,16 @@ commands, run ``$ invoke --list``.
 """
 import os
 import sys
-import code
 import json
 import platform
 import subprocess
 import logging
-from time import sleep
 
 import invoke
 from invoke import Collection
 
 from website import settings
-from utils import pip_install, bin_prefix
+from .utils import pip_install, bin_prefix
 
 logging.getLogger('invoke').setLevel(logging.CRITICAL)
 
@@ -24,13 +22,6 @@ logging.getLogger('invoke').setLevel(logging.CRITICAL)
 HERE = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 WHEELHOUSE_PATH = os.environ.get('WHEELHOUSE')
 CONSTRAINTS_PATH = os.path.join(HERE, 'requirements', 'constraints.txt')
-
-try:
-    __import__('rednose')
-except ImportError:
-    TEST_CMD = 'nosetests'
-else:
-    TEST_CMD = 'nosetests --rednose'
 
 ns = Collection()
 
@@ -49,6 +40,7 @@ def task(*args, **kwargs):
         new_task = invoke.task(args[0])
         ns.add_task(new_task)
         return new_task
+
     def decorator(f):
         new_task = invoke.task(f, *args, **kwargs)
         ns.add_task(new_task)
@@ -57,291 +49,75 @@ def task(*args, **kwargs):
 
 
 @task
-def server(ctx, host=None, port=5000, debug=True, live=False, gitlogs=False):
+def server(ctx, host=None, port=5000, debug=True, gitlogs=False):
     """Run the app server."""
-    if gitlogs:
-        git_logs(ctx)
-    from website.app import init_app
-    os.environ['DJANGO_SETTINGS_MODULE'] = 'api.base.settings'
-    app = init_app(set_backends=True, routes=True)
-    settings.API_SERVER_PORT = port
+    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not debug:
+        if os.environ.get('WEB_REMOTE_DEBUG', None):
+            import pydevd
+            # e.g. '127.0.0.1:5678'
+            remote_parts = os.environ.get('WEB_REMOTE_DEBUG').split(':')
+            pydevd.settrace(remote_parts[0], port=int(remote_parts[1]), suspend=False, stdoutToServer=True, stderrToServer=True)
 
-    if live:
-        from livereload import Server
-        server = Server(app.wsgi_app)
-        server.watch(os.path.join(HERE, 'website', 'static', 'public'))
-        server.serve(port=port)
+        if gitlogs:
+            git_logs(ctx)
+        from website.app import init_app
+        os.environ['DJANGO_SETTINGS_MODULE'] = 'api.base.settings'
+        app = init_app(set_backends=True, routes=True)
+        settings.API_SERVER_PORT = port
     else:
-        if settings.SECURE_MODE:
-            context = (settings.OSF_SERVER_CERT, settings.OSF_SERVER_KEY)
-        else:
-            context = None
-        app.run(host=host, port=port, debug=debug, threaded=debug, extra_files=[settings.ASSET_HASH_PATH], ssl_context=context)
+        from framework.flask import app
+
+    context = None
+    if settings.SECURE_MODE:
+        context = (settings.OSF_SERVER_CERT, settings.OSF_SERVER_KEY)
+    app.run(host=host, port=port, debug=debug, threaded=debug, extra_files=[settings.ASSET_HASH_PATH], ssl_context=context)
 
 
 @task
-def git_logs(ctx):
+def git_logs(ctx, branch=None):
     from scripts.meta import gatherer
-    gatherer.main()
+    gatherer.main(branch=branch)
 
 
 @task
-def apiserver(ctx, port=8000, wait=True, host='127.0.0.1'):
+def apiserver(ctx, port=8000, wait=True, autoreload=True, host='127.0.0.1', pty=True):
     """Run the API server."""
     env = os.environ.copy()
     cmd = 'DJANGO_SETTINGS_MODULE=api.base.settings {} manage.py runserver {}:{} --nothreading'\
         .format(sys.executable, host, port)
+    if not autoreload:
+        cmd += ' --noreload'
     if settings.SECURE_MODE:
         cmd = cmd.replace('runserver', 'runsslserver')
         cmd += ' --certificate {} --key {}'.format(settings.OSF_SERVER_CERT, settings.OSF_SERVER_KEY)
 
     if wait:
-        return ctx.run(cmd, echo=True, pty=True)
+        return ctx.run(cmd, echo=True, pty=pty)
     from subprocess import Popen
 
     return Popen(cmd, shell=True, env=env)
 
 
 @task
-def adminserver(ctx, port=8001, host='127.0.0.1'):
+def adminserver(ctx, port=8001, host='127.0.0.1', pty=True):
     """Run the Admin server."""
     env = 'DJANGO_SETTINGS_MODULE="admin.base.settings"'
     cmd = '{} python manage.py runserver {}:{} --nothreading'.format(env, host, port)
     if settings.SECURE_MODE:
         cmd = cmd.replace('runserver', 'runsslserver')
         cmd += ' --certificate {} --key {}'.format(settings.OSF_SERVER_CERT, settings.OSF_SERVER_KEY)
-    ctx.run(cmd, echo=True, pty=True)
-
-
-SHELL_BANNER = """
-{version}
-
-+--------------------------------------------------+
-|cccccccccccccccccccccccccccccccccccccccccccccccccc|
-|ccccccccccccccccccccccOOOOOOOccccccccccccccccccccc|
-|ccccccccccccccccccccOOOOOOOOOOcccccccccccccccccccc|
-|cccccccccccccccccccOOOOOOOOOOOOccccccccccccccccccc|
-|cccccccccOOOOOOOcccOOOOOOOOOOOOcccOOOOOOOccccccccc|
-|cccccccOOOOOOOOOOccOOOOOsssOOOOcOOOOOOOOOOOccccccc|
-|ccccccOOOOOOOOOOOOccOOssssssOOccOOOOOOOOOOOccccccc|
-|ccccccOOOOOOOOOOOOOcOssssssssOcOOOOOOOOOOOOOcccccc|
-|ccccccOOOOOOOOOOOOsOcOssssssOOOOOOOOOOOOOOOccccccc|
-|cccccccOOOOOOOOOOOssccOOOOOOcOssOOOOOOOOOOcccccccc|
-|cccccccccOOOOOOOsssOccccccccccOssOOOOOOOcccccccccc|
-|cccccOOOccccOOssssOccccccccccccOssssOccccOOOcccccc|
-|ccOOOOOOOOOOOOOccccccccccccccccccccOOOOOOOOOOOOccc|
-|cOOOOOOOOssssssOcccccccccccccccccOOssssssOOOOOOOOc|
-|cOOOOOOOssssssssOccccccccccccccccOsssssssOOOOOOOOc|
-|cOOOOOOOOsssssssOccccccccccccccccOsssssssOOOOOOOOc|
-|cOOOOOOOOOssssOOccccccccccccccccccOsssssOOOOOOOOcc|
-|cccOOOOOOOOOOOOOOOccccccccccccccOOOOOOOOOOOOOOOccc|
-|ccccccccccccOOssssOOccccccccccOssssOOOcccccccccccc|
-|ccccccccOOOOOOOOOssOccccOOcccOsssOOOOOOOOccccccccc|
-|cccccccOOOOOOOOOOOsOcOOssssOcOssOOOOOOOOOOOccccccc|
-|ccccccOOOOOOOOOOOOOOOsssssssOcOOOOOOOOOOOOOOcccccc|
-|ccccccOOOOOOOOOOOOOcOssssssssOcOOOOOOOOOOOOOcccccc|
-|ccccccOOOOOOOOOOOOcccOssssssOcccOOOOOOOOOOOccccccc|
-|ccccccccOOOOOOOOOcccOOOOOOOOOOcccOOOOOOOOOcccccccc|
-|ccccccccccOOOOcccccOOOOOOOOOOOcccccOOOOccccccccccc|
-|ccccccccccccccccccccOOOOOOOOOOcccccccccccccccccccc|
-|cccccccccccccccccccccOOOOOOOOOcccccccccccccccccccc|
-|cccccccccccccccccccccccOOOOccccccccccccccccccccccc|
-|cccccccccccccccccccccccccccccccccccccccccccccccccc|
-+--------------------------------------------------+
-
-Welcome to the OSF Python Shell. Happy hacking!
-
-{transaction}
-Available variables:
-
-{context}
-"""
-
-TRANSACTION_WARNING = """
-*** TRANSACTION AUTOMATICALLY STARTED ***
-
-To persist changes run 'commit()'.
-Keep in mind that changing documents will lock them.
-
-This feature can be disabled with the '--no-transaction' flag.
-
-"""
-
-
-def make_shell_context(auto_transact=True):
-    from modularodm import Q
-    from framework.auth import User, Auth
-    from framework.mongo import database
-    from website.app import init_app
-    from website.project.model import Node
-    from website import models  # all models
-    from website import settings
-    import requests
-    from framework.transactions import commands
-    from framework.transactions import context as tcontext
-    app = init_app()
-
-    def commit():
-        commands.commit()
-        print('Transaction committed.')
-        if auto_transact:
-            commands.begin()
-            print('New transaction opened.')
-
-    def rollback():
-        commands.rollback()
-        print('Transaction rolled back.')
-        if auto_transact:
-            commands.begin()
-            print('New transaction opened.')
-
-    context = {
-        'transaction': tcontext.TokuTransaction,
-        'start_transaction': commands.begin,
-        'commit': commit,
-        'rollback': rollback,
-        'app': app,
-        'db': database,
-        'User': User,
-        'Auth': Auth,
-        'Node': Node,
-        'Q': Q,
-        'models': models,
-        'run_tests': test,
-        'rget': requests.get,
-        'rpost': requests.post,
-        'rdelete': requests.delete,
-        'rput': requests.put,
-        'settings': settings,
-    }
-    try:  # Add a fake factory for generating fake names, emails, etc.
-        from faker import Factory
-        fake = Factory.create()
-        context['fake'] = fake
-    except ImportError:
-        pass
-    if auto_transact:
-        commands.begin()
-    return context
-
-
-def format_context(context):
-    lines = []
-    for name, obj in context.items():
-        line = '{name}: {obj!r}'.format(**locals())
-        lines.append(line)
-    return '\n'.join(lines)
-
-
-# Shell command adapted from Flask-Script. See NOTICE for license info.
-@task
-def shell(ctx, transaction=True):
-    context = make_shell_context(auto_transact=transaction)
-    banner = SHELL_BANNER.format(version=sys.version,
-        context=format_context(context),
-        transaction=TRANSACTION_WARNING if transaction else ''
-    )
-    try:
-        try:
-            # 0.10.x
-            from IPython.Shell import IPShellEmbed
-            ipshell = IPShellEmbed(banner=banner)
-            ipshell(global_ns={}, local_ns=context)
-        except ImportError:
-            # 0.12+
-            from IPython import embed
-            embed(banner1=banner, user_ns=context)
-        return
-    except ImportError:
-        pass
-    # fallback to basic python shell
-    code.interact(banner, local=context)
-    return
-
-
-@task(aliases=['mongo'])
-def mongoserver(ctx, daemon=False, config=None):
-    """Run the mongod process.
-    """
-    if not config:
-        platform_configs = {
-            'darwin': '/usr/local/etc/tokumx.conf',  # default for homebrew install
-            'linux': '/etc/tokumx.conf',
-        }
-        platform = str(sys.platform).lower()
-        config = platform_configs.get(platform)
-    port = settings.DB_PORT
-    cmd = 'mongod --port {0}'.format(port)
-    if config:
-        cmd += ' --config {0}'.format(config)
-    if daemon:
-        cmd += ' --fork'
-    ctx.run(cmd, echo=True)
-
-
-@task(aliases=['mongoshell'])
-def mongoclient(ctx):
-    """Run the mongo shell for the OSF database."""
-    db = settings.DB_NAME
-    port = settings.DB_PORT
-    ctx.run('mongo {db} --port {port}'.format(db=db, port=port), pty=True)
-
+    ctx.run(cmd, echo=True, pty=pty)
 
 @task
-def mongodump(ctx, path):
-    """Back up the contents of the running OSF database"""
-    db = settings.DB_NAME
-    port = settings.DB_PORT
-
-    cmd = 'mongodump --db {db} --port {port} --out {path}'.format(
-        db=db,
-        port=port,
-        path=path,
-        pty=True)
-
-    if settings.DB_USER:
-        cmd += ' --username {0}'.format(settings.DB_USER)
-    if settings.DB_PASS:
-        cmd += ' --password {0}'.format(settings.DB_PASS)
-
-    ctx.run(cmd, echo=True)
-
-    print()
-    print('To restore from the dumped database, run `invoke mongorestore {0}`'.format(
-        os.path.join(path, settings.DB_NAME)))
-
-
-@task
-def mongorestore(ctx, path, drop=False):
-    """Restores the running OSF database with the contents of the database at
-    the location given its argument.
-
-    By default, the contents of the specified database are added to
-    the existing database. The `--drop` option will cause the existing database
-    to be dropped.
-
-    A caveat: if you `invoke mongodump {path}`, you must restore with
-    `invoke mongorestore {path}/{settings.DB_NAME}, as that's where the
-    database dump will be stored.
-    """
-    db = settings.DB_NAME
-    port = settings.DB_PORT
-
-    cmd = 'mongorestore --db {db} --port {port}'.format(
-        db=db,
-        port=port,
-        pty=True)
-
-    if settings.DB_USER:
-        cmd += ' --username {0}'.format(settings.DB_USER)
-    if settings.DB_PASS:
-        cmd += ' --password {0}'.format(settings.DB_PASS)
-
-    if drop:
-        cmd += ' --drop'
-
-    cmd += ' ' + path
-    ctx.run(cmd, echo=True)
+def shell(ctx, transaction=True, print_sql=False, notebook=False):
+    cmd = 'DJANGO_SETTINGS_MODULE="api.base.settings" python manage.py osf_shell'
+    if print_sql:
+        cmd += ' --print-sql'
+    if notebook:
+        cmd += ' --notebook'
+    if not transaction:
+        cmd += ' --no-transaction'
+    return ctx.run(cmd, pty=True, echo=True)
 
 
 @task
@@ -364,66 +140,73 @@ def sharejs(ctx, host=None, port=None, db_url=None, cors_allow_origin=None):
 
 
 @task(aliases=['celery'])
-def celery_worker(ctx, level='debug', hostname=None, beat=False):
+def celery_worker(ctx, level='debug', hostname=None, beat=False, queues=None, concurrency=None, max_tasks_per_child=None):
     """Run the Celery process."""
-    cmd = 'celery worker -A framework.celery_tasks -l {0}'.format(level)
+    os.environ['DJANGO_SETTINGS_MODULE'] = 'api.base.settings'
+    cmd = 'celery worker -A framework.celery_tasks -Ofair -l {0}'.format(level)
     if hostname:
         cmd = cmd + ' --hostname={}'.format(hostname)
     # beat sets up a cron like scheduler, refer to website/settings
     if beat:
         cmd = cmd + ' --beat'
+    if queues:
+        cmd = cmd + ' --queues={}'.format(queues)
+    if concurrency:
+        cmd = cmd + ' --concurrency={}'.format(concurrency)
+    if max_tasks_per_child:
+        cmd = cmd + ' --maxtasksperchild={}'.format(max_tasks_per_child)
     ctx.run(bin_prefix(cmd), pty=True)
 
 
 @task(aliases=['beat'])
 def celery_beat(ctx, level='debug', schedule=None):
     """Run the Celery process."""
+    os.environ['DJANGO_SETTINGS_MODULE'] = 'api.base.settings'
     # beat sets up a cron like scheduler, refer to website/settings
     cmd = 'celery beat -A framework.celery_tasks -l {0} --pidfile='.format(level)
     if schedule:
         cmd = cmd + ' --schedule={}'.format(schedule)
     ctx.run(bin_prefix(cmd), pty=True)
 
-
 @task
-def rabbitmq(ctx):
-    """Start a local rabbitmq server.
-
-    NOTE: this is for development only. The production environment should start
-    the server as a daemon.
-    """
-    ctx.run('rabbitmq-server', pty=True)
-
-
-@task(aliases=['elastic'])
-def elasticsearch(ctx):
-    """Start a local elasticsearch server
-
-    NOTE: Requires that elasticsearch is installed. See README for instructions
-    """
-    import platform
-    if platform.linux_distribution()[0] == 'Ubuntu':
-        ctx.run('sudo service elasticsearch start')
-    elif platform.system() == 'Darwin':  # Mac OSX
-        ctx.run('elasticsearch')
-    else:
-        print('Your system is not recognized, you will have to start elasticsearch manually')
-
-@task
-def migrate_search(ctx, delete=False, index=settings.ELASTIC_INDEX):
+def migrate_search(ctx, delete=True, remove=False, index=settings.ELASTIC_INDEX):
     """Migrate the search-enabled models."""
+    from website.app import init_app
+    init_app(routes=False, set_backends=False)
     from website.search_migration.migrate import migrate
-    migrate(delete, index=index)
 
+    # NOTE: Silence the warning:
+    # "InsecureRequestWarning: Unverified HTTPS request is being made. Adding certificate verification is strongly advised."
+    SILENT_LOGGERS = ['py.warnings']
+    for logger in SILENT_LOGGERS:
+        logging.getLogger(logger).setLevel(logging.ERROR)
+
+    migrate(delete, remove=remove, index=index)
 
 @task
 def rebuild_search(ctx):
     """Delete and recreate the index for elasticsearch"""
-    ctx.run('curl -s -XDELETE {uri}/{index}*'.format(uri=settings.ELASTIC_URI,
-                                             index=settings.ELASTIC_INDEX))
-    ctx.run('curl -s -XPUT {uri}/{index}'.format(uri=settings.ELASTIC_URI,
-                                          index=settings.ELASTIC_INDEX))
-    migrate_search(ctx)
+    from website.app import init_app
+    import requests
+    from website import settings
+
+    init_app(routes=False, set_backends=True)
+    if not settings.ELASTIC_URI.startswith('http'):
+        protocol = 'http://' if settings.DEBUG_MODE else 'https://'
+    else:
+        protocol = ''
+    url = '{protocol}{uri}/{index}'.format(
+        protocol=protocol,
+        uri=settings.ELASTIC_URI.rstrip('/'),
+        index=settings.ELASTIC_INDEX,
+    )
+    print('Deleting index {}'.format(settings.ELASTIC_INDEX))
+    print('----- DELETE {}*'.format(url))
+    requests.delete(url + '*')
+    print('Creating index {}'.format(settings.ELASTIC_INDEX))
+    print('----- PUT {}'.format(url))
+    requests.put(url)
+    migrate_search(ctx, delete=False)
 
 
 @task
@@ -434,38 +217,31 @@ def mailserver(ctx, port=1025):
 
 
 @task
-def jshint(ctx):
-    """Run JSHint syntax check"""
-    js_folder = os.path.join(HERE, 'website', 'static', 'js')
-    cmd = 'jshint {}'.format(js_folder)
-    ctx.run(cmd, echo=True)
-
-
-@task(aliases=['flake8'])
-def flake(ctx):
-    ctx.run('flake8 .', echo=True)
+def syntax(ctx):
+    """Use pre-commit to run formatters and linters."""
+    ctx.run('pre-commit run --all-files --show-diff-on-failure', echo=True)
 
 
 @task(aliases=['req'])
-def requirements(ctx, base=False, addons=False, release=False, dev=False, metrics=False, quick=False):
+def requirements(ctx, base=False, addons=False, release=False, dev=False, all=False):
     """Install python dependencies.
 
     Examples:
         inv requirements
-        inv requirements --quick
+        inv requirements --all
 
-    Quick requirements are, in order, addons, dev and the base requirements. You should be able to use --quick for
-    day to day development.
+    You should use --all for updating your developement environment.
+    --all will install (in order): addons, dev and the base requirements.
 
-    By default, base requirements will run. However, if any set of addons, release, dev, or metrics are chosen, base
+    By default, base requirements will run. However, if any set of addons, release, or dev are chosen, base
     will have to be mentioned explicitly in order to run. This is to remain compatible with previous usages. Release
-    requirements will prevent dev, metrics, and base from running.
+    requirements will prevent dev, and base from running.
     """
-    if quick:
+    if all:
         base = True
         addons = True
         dev = True
-    if not(addons or dev or metrics):
+    if not(addons or dev):
         base = True
     if release or addons:
         addon_requirements(ctx)
@@ -483,135 +259,240 @@ def requirements(ctx, base=False, addons=False, release=False, dev=False, metric
                 pip_install(req_file, constraints_file=CONSTRAINTS_PATH),
                 echo=True
             )
-        if metrics:  # then dev requirements
-            req_file = os.path.join(HERE, 'requirements', 'metrics.txt')
-            ctx.run(
-                pip_install(req_file, constraints_file=CONSTRAINTS_PATH),
-                echo=True
-            )
+
         if base:  # then base requirements
             req_file = os.path.join(HERE, 'requirements.txt')
             ctx.run(
                 pip_install(req_file, constraints_file=CONSTRAINTS_PATH),
                 echo=True
             )
+    # fix URITemplate name conflict h/t @github
+    ctx.run('pip uninstall uritemplate.py --yes || true')
+    ctx.run('pip install --no-cache-dir uritemplate.py==0.3.0')
 
 
 @task
-def test_module(ctx, module=None, verbosity=2):
+def test_module(ctx, module=None, numprocesses=None, nocapture=False, params=None, coverage=False):
     """Helper for running tests.
     """
-    # Allow selecting specific submodule
-    module_fmt = ' '.join(module) if isinstance(module, list) else module
-    args = ' --verbosity={0} -s {1}'.format(verbosity, module_fmt)
-    # Use pty so the process buffers "correctly"
-    ctx.run(bin_prefix(TEST_CMD) + args, pty=True)
+    os.environ['DJANGO_SETTINGS_MODULE'] = 'osf_tests.settings'
+    import pytest
+    if not numprocesses:
+        from multiprocessing import cpu_count
+        numprocesses = cpu_count()
+    numprocesses = int(numprocesses)
+    # NOTE: Subprocess to compensate for lack of thread safety in the httpretty module.
+    # https://github.com/gabrielfalcao/HTTPretty/issues/209#issue-54090252
+    args = []
+    if coverage:
+        args.extend([
+            '--cov-report', 'term-missing',
+            '--cov', 'admin',
+            '--cov', 'addons',
+            '--cov', 'api',
+            '--cov', 'framework',
+            '--cov', 'osf',
+            '--cov', 'website',
+        ])
+    if not nocapture:
+        args += ['-s']
+    if numprocesses > 1:
+        args += ['-n {}'.format(numprocesses), '--max-slave-restart=0']
+    modules = [module] if isinstance(module, basestring) else module
+    args.extend(modules)
+    if params:
+        params = [params] if isinstance(params, basestring) else params
+        args.extend(params)
+    retcode = pytest.main(args)
+    sys.exit(retcode)
+
+
+OSF_TESTS = [
+    'osf_tests',
+]
+
+WEBSITE_TESTS = [
+    'tests',
+]
+
+API_TESTS1 = [
+    'api_tests/identifiers',
+    'api_tests/institutions',
+    'api_tests/licenses',
+    'api_tests/logs',
+    'api_tests/schemas',
+    'api_tests/providers',
+    'api_tests/preprints',
+    'api_tests/registrations',
+    'api_tests/users',
+]
+API_TESTS2 = [
+    'api_tests/actions',
+    'api_tests/chronos',
+    'api_tests/meetings',
+    'api_tests/metrics',
+    'api_tests/nodes',
+    'api_tests/requests',
+    'api_tests/subscriptions',
+    'api_tests/waffle',
+    'api_tests/wb',
+]
+API_TESTS3 = [
+    'api_tests/addons_tests',
+    'api_tests/alerts',
+    'api_tests/applications',
+    'api_tests/banners',
+    'api_tests/base',
+    'api_tests/collections',
+    'api_tests/comments',
+    'api_tests/crossref',
+    'api_tests/files',
+    'api_tests/guids',
+    'api_tests/reviews',
+    'api_tests/regions',
+    'api_tests/search',
+    'api_tests/scopes',
+    'api_tests/taxonomies',
+    'api_tests/test',
+    'api_tests/tokens',
+    'api_tests/view_only_links',
+    'api_tests/wikis',
+]
+ADDON_TESTS = [
+    'addons',
+]
+ADMIN_TESTS = [
+    'admin_tests',
+]
 
 
 @task
-def test_osf(ctx):
+def test_osf(ctx, numprocesses=None, coverage=False):
     """Run the OSF test suite."""
-    test_module(ctx, module='tests/')
-
+    print('Testing modules "{}"'.format(OSF_TESTS))
+    test_module(ctx, module=OSF_TESTS, numprocesses=numprocesses, coverage=coverage)
 
 @task
-def test_api(ctx):
+def test_website(ctx, numprocesses=None, coverage=False):
+    """Run the old test suite."""
+    print('Testing modules "{}"'.format(WEBSITE_TESTS))
+    test_module(ctx, module=WEBSITE_TESTS, numprocesses=numprocesses, coverage=coverage)
+
+@task
+def test_api1(ctx, numprocesses=None, coverage=False):
     """Run the API test suite."""
-    test_module(ctx, module='api_tests/')
+    print('Testing modules "{}"'.format(API_TESTS1 + ADMIN_TESTS))
+    test_module(ctx, module=API_TESTS1 + ADMIN_TESTS, numprocesses=numprocesses, coverage=coverage)
 
 
 @task
-def test_admin(ctx):
+def test_api2(ctx, numprocesses=None, coverage=False):
+    """Run the API test suite."""
+    print('Testing modules "{}"'.format(API_TESTS2))
+    test_module(ctx, module=API_TESTS2, numprocesses=numprocesses, coverage=coverage)
+
+
+@task
+def test_api3(ctx, numprocesses=None, coverage=False):
+    """Run the API test suite."""
+    print('Testing modules "{}"'.format(API_TESTS3 + OSF_TESTS))
+    # NOTE: There may be some concurrency issues with ES
+    test_module(ctx, module=API_TESTS3 + OSF_TESTS, numprocesses=numprocesses, coverage=coverage)
+
+
+@task
+def test_admin(ctx, numprocesses=None, coverage=False):
     """Run the Admin test suite."""
-    # test_module(ctx, module="admin_tests/")
-    module = 'admin_tests/'
-    module_fmt = ' '.join(module) if isinstance(module, list) else module
-    admin_tasks.manage(ctx, 'test {}'.format(module_fmt))
+    print('Testing module "admin_tests"')
+    test_module(ctx, module=ADMIN_TESTS, numprocesses=numprocesses, coverage=coverage)
 
 
 @task
-def test_varnish(ctx):
-    """Run the Varnish test suite."""
-    proc = apiserver(ctx, wait=False)
-    sleep(5)
-    test_module(ctx, module='api/caching/tests/test_caching.py')
-    proc.kill()
-
-
-@task
-def test_addons(ctx):
+def test_addons(ctx, numprocesses=None, coverage=False):
     """Run all the tests in the addons directory.
     """
-    modules = []
-    for addon in settings.ADDONS_REQUESTED:
-        module = os.path.join(settings.BASE_PATH, 'addons', addon)
-        modules.append(module)
-    test_module(ctx, module=modules)
+    print('Testing modules "{}"'.format(ADDON_TESTS))
+    test_module(ctx, module=ADDON_TESTS, numprocesses=numprocesses, coverage=coverage)
 
 
 @task
-def test(ctx, all=False, syntax=False):
+def test(ctx, all=False, lint=False):
     """
     Run unit tests: OSF (always), plus addons and syntax checks (optional)
     """
-    if syntax:
-        flake(ctx)
-        jshint(ctx)
+    if lint:
+        syntax(ctx)
 
-    test_osf(ctx)
-    test_api(ctx)
-    test_admin(ctx)
+    test_website(ctx)  # /tests
+    test_api1(ctx)
+    test_api2(ctx)
+    test_api3(ctx)  # also /osf_tests
 
     if all:
         test_addons(ctx)
-        karma(ctx, single=True, browsers='PhantomJS')
+        # TODO: Enable admin tests
+        test_admin(ctx)
+        karma(ctx)
+
+@task
+def travis_setup(ctx):
+    ctx.run('npm install -g bower', echo=True)
+
+    with open('package.json', 'r') as fobj:
+        package_json = json.load(fobj)
+        ctx.run('npm install @centerforopenscience/list-of-licenses@{}'.format(package_json['dependencies']['@centerforopenscience/list-of-licenses']), echo=True)
+
+    with open('bower.json', 'r') as fobj:
+        bower_json = json.load(fobj)
+        ctx.run('bower install {}'.format(bower_json['dependencies']['styles']), echo=True)
+
+@task
+def test_travis_addons(ctx, numprocesses=None, coverage=False):
+    """
+    Run half of the tests to help travis go faster.
+    """
+    travis_setup(ctx)
+    syntax(ctx)
+    test_addons(ctx, numprocesses=numprocesses, coverage=coverage)
+
+@task
+def test_travis_website(ctx, numprocesses=None, coverage=False):
+    """
+    Run other half of the tests to help travis go faster.
+    """
+    travis_setup(ctx)
+    test_website(ctx, numprocesses=numprocesses, coverage=coverage)
 
 
 @task
-def test_travis_osf(ctx):
-    """
-    Run half of the tests to help travis go faster
-    """
-    flake(ctx)
-    jshint(ctx)
-    test_osf(ctx)
-
-@task
-def test_travis_else(ctx):
-    """
-    Run other half of the tests to help travis go faster
-    """
-    test_addons(ctx)
-    test_api(ctx)
-    test_admin(ctx)
-    karma(ctx, single=True, browsers='PhantomJS')
+def test_travis_api1_and_js(ctx, numprocesses=None, coverage=False):
+    # TODO: Uncomment when https://github.com/travis-ci/travis-ci/issues/8836 is resolved
+    # karma(ctx)
+    travis_setup(ctx)
+    test_api1(ctx, numprocesses=numprocesses, coverage=coverage)
 
 
 @task
-def test_travis_varnish(ctx):
-    test_varnish(ctx)
+def test_travis_api2(ctx, numprocesses=None, coverage=False):
+    travis_setup(ctx)
+    test_api2(ctx, numprocesses=numprocesses, coverage=coverage)
 
 
 @task
-def karma(ctx, single=False, sauce=False, browsers=None):
+def test_travis_api3_and_osf(ctx, numprocesses=None, coverage=False):
+    travis_setup(ctx)
+    test_api3(ctx, numprocesses=numprocesses, coverage=coverage)
+
+@task
+def karma(ctx, travis=False):
     """Run JS tests with Karma. Requires Chrome to be installed."""
-    karma_bin = os.path.join(
-        HERE, 'node_modules', 'karma', 'bin', 'karma'
-    )
-    cmd = '{} start'.format(karma_bin)
-    if sauce:
-        cmd += ' karma.saucelabs.conf.js'
-    if single:
-        cmd += ' --single-run'
-    # Use browsers if specified on the command-line, otherwise default
-    # what's specified in karma.conf.js
-    if browsers:
-        cmd += ' --browsers {}'.format(browsers)
-    ctx.run(cmd, echo=True)
+    if travis:
+        return ctx.run('yarn test-travis', echo=True)
+    ctx.run('yarn test', echo=True)
 
 
 @task
-def wheelhouse(ctx, addons=False, release=False, dev=False, metrics=False):
+def wheelhouse(ctx, addons=False, release=False, dev=False, pty=True):
     """Build wheels for python dependencies.
 
     Examples:
@@ -619,7 +500,6 @@ def wheelhouse(ctx, addons=False, release=False, dev=False, metrics=False):
         inv wheelhouse --dev
         inv wheelhouse --addons
         inv wheelhouse --release
-        inv wheelhouse --metrics
     """
     if release or addons:
         for directory in os.listdir(settings.ADDON_PATH):
@@ -627,18 +507,20 @@ def wheelhouse(ctx, addons=False, release=False, dev=False, metrics=False):
             if os.path.isdir(path):
                 req_file = os.path.join(path, 'requirements.txt')
                 if os.path.exists(req_file):
-                    cmd = 'pip wheel --find-links={} -r {} --wheel-dir={}'.format(WHEELHOUSE_PATH, req_file, WHEELHOUSE_PATH)
-                    ctx.run(cmd, pty=True)
+                    cmd = 'pip wheel --find-links={} -r {} --wheel-dir={} -c {}'.format(
+                        WHEELHOUSE_PATH, req_file, WHEELHOUSE_PATH, CONSTRAINTS_PATH,
+                    )
+                    ctx.run(cmd, pty=pty)
     if release:
         req_file = os.path.join(HERE, 'requirements', 'release.txt')
     elif dev:
         req_file = os.path.join(HERE, 'requirements', 'dev.txt')
-    elif metrics:
-        req_file = os.path.join(HERE, 'requirements', 'metrics.txt')
     else:
         req_file = os.path.join(HERE, 'requirements.txt')
-    cmd = 'pip wheel --find-links={} -r {} --wheel-dir={}'.format(WHEELHOUSE_PATH, req_file, WHEELHOUSE_PATH)
-    ctx.run(cmd, pty=True)
+    cmd = 'pip wheel --find-links={} -r {} --wheel-dir={} -c {}'.format(
+        WHEELHOUSE_PATH, req_file, WHEELHOUSE_PATH, CONSTRAINTS_PATH,
+    )
+    ctx.run(cmd, pty=pty)
 
 
 @task
@@ -656,33 +538,6 @@ def addon_requirements(ctx):
             )
 
     print('Finished installing addon requirements')
-
-
-@task
-def encryption(ctx, owner=None):
-    """Generate GnuPG key.
-
-    For local development:
-    > invoke encryption
-    On Linode:
-    > sudo env/bin/invoke encryption --owner www-data
-
-    """
-    if not settings.USE_GNUPG:
-        print('GnuPG is not enabled. No GnuPG key will be generated.')
-        return
-
-    import gnupg
-    gpg = gnupg.GPG(gnupghome=settings.GNUPG_HOME, gpgbinary=settings.GNUPG_BINARY)
-    keys = gpg.list_keys()
-    if keys:
-        print('Existing GnuPG key found')
-        return
-    print('Generating GnuPG key')
-    input_data = gpg.gen_key_input(name_real='OSF Generated Key')
-    gpg.gen_key(input_data)
-    if owner:
-        ctx.run('sudo chown -R {0} {1}'.format(owner, settings.GNUPG_HOME))
 
 
 @task
@@ -721,49 +576,47 @@ def copy_settings(ctx, addons=False):
         copy_addon_settings(ctx)
 
 
-@task
-def packages(ctx):
-    brew_commands = [
-        'update',
-        'upgrade',
-        'install libxml2',
-        'install libxslt',
-        'install elasticsearch',
-        'install gpg',
-        'install node',
-        'tap tokutek/tokumx',
-        'install tokumx-bin',
-    ]
-    if platform.system() == 'Darwin':
-        print('Running brew commands')
-        for item in brew_commands:
-            command = 'brew {cmd}'.format(cmd=item)
-            ctx.run(command)
-    elif platform.system() == 'Linux':
-        # TODO: Write a script similar to brew bundle for Ubuntu
-        # e.g., run('sudo apt-get install [list of packages]')
-        pass
-
-
 @task(aliases=['bower'])
 def bower_install(ctx):
     print('Installing bower-managed packages')
-    bower_bin = os.path.join(HERE, 'node_modules', 'bower', 'bin', 'bower')
-    ctx.run('{} prune'.format(bower_bin), echo=True)
-    ctx.run('{} install'.format(bower_bin), echo=True)
+    bower_bin = os.path.join(HERE, 'node_modules', '.bin', 'bower')
+    ctx.run('{} prune --allow-root'.format(bower_bin), echo=True)
+    ctx.run('{} install --allow-root'.format(bower_bin), echo=True)
 
 
 @task
-def setup(ctx):
-    """Creates local settings, installs requirements, and generates encryption key"""
-    copy_settings(ctx, addons=True)
-    packages(ctx)
-    requirements(ctx, addons=True, dev=True)
-    encryption(ctx)
-    # Build nodeCategories.json before building assets
-    build_js_config_files(ctx)
-    assets(ctx, dev=True, watch=False)
+def docker_init(ctx):
+    """Initial docker setup"""
+    print('You will be asked for your sudo password to continue...')
+    if platform.system() == 'Darwin':  # Mac OSX
+        ctx.run('sudo ifconfig lo0 alias 192.168.168.167')
+    else:
+        print('Your system is not recognized, you will have to setup docker manually')
 
+def ensure_docker_env_setup(ctx):
+    if hasattr(os.environ, 'DOCKER_ENV_SETUP') and os.environ['DOCKER_ENV_SETUP'] == '1':
+        pass
+    else:
+        os.environ['WEB_REMOTE_DEBUG'] = '192.168.168.167:11000'
+        os.environ['API_REMOTE_DEBUG'] = '192.168.168.167:12000'
+        os.environ['WORKER_REMOTE_DEBUG'] = '192.168.168.167:13000'
+        os.environ['DOCKER_ENV_SETUP'] = '1'
+        docker_init(ctx)
+
+@task
+def docker_requirements(ctx):
+    ensure_docker_env_setup(ctx)
+    ctx.run('docker-compose up requirements requirements_mfr requirements_wb')
+
+@task
+def docker_appservices(ctx):
+    ensure_docker_env_setup(ctx)
+    ctx.run('docker-compose up assets fakecas elasticsearch tokumx postgres')
+
+@task
+def docker_osf(ctx):
+    ensure_docker_env_setup(ctx)
+    ctx.run('docker-compose up mfr wb web api')
 
 @task
 def clear_sessions(ctx, months=1, dry_run=False):
@@ -795,8 +648,7 @@ def hotfix(ctx, name, finish=False, push=False):
     if finish:
         ctx.run('git flow hotfix finish {}'.format(next_patch_version), echo=True, pty=True)
     if push:
-        ctx.run('git push origin master', echo=True)
-        ctx.run('git push --tags', echo=True)
+        ctx.run('git push --follow-tags origin master', echo=True)
         ctx.run('git push origin develop', echo=True)
 
 
@@ -921,15 +773,12 @@ def webpack(ctx, clean=False, watch=False, dev=False, colors=False):
     """Build static assets with webpack."""
     if clean:
         clean_assets(ctx)
-    webpack_bin = os.path.join(HERE, 'node_modules', 'webpack', 'bin', 'webpack.js')
-    args = [webpack_bin]
+    args = ['yarn run webpack-{}'.format('dev' if dev else 'prod')]
     args += ['--progress']
     if watch:
         args += ['--watch']
     if colors:
         args += ['--colors']
-    config_file = 'webpack.dev.config.js' if dev else 'webpack.prod.config.js'
-    args += ['--config {0}'.format(config_file)]
     command = ' '.join(args)
     ctx.run(command, echo=True)
 
@@ -946,10 +795,10 @@ def build_js_config_files(ctx):
 @task()
 def assets(ctx, dev=False, watch=False, colors=False):
     """Install and build static assets."""
-    npm = 'npm install'
+    command = 'yarn install --frozen-lockfile'
     if not dev:
-        npm += ' --production'
-    ctx.run(npm, echo=True)
+        command += ' --production'
+    ctx.run(command, echo=True)
     bower_install(ctx)
     build_js_config_files(ctx)
     # Always set clean=False to prevent possible mistakes
@@ -988,28 +837,33 @@ def usage(ctx):
 ### Maintenance Tasks ###
 
 @task
-def set_maintenance(ctx, start=None, end=None):
-    from website.maintenance import set_maintenance, get_maintenance
-    """Set the time period for the maintenance notice to be displayed.
-    If no start or end values are displayed, default to starting now
-    and ending 24 hours from now. If no timezone info is passed along,
-    everything will be converted to UTC.
+def set_maintenance(ctx, message='', level=1, start=None, end=None):
+    from website.app import setup_django
+    setup_django()
+    from website.maintenance import set_maintenance
+    """Display maintenance notice across OSF applications (incl. preprints, registries, etc.)
 
-    If a given end time results in a start that is after the end, start
-    will be changed to be 24 hours before the end time.
+    start - Start time for the maintenance period
+    end - End time for the mainteance period
+        NOTE: If no start or end values are provided, default to starting now
+        and ending 24 hours from now.
+    message - Message to display. If omitted, will be:
+        "The site will undergo maintenance between <localized start time> and <localized end time>. Thank you
+        for your patience."
+    level - Severity level. Modifies the color of the displayed notice. Must be one of 1 (info), 2 (warning), 3 (danger).
 
     Examples:
-        invoke set_maintenance_state
-        invoke set_maintenance_state --start 2016-03-16T15:41:00-04:00
-        invoke set_maintenance_state --end 2016-03-16T15:41:00-04:00
+        invoke set_maintenance --start 2016-03-16T15:41:00-04:00 --end 2016-03-16T15:42:00-04:00
+        invoke set_maintenance --message 'The OSF is experiencing issues connecting to a 3rd party service' --level 2 --start 2016-03-16T15:41:00-04:00 --end 2016-03-16T15:42:00-04:00
     """
-    set_maintenance(start, end)
-    state = get_maintenance()
-    print('Maintenance notice up for {} to {}.'.format(state['start'], state['end']))
+    state = set_maintenance(message, level, start, end)
+    print('Maintenance notice up {} to {}.'.format(state['start'], state['end']))
 
 
 @task
 def unset_maintenance(ctx):
+    from website.app import setup_django
+    setup_django()
     from website.maintenance import unset_maintenance
     print('Taking down maintenance notice...')
     unset_maintenance()

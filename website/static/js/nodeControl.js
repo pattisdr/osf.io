@@ -1,6 +1,5 @@
 /**
-* Controls the actions in the project header (make public/private, watch button,
-* forking, etc.)
+* Controls the actions in the project header (make public/private, forking, etc.)
 */
 'use strict';
 
@@ -16,6 +15,8 @@ var iconmap = require('js/iconmap');
 var NodeActions = require('js/project.js');
 var NodesPrivacy = require('js/nodesPrivacy').NodesPrivacy;
 
+var RequestAccess = require('js/requestAccess.js');
+
 /**
  * The ProjectViewModel, scoped to the project header.
  * @param {Object} data The parsed project data returned from the project's API url.
@@ -24,7 +25,7 @@ var NodesPrivacy = require('js/nodesPrivacy').NodesPrivacy;
  */
 var ProjectViewModel = function(data, options) {
     var self = this;
-    
+
     self._id = data.node.id;
     self.apiUrl = data.node.api_url;
     self.dateCreated = new $osf.FormattableDate(data.node.date_created);
@@ -34,37 +35,29 @@ var ProjectViewModel = function(data, options) {
     self.doi = ko.observable(data.node.identifiers.doi);
     self.ark = ko.observable(data.node.identifiers.ark);
     self.idCreationInProgress = ko.observable(false);
-    self.watchedCount = ko.observable(data.node.watched_count);
-    self.userIsWatching = ko.observable(data.user.is_watching);
     self.dateRegistered = new $osf.FormattableDate(data.node.registered_date);
+    self.dateRetracted = new $osf.FormattableDate(data.node.date_retracted);
     self.inDashboard = ko.observable(data.node.in_dashboard);
     self.dashboard = data.user.dashboard_id;
     self.userCanEdit = data.user.can_edit;
     self.userPermissions = data.user.permissions;
     self.node = data.node;
-    self.description = ko.observable(data.node.description);
+    self.description = ko.observable(data.node.description ? data.node.description : '');
     self.title = data.node.title;
     self.categoryValue = ko.observable(data.node.category_short);
     self.isRegistration = data.node.is_registration;
     self.user = data.user;
     self.nodeIsPublic = data.node.is_public;
     self.nodeType = data.node.node_type;
+    self.currentUserRequestState = options.currentUserRequestState;
 
+    self.requestAccess = new RequestAccess(options.currentUserRequestState, self._id, self.user);
     self.nodeIsPendingEmbargoTermination = ko.observable(data.node.is_pending_embargo_termination);
     self.makePublicTooltip = ko.computed(function() {
         if(self.nodeIsPendingEmbargoTermination()) {
             return 'A request to make this registration public is pending';
         }
         return null;
-    });
-
-    // WATCH button is removed, functionality is still here in case of future implementation -- CU
-    // The button text to display (e.g. "Watch" if not watching)
-    self.watchButtonDisplay = ko.pureComputed(function() {
-        return self.watchedCount().toString();
-    });
-    self.watchButtonAction = ko.pureComputed(function() {
-        return self.userIsWatching() ? 'Unwatch' : 'Watch';
     });
 
     self.canBeOrganized = ko.pureComputed(function() {
@@ -74,11 +67,7 @@ var ProjectViewModel = function(data, options) {
     // Add icon to title
     self.icon = ko.pureComputed(function() {
         var category = self.categoryValue();
-        if (Object.keys(iconmap.componentIcons).indexOf(category) >=0 ){
-            return iconmap.componentIcons[category];
-        } else {
-            return iconmap.projectIcons[category];
-        }
+        return iconmap.projectComponentIcons[category];
     });
 
     // Editable Title and Description
@@ -108,25 +97,26 @@ var ProjectViewModel = function(data, options) {
         $('#nodeTitleEditable').editable($.extend({}, editableOptions, {
             name: 'title',
             title: 'Edit Title',
-            tpl: '<input type="text" maxlength="200">',
+            tpl: '<input type="text" maxlength="512">',
             validate: function (value) {
                 if ($.trim(value) === '') {
                     return 'Title cannot be blank.';
                 }
-                else if(value.length > 200){
-                    return 'Title cannot exceed 200 characters.';
+                else if(value.length > 512){
+                    return 'Title cannot exceed 512 characters.';
                 }
             }
         }));
 
+        var project_or_component_label = self.categoryValue() === 'project' ? 'project' : 'component';
         $('#nodeDescriptionEditable').editable($.extend({}, editableOptions, {
             name: 'description',
             title: 'Edit Description',
-            emptytext: 'No description',
+            emptytext: 'Add a brief description to your ' + project_or_component_label,
             emptyclass: 'text-muted',
-            value: self.description(),
+            value: $osf.decodeText(self.description()),
             success: function(response, newValue) {
-                newValue = response.newValue; // Update display to reflect changes, eg by sanitizer
+                newValue = $osf.decodeText(response.newValue); // Update display to reflect changes, eg by sanitizer
                 self.description(newValue);
                 return {newValue: newValue};
             }
@@ -148,8 +138,9 @@ var ProjectViewModel = function(data, options) {
                 return {newValue: newValue};
             }
         }));
+    } else {
+      $('#nodeDescriptionEditable').html($osf.linkifyText(self.description()));
     }
-
     /**
      * Add project to the Project Organizer.
      */
@@ -182,46 +173,24 @@ var ProjectViewModel = function(data, options) {
         });
     };
 
-
-    /**
-     * Toggle the watch status for this project.
-     */
-    var watchUpdateInProgress = false;
-    self.toggleWatch = function() {
-        // When there is no watch-update in progress,
-        // send POST request to node's watch API url and update the watch count
-        if(!watchUpdateInProgress) {
-            if (self.userIsWatching()) {
-                self.watchedCount(self.watchedCount() - 1);
-            } else {
-                self.watchedCount(self.watchedCount() + 1);
-            }
-            watchUpdateInProgress = true;
-            $osf.postJSON(
-                self.apiUrl + 'togglewatch/',
-                {}
-            ).done(function (data) {
-                // Update watch count in DOM
-                watchUpdateInProgress = false;
-                self.userIsWatching(data.watched);
-                self.watchedCount(data.watchCount);
-            }).fail(
-                $osf.handleJSONError
-            );
-        }
-    };
-
     self.forkNode = function() {
         NodeActions.forkNode();
     };
 
-    self.hasIdentifiers = ko.pureComputed(function() {
-        return !!(self.doi() && self.ark());
+    self.hasDoi = ko.pureComputed(function() {
+        return !!(self.doi());
+    });
+
+    self.hasArk = ko.pureComputed(function() {
+        return !!(self.ark());
+    });
+
+    self.identifier = ko.pureComputed(function(){
+        return self.hasArk() && self.hasDoi()? 'Identifiers' : 'Identifier';
     });
 
     self.canCreateIdentifiers = ko.pureComputed(function() {
-        return !self.hasIdentifiers() &&
-            self.isRegistration &&
+        return !self.hasDoi() &&
             self.nodeIsPublic &&
             self.userPermissions.indexOf('admin') !== -1;
     });
@@ -237,10 +206,11 @@ var ProjectViewModel = function(data, options) {
     self.askCreateIdentifiers = function() {
         var self = this;
         bootbox.confirm({
-            title: 'Create identifiers',
+            title: 'Create DOI',
             message: '<p class="overflow">' +
-                'Are you sure you want to create a DOI and ARK for this ' +
-                $osf.htmlEscape(self.nodeType) + '?',
+                'Are you sure you want to create a DOI for this ' +
+                $osf.htmlEscape(self.nodeType) + '? A DOI' +
+                ' is persistent and will always resolve to this page.',
             callback: function(confirmed) {
                 if (confirmed) {
                     self.createIdentifiers();
@@ -267,11 +237,10 @@ var ProjectViewModel = function(data, options) {
             self.ark(resp.ark);
         }).fail(function(xhr) {
             var message = 'We could not create the identifier at this time. ' +
-                'The DOI/ARK acquisition service may be down right now. ' +
-                'Please try again soon and/or contact ' +
-                '<a href="mailto: support@osf.io">support@osf.io</a>';
+                'The DOI acquisition service may be down right now. ' +
+                'Please try again soon and/or contact ' + $osf.osfSupportLink();
             $osf.growl('Error', message, 'danger');
-            Raven.captureMessage('Could not create identifiers', {extra: {url: url, status: xhr.status}});
+            Raven.captureMessage('Could not create doi', {extra: {url: url, status: xhr.status}});
         }).always(function() {
             clearTimeout(timeout);
             self.idCreationInProgress(false); // hide loading indicator

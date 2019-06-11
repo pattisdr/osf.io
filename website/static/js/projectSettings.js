@@ -1,13 +1,13 @@
 'use strict';
 
 var $ = require('jquery');
-var bootbox = require('bootbox');  // TODO: Why is this required? Is it? See [#OSF-6100]
 var Raven = require('raven-js');
 var ko = require('knockout');
 var $osf = require('js/osfHelpers');
 var oop = require('js/oop');
 var ChangeMessageMixin = require('js/changeMessage');
 var language = require('js/osfLanguage').projectSettings;
+var NodesDelete = require('js/nodesDelete').NodesDelete;
 
 var ProjectSettings = oop.extend(
     ChangeMessageMixin,
@@ -28,7 +28,7 @@ var ProjectSettings = oop.extend(
             self.categoryOptions = params.categoryOptions;
             self.categoryPlaceholder = params.category;
             self.selectedCategory = ko.observable(params.category);
-            
+
             if (!params.updateUrl) {
                 throw new Error(language.instantiationErrorMessage);
             }
@@ -68,11 +68,13 @@ var ProjectSettings = oop.extend(
                 self.changeMessage(language.updateSuccessMessage, 'text-success');
                 return;
             }
-            var requestPayload = self.serialize();
-            var request = $osf.ajaxJSON('patch',
-                self.updateUrl,
-                { data: requestPayload,
-                isCors: true });
+            var request = $osf.ajaxJSON('PATCH', self.updateUrl, {
+                data: self.serialize(),
+                isCors: true,
+                fields: {
+                    processData: false
+                }
+            });
             request.done(function(response) {
                 self.categoryPlaceholder = response.data.attributes.category;
                 self.titlePlaceholder = response.data.attributes.title;
@@ -85,6 +87,10 @@ var ProjectSettings = oop.extend(
             });
             request.fail(self.updateError.bind(self));
             return request;
+        },
+        setCategory: function(category){
+            var self = this;
+            self.selectedCategory(category);
         },
         /*cancel handler*/
         cancelAll: function() {
@@ -145,12 +151,13 @@ request.fail(function(xhr, textStatus, err) {
  * Pulls a random name from the scientist list to use as confirmation string
  *  Ignores case and whitespace
  */
-var getConfirmationCode = function(nodeType) {
+var getConfirmationCode = function(nodeType, isSupplementalProject) {
+     var preprint_message = '<p class="danger">This ' + nodeType + ' contains supplemental materials for a preprint.';
 
     // It's possible that the XHR request for contributors has not finished before getting to this
     // point; only construct the HTML for the list of contributors if the contribs list is populated
-    var message = '<p>It will no longer be available to other contributors on the project.';
-
+    var message = '<p>It will no longer be available to other contributors on the project.' +
+        (isSupplementalProject ? preprint_message : '');
     $osf.confirmDangerousAction({
         title: 'Are you sure you want to delete this ' + nodeType + '?',
         message: message,

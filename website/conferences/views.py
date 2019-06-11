@@ -2,28 +2,24 @@
 
 import httplib
 import logging
-from datetime import datetime
 
-from modularodm import Q
-from modularodm.exceptions import ModularOdmException
+from django.db import transaction, connection
+from django_bulk_update.helper import bulk_update
+from django.contrib.contenttypes.models import ContentType
 
 from framework.auth import get_or_create_user
 from framework.exceptions import HTTPError
 from framework.flask import redirect
-from framework.transactions.context import TokuTransaction
 from framework.transactions.handlers import no_auto_transaction
-
+from osf import features
+from osf.models import AbstractNode, Node, Conference, Tag, OSFUser
 from website import settings
-from website.models import Node, Tag
-from website.util import web_url_for
-from website.mails import send_mail
-from website.files.models import StoredFileNode
-from website.mails import CONFERENCE_SUBMITTED, CONFERENCE_INACTIVE, CONFERENCE_FAILED
-
 from website.conferences import utils, signals
 from website.conferences.message import ConferenceMessage, ConferenceError
-from website.conferences.model import Conference
-
+from website.ember_osf_web.decorators import ember_flag_is_active
+from website.mails import CONFERENCE_SUBMITTED, CONFERENCE_INACTIVE, CONFERENCE_FAILED
+from website.mails import send_mail
+from website.util import web_url_for
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +48,8 @@ def meeting_hook():
             CONFERENCE_INACTIVE,
             fullname=message.sender_display,
             presentations_url=web_url_for('conference_view', _absolute=True),
+            can_change_preferences=False,
+            logo=settings.OSF_MEETINGS_LOGO,
         )
         raise HTTPError(httplib.NOT_ACCEPTABLE)
 
@@ -69,37 +67,46 @@ def add_poster_by_email(conference, message):
             message.sender_email,
             CONFERENCE_FAILED,
             fullname=message.sender_display,
+            can_change_preferences=False,
+            logo=settings.OSF_MEETINGS_LOGO
         )
 
-    created = []
-
-    with TokuTransaction():
+    with transaction.atomic():
         user, user_created = get_or_create_user(
             message.sender_display,
             message.sender_email,
-            message.is_spam,
+            is_spam=message.is_spam,
         )
         if user_created:
-            created.append(user)
-            user.system_tags.append('osf4m')
+            if utils.is_valid_email(user.fullname):
+                user.fullname = user._id  # Users cannot use an email as their full name
+
+            user.save()  # need to save in order to access m2m fields (e.g. tags)
+            user.add_system_tag('osf4m')
+            user.update_date_last_login()
+            user.save()
+
+            # must save the user first before accessing user._id
             set_password_url = web_url_for(
                 'reset_password_get',
-                verification_key=user.verification_key,
+                uid=user._id,
+                token=user.verification_key_v2['token'],
                 _absolute=True,
             )
-            user.date_last_login = datetime.utcnow()
-            user.save()
         else:
             set_password_url = None
 
-        node, node_created = utils.get_or_create_node(message.subject, user)
-        if node_created:
-            created.append(node)
-            node.system_tags.append('osf4m')
-            node.save()
+        # Always create a new meeting node
+        node = Node.objects.create(
+            title=message.subject,
+            creator=user
+        )
+        node.add_system_tag('osf4m')
+        node.save()
 
         utils.provision_node(conference, message, node, user)
-        utils.record_message(message, created)
+        created_user = user if user_created else None
+        utils.record_message(message, node, created_user)
     # Prevent circular import error
     from framework.auth import signals as auth_signals
     if user_created:
@@ -133,83 +140,154 @@ def add_poster_by_email(conference, message):
         file_url=download_url,
         presentation_type=message.conference_category.lower(),
         is_spam=message.is_spam,
+        can_change_preferences=False,
+        logo=settings.OSF_MEETINGS_LOGO
     )
-    if node_created and user_created:
+    if user_created:
         signals.osf4m_user_created.send(user, conference=conference, node=node)
-
-
-def _render_conference_node(node, idx, conf):
-    try:
-        record = next(
-            x for x in
-            StoredFileNode.find(
-                Q('node', 'eq', node) &
-                Q('is_file', 'eq', True)
-            ).limit(1)
-        ).wrapped()
-        download_count = record.get_download_count()
-
-        download_url = node.web_url_for(
-            'addon_view_or_download_file',
-            path=record.path.strip('/'),
-            provider='osfstorage',
-            action='download',
-            _absolute=True,
-        )
-    except StopIteration:
-        download_url = ''
-        download_count = 0
-
-    author = node.visible_contributors[0]
-    tags = [tag._id for tag in node.tags]
-
-    return {
-        'id': idx,
-        'title': node.title,
-        'nodeUrl': node.url,
-        'author': author.family_name if author.family_name else author.fullname,
-        'authorUrl': node.creator.url,
-        'category': conf.field_names['submission1'] if conf.field_names['submission1'] in node.system_tags else conf.field_names['submission2'],
-        'download': download_count,
-        'downloadUrl': download_url,
-        'dateCreated': node.date_created.isoformat(),
-        'confName': conf.name,
-        'confUrl': web_url_for('conference_results', meeting=conf.endpoint),
-        'tags': ' '.join(tags)
-    }
-
 
 def conference_data(meeting):
     try:
-        conf = Conference.find_one(Q('endpoint', 'iexact', meeting))
-    except ModularOdmException:
+        conf = Conference.objects.get(endpoint__iexact=meeting)
+    except Conference.DoesNotExist:
         raise HTTPError(httplib.NOT_FOUND)
 
-    nodes = Node.find(
-        Q('tags', 'iexact', meeting) &
-        Q('is_public', 'eq', True) &
-        Q('is_deleted', 'eq', False)
-    )
+    return conference_submissions_sql(conf)
 
-    ret = [
-        _render_conference_node(each, idx, conf)
-        for idx, each in enumerate(nodes)
-    ]
-    return ret
+def conference_submissions_sql(conf):
+    """
+    Serializes all meeting submissions to a conference (returns array of dictionaries)
 
+    :param obj conf: Conference object.
+
+    """
+    submission1_name = conf.field_names['submission1']
+    submission2_name = conf.field_names['submission2']
+    conference_url = web_url_for('conference_results', meeting=conf.endpoint)
+    abstract_node_content_type_id = ContentType.objects.get_for_model(AbstractNode).id
+    osf_user_content_type_id = ContentType.objects.get_for_model(OSFUser).id
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT  json_build_object(
+                    'id', ROW_NUMBER() OVER (ORDER BY 1),
+                    'title', osf_abstractnode.title,
+                    'nodeUrl', '/' || GUID._id || '/',
+                    'author', CASE WHEN AUTHOR.family_name != '' THEN AUTHOR.family_name ELSE AUTHOR.fullname END,
+                    'authorUrl', '/' || AUTHOR_GUID._id || '/',
+                    'category', CASE WHEN %s = ANY(TAGS_LIST.tag_list) THEN %s ELSE %s END,
+                    'download', COALESCE(DOWNLOAD_COUNT, 0),
+                    'downloadUrl', COALESCE('/project/' || GUID._id || '/files/osfstorage/' || FILE._id || '/?action=download', ''),
+                    'dateCreated', osf_abstractnode.created,
+                    'confName', %s,
+                    'confUrl', %s,
+                    'tags', array_to_string(TAGS_LIST.tag_list, ' ')
+                )
+            FROM osf_abstractnode
+              INNER JOIN osf_abstractnode_tags ON (osf_abstractnode.id = osf_abstractnode_tags.abstractnode_id)
+              LEFT JOIN LATERAL(
+                SELECT array_agg(osf_tag.name) AS tag_list
+                  FROM osf_tag
+                  INNER JOIN osf_abstractnode_tags ON (osf_tag.id = osf_abstractnode_tags.tag_id)
+                  WHERE (osf_tag.system = FALSE AND osf_abstractnode_tags.abstractnode_id = osf_abstractnode.id)
+                ) AS TAGS_LIST ON TRUE -- Concatenates tag names with space in between
+              LEFT JOIN LATERAL (
+                        SELECT osf_osfuser.*
+                        FROM osf_osfuser
+                          INNER JOIN osf_contributor ON (osf_contributor.user_id = osf_osfuser.id)
+                        WHERE (osf_contributor.node_id = osf_abstractnode.id AND osf_contributor.visible = TRUE)
+                        ORDER BY osf_contributor._order ASC
+                        LIMIT 1
+                        ) AUTHOR ON TRUE  -- Returns first visible contributor
+              LEFT JOIN LATERAL (
+                SELECT osf_guid._id
+                FROM osf_guid
+                WHERE (osf_guid.object_id = osf_abstractnode.id AND osf_guid.content_type_id = %s) -- Content type for AbstractNode
+                ORDER BY osf_guid.created DESC
+                LIMIT 1   -- Returns node guid
+              ) GUID ON TRUE
+              LEFT JOIN LATERAL (
+                SELECT osf_guid._id
+                FROM osf_guid
+                WHERE (osf_guid.object_id = AUTHOR.id AND osf_guid.content_type_id = %s)  -- Content type for OSFUser
+                LIMIT 1
+              ) AUTHOR_GUID ON TRUE   -- Returns author_guid
+              LEFT JOIN LATERAL (
+                SELECT osf_basefilenode.*
+                FROM osf_basefilenode
+                WHERE (osf_basefilenode.type = 'osf.osfstoragefile'
+                       AND osf_basefilenode.provider = 'osfstorage'
+                       AND osf_basefilenode.target_content_type_id = %s -- Content type for AbstractNode
+                       AND osf_basefilenode.target_object_id = osf_abstractnode.id)
+                ORDER BY osf_basefilenode.id ASC
+                LIMIT 1 -- Joins file
+              ) FILE ON TRUE
+              LEFT JOIN LATERAL (
+                SELECT P.total AS DOWNLOAD_COUNT
+                FROM osf_pagecounter AS P
+                WHERE P._id = 'download:' || GUID._id || ':' || FILE._id
+                LIMIT 1
+              ) DOWNLOAD_COUNT ON TRUE
+            -- Get all the nodes for a specific meeting
+            WHERE (osf_abstractnode_tags.tag_id IN
+                   (SELECT U0.id AS Col1
+                    FROM osf_tag U0
+                    WHERE (U0.system = FALSE
+                           AND UPPER(U0.name :: TEXT) = UPPER(%s)
+                           AND U0.system = FALSE))
+                   AND osf_abstractnode.is_deleted = FALSE
+                   AND osf_abstractnode.is_public = TRUE
+                   AND AUTHOR_GUID IS NOT NULL)
+            ORDER BY osf_abstractnode.created DESC;
+
+            """, [
+                submission1_name,
+                submission1_name,
+                submission2_name,
+                conf.name,
+                conference_url,
+                abstract_node_content_type_id,
+                osf_user_content_type_id,
+                abstract_node_content_type_id,
+                conf.endpoint
+            ]
+        )
+        rows = cursor.fetchall()
+        return [row[0] for row in rows]
 
 def redirect_to_meetings(**kwargs):
     return redirect('/meetings/')
 
 
+def serialize_conference(conf):
+    return {
+        'active': conf.active,
+        'admins': list(conf.admins.all().values_list('guids___id', flat=True)),
+        'end_date': conf.end_date,
+        'endpoint': conf.endpoint,
+        'field_names': conf.field_names,
+        'info_url': conf.info_url,
+        'is_meeting': conf.is_meeting,
+        'location': conf.location,
+        'logo_url': conf.logo_url,
+        'name': conf.name,
+        'num_submissions': conf.num_submissions,
+        'poster': conf.poster,
+        'public_projects': conf.public_projects,
+        'start_date': conf.start_date,
+        'talk': conf.talk,
+    }
+
+@ember_flag_is_active(features.EMBER_MEETING_DETAIL)
 def conference_results(meeting):
     """Return the data for the grid view for a conference.
 
     :param str meeting: Endpoint name for a conference.
     """
     try:
-        conf = Conference.find_one(Q('endpoint', 'iexact', meeting))
-    except ModularOdmException:
+        conf = Conference.objects.get(endpoint__iexact=meeting)
+    except Conference.DoesNotExist:
         raise HTTPError(httplib.NOT_FOUND)
 
     data = conference_data(meeting)
@@ -217,10 +295,15 @@ def conference_results(meeting):
     return {
         'data': data,
         'label': meeting,
-        'meeting': conf.to_storage(),
+        'meeting': serialize_conference(conf),
         # Needed in order to use base.mako namespace
         'settings': settings,
     }
+
+
+def redirect_to_conference_results(meeting):
+    return redirect('/meetings/{}'.format(meeting))
+
 
 def conference_submissions(**kwargs):
     """Return data for all OSF4M submissions.
@@ -228,36 +311,25 @@ def conference_submissions(**kwargs):
     The total number of submissions for each meeting is calculated and cached
     in the Conference.num_submissions field.
     """
-    submissions = []
+    conferences = Conference.objects.filter(is_meeting=True)
     #  TODO: Revisit this loop, there has to be a way to optimize it
-    for conf in Conference.find():
+    for conf in conferences:
         # For efficiency, we filter by tag first, then node
         # instead of doing a single Node query
-        projects = set()
-
-        tags = Tag.find(Q('lower', 'eq', conf.endpoint.lower())).get_keys()
-        nodes = Node.find(
-            Q('tags', 'in', tags) &
-            Q('is_public', 'eq', True) &
-            Q('is_deleted', 'ne', True)
-        )
-        projects.update(list(nodes))
-
-        for idx, node in enumerate(projects):
-            submissions.append(_render_conference_node(node, idx, conf))
-        num_submissions = len(projects)
+        tags = Tag.objects.filter(system=False, name__iexact=conf.endpoint).values_list('pk', flat=True)
+        nodes = AbstractNode.objects.filter(tags__in=tags, is_public=True, is_deleted=False)
         # Cache the number of submissions
-        conf.num_submissions = num_submissions
-        conf.save()
-        if num_submissions < settings.CONFERENCE_MIN_COUNT:
-            continue
-    submissions.sort(key=lambda submission: submission['dateCreated'], reverse=True)
-    return {'submissions': submissions}
+        conf.num_submissions = nodes.count()
+    bulk_update(conferences, update_fields=['num_submissions'])
+    return {'success': True}
 
+@ember_flag_is_active(features.EMBER_MEETINGS)
 def conference_view(**kwargs):
     meetings = []
-    for conf in Conference.find():
+    for conf in Conference.objects.all():
         if conf.num_submissions < settings.CONFERENCE_MIN_COUNT:
+            continue
+        if (hasattr(conf, 'is_meeting') and (conf.is_meeting is False)):
             continue
         meetings.append({
             'name': conf.name,

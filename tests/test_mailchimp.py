@@ -1,13 +1,16 @@
 # -*- coding: utf-8 -*-
 import mock
+import pytest
 from website import mailchimp_utils
 from tests.base import OsfTestCase
 from nose.tools import *  # noqa; PEP8 asserts
-from tests.factories import UserFactory
+from osf_tests.factories import UserFactory
 import mailchimp
 
 from framework.celery_tasks import handlers
 
+
+@pytest.mark.enable_enqueue_task
 class TestMailChimpHelpers(OsfTestCase):
 
     def setUp(self, *args, **kwargs):
@@ -66,6 +69,7 @@ class TestMailChimpHelpers(OsfTestCase):
         mock_client.lists.subscribe.side_effect = mailchimp.ValidationError
         mailchimp_utils.subscribe_mailchimp(list_name, user._id)
         handlers.celery_teardown_request()
+        user.reload()
         assert_false(user.mailchimp_mailing_lists[list_name])
 
     @mock.patch('website.mailchimp_utils.get_mailchimp_api')

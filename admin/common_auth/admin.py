@@ -2,47 +2,45 @@ from __future__ import absolute_import
 
 from django.contrib import admin
 from django.contrib.admin.models import DELETION
-from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import Permission
 from django.core.urlresolvers import reverse
 from django.utils.html import escape
 
-from admin.common_auth.logs import OSFLogEntry
-from admin.common_auth.forms import UserRegistrationForm
-from admin.common_auth.models import MyUser
+from osf.models import AdminLogEntry
+from osf.models import AdminProfile
 
 
 class PermissionAdmin(admin.ModelAdmin):
     search_fields = ['name', 'codename']
 
+class AdminAdmin(admin.ModelAdmin):
 
-class CustomUserAdmin(UserAdmin):
-    add_form = UserRegistrationForm
-    list_display = ['email', 'first_name', 'last_name', 'is_active', 'confirmed', 'osf_id']
-    fieldsets = (
-        (None, {'fields': ('email', 'password',)}),
-        ('Personal info', {'fields': ('first_name', 'last_name', 'email', 'date_joined', 'last_login', 'osf_id')}),
-        ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions',)}),
-    )
-    add_fieldsets = (
-        (None, {'fields':
-                ('email', 'first_name', 'last_name', 'password1', 'password2', 'osf_id'),
-                }),)
-    search_fields = ('email', 'first_name', 'last_name',)
-    ordering = ('last_name', 'first_name',)
-    actions = ['send_email_invitation']
-    readonly_fields = ('date_joined',)
+    def permission_groups(self):
+        perm_groups = ', '.join(
+            [perm.name for perm in self.user.groups.all()]) if self.user.groups.all() else 'No permission groups'
+        return u'<a href="/account/register/?id={id}">{groups}</a>'.format(id=self.user._id, groups=perm_groups)
+
+    def user_name(self):
+        return self.user.username
+
+    def _id(self):
+        return self.user._id
+
+    permission_groups.allow_tags = True
+    permission_groups.short_description = 'Permission Groups'
+
+    list_display = [user_name, _id, permission_groups]
 
 
-admin.site.register(MyUser, CustomUserAdmin)
 admin.site.register(Permission, PermissionAdmin)
+admin.site.register(AdminProfile, AdminAdmin)
 
 
 class LogEntryAdmin(admin.ModelAdmin):
 
     date_hierarchy = 'action_time'
 
-    readonly_fields = [f.name for f in OSFLogEntry._meta.get_fields()]
+    readonly_fields = [f.name for f in AdminLogEntry._meta.get_fields()]
 
     list_filter = [
         'user',
@@ -92,4 +90,4 @@ class LogEntryAdmin(admin.ModelAdmin):
             .prefetch_related('content_type')
 
 
-admin.site.register(OSFLogEntry, LogEntryAdmin)
+# admin.site.register(AdminLogEntry, LogEntryAdmin)

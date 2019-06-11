@@ -38,6 +38,9 @@
 .fangorn-selected > div span.text-muted {
 	color: #DDD;
 }
+.fangorn-preprint {
+    background-color: #e7f1f3;
+}
 .tb-disabled {
 	background: #eee;
 	color: #ccc;
@@ -80,10 +83,15 @@
     cursor: pointer !important;
     color: #333333;
 }
-.fg-file-links:hover {
+.fg-version-links {
+    cursor: pointer !important;
+    color: #337ab7;
+    font-weight: bold;
+}
+.fg-file-links:hover, .fg-version-links:hover {
     text-decoration: underline;
 }
-.fangorn-selected .fg-file-links {
+.fangorn-selected .fg-file-links, .fangorn-selected .fg-version-links {
     color: #FFFFFF;
 }
 .tb-row-titles {
@@ -346,4 +354,9 @@ a.fangorn-toolbar-icon {
 	height: 16px;
     display: inline-block;
     background: url('/static/img/hgrid/fontawesome/file-text-o.png');
+}
+
+/* file pop up modal text  */
+.replace-file {
+    margin-left: 8px;
 }

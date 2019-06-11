@@ -15,7 +15,9 @@ from framework.forms import (
     BootstrapTextInput,
     BootstrapPasswordInput,
     stripped,
-    lowerstripped
+    lowerstripped,
+    BooleanField,
+    CheckboxInput
 )
 from website import language
 
@@ -62,6 +64,15 @@ name_field = TextField(
     widget=BootstrapTextInput(),
 )
 
+name_field_not_required = TextField(
+    'Full Name',
+    [
+        NoHtmlCharacters(),
+    ],
+    filters=[stripped],
+    widget=BootstrapTextInput(),
+)
+
 email_field = TextField('Email Address',
     [
         validators.Required(message=u'Email address is required'),
@@ -100,10 +111,10 @@ confirm_email_field = TextField(
 password_field = PasswordField('Password',
     [
         validators.Required(message=u'Password is required'),
-        validators.Length(min=6, message=u'Password is too short. '
-            'Password should be at least 6 characters.'),
-        validators.Length(max=256, message=u'Password is too long. '
-            'Password should be at most 256 characters.'),
+        validators.Length(min=8, message=u'Password is too short. '
+            'Password should be at least 8 characters.'),
+        validators.Length(max=255, message=u'Password is too long. '
+            'Password should be at most 255 characters.'),
     ],
     filters=[stripped],
     widget=BootstrapPasswordInput()
@@ -123,10 +134,10 @@ class ResetPasswordForm(Form):
     password = PasswordField('New Password',
         [
             validators.Required(message=u'Password is required'),
-            validators.Length(min=6, message=u'Password is too short. '
-                'Password should be at least 6 characters.'),
-            validators.Length(max=256, message=u'Password is too long. '
-                'Password should be at most 256 characters.'),
+            validators.Length(min=8, message=u'Password is too short. '
+                'Password should be at least 8 characters.'),
+            validators.Length(max=255, message=u'Password is too long. '
+                'Password should be at most 255 characters.'),
         ],
         filters=[stripped],
         widget=BootstrapPasswordInput()
@@ -144,6 +155,11 @@ class ResetPasswordForm(Form):
 
 class SetEmailAndPasswordForm(ResetPasswordForm):
     token = HiddenField()
+    accepted_terms_of_service = BooleanField(
+        [
+            validators.Required(message=u'This field is required'),
+        ]
+    )
 
 
 class SignInForm(Form):
@@ -152,7 +168,14 @@ class SignInForm(Form):
 
 
 class ResendConfirmationForm(Form):
+    name = name_field_not_required  # If the user's auth already has a fullname this won't appear.
     email = email_field
+    accepted_terms_of_service = BooleanField(
+        [
+            validators.Required(message=u'This field is required'),
+        ],
+        widget=CheckboxInput()
+    )
 
 
 class PasswordForm(Form):

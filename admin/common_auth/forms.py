@@ -1,8 +1,10 @@
+from __future__ import absolute_import
+
 from django import forms
-from django.contrib.auth.forms import UserCreationForm
-from django.contrib.admin.widgets import FilteredSelectMultiple
+from django.db.models import Q
 from django.contrib.auth.models import Group
-from .models import MyUser
+
+from osf.models import AdminProfile
 
 
 class LoginForm(forms.Form):
@@ -14,20 +16,21 @@ class LoginForm(forms.Form):
     )
 
 
-class UserRegistrationForm(UserCreationForm):
+class UserRegistrationForm(forms.Form):
+    """ A form that finds an existing OSF User, and grants permissions to that
+    user so that they can use the admin app"""
+
+    osf_id = forms.CharField(required=True, max_length=5, min_length=5)
+
+    # TODO: Moving to guardian, find a better way to distinguish "admin-like" groups from object permission groups
     group_perms = forms.ModelMultipleChoiceField(
-        queryset=Group.objects.filter(name='prereg_group'),
-        widget=FilteredSelectMultiple('verbose name', is_stacked=False),
-        required=False
+        queryset=Group.objects.exclude(Q(name__startswith='collections_') | Q(name__startswith='reviews_') | Q(name__startswith='preprint_')),
+        required=False,
+        widget=forms.CheckboxSelectMultiple
     )
 
-    class Meta:
-            model = MyUser
-            fields = ['password1', 'password2', 'first_name', 'last_name', 'email', 'is_active', 'is_staff',
-            'is_superuser', 'groups', 'user_permissions', 'last_login', 'group_perms', 'osf_id']
 
-    def __init__(self, *args, **kwargs):
-        super(UserRegistrationForm, self).__init__(*args, **kwargs)
-        self.fields['first_name'].required = True
-        self.fields['last_name'].required = True
-        self.fields['osf_id'].required = True
+class DeskUserForm(forms.ModelForm):
+    class Meta:
+        model = AdminProfile
+        fields = ['desk_token', 'desk_token_secret']

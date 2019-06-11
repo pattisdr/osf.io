@@ -3,8 +3,8 @@ from django.contrib.auth.decorators import login_required as login
 
 from . import views
 
+app_name = 'admin'
+
 urlpatterns = [
-    url(r'^$', login(views.OSFStatisticsListView.as_view()), name='stats_list'),
-    url(r'^update/$', login(views.update_metrics), name='update'),
-    url(r'^download/$', login(views.download_csv), name='download'),
+    url(r'^$', login(views.MetricsView.as_view()), name='metrics'),
 ]

@@ -2,25 +2,23 @@ import jwt
 import httplib as http
 
 import mock
+from django.db.models import Q
 from nose.tools import *  # noqa
 
-from modularodm import Q
-
 from tests.base import OsfTestCase
-from tests import factories
+from osf_tests import factories
 from tests.utils import mock_auth
 
 from framework.exceptions import HTTPError
 
 from website import settings
-from website.models import Node
-from website.project.sanctions import Embargo, RegistrationApproval, Retraction, Sanction
-from website.tokens import decode, encode, TokenHandler
-from website.tokens.exceptions import TokenHandlerNotFound
+from osf.models import AbstractNode, Embargo, RegistrationApproval, Retraction, Sanction
+from osf.utils.tokens import decode, encode, TokenHandler
+from osf.exceptions import TokenHandlerNotFound
 
 NO_SANCTION_MSG = 'There is no {0} associated with this token.'
-APPROVED_MSG = "This registration is not pending {0}."
-REJECTED_MSG = "This registration {0} has been rejected."
+APPROVED_MSG = 'This registration is not pending {0}.'
+REJECTED_MSG = 'This registration {0} has been rejected.'
 
 class TestTokenHandler(OsfTestCase):
 
@@ -59,7 +57,7 @@ class TestTokenHandler(OsfTestCase):
         with assert_raises(TokenHandlerNotFound):
             token.to_response()
 
-    @mock.patch('website.tokens.handlers.sanction_handler')
+    @mock.patch('osf.utils.tokens.handlers.sanction_handler')
     def test_token_process_with_valid_action(self, mock_handler):
         self.payload['action'] = 'approve_registration_approval'
         token = TokenHandler.from_payload(self.payload)
@@ -84,7 +82,7 @@ class SanctionTokenHandlerBase(OsfTestCase):
         if not self.kind:
             return
         self.sanction = self.Factory()
-        self.reg = Node.find_one(Q(self.Model.SHORT_NAME, 'eq', self.sanction))
+        self.reg = AbstractNode.objects.get(Q(**{self.Model.SHORT_NAME: self.sanction}))
         self.user = self.reg.creator
 
     def test_sanction_handler(self):
@@ -93,7 +91,7 @@ class SanctionTokenHandlerBase(OsfTestCase):
         approval_token = self.sanction.approval_state[self.user._id]['approval_token']
         handler = TokenHandler.from_string(approval_token)
         with mock_auth(self.user):
-            with mock.patch('website.tokens.handlers.{0}_handler'.format(self.kind)) as mock_handler:
+            with mock.patch('osf.utils.tokens.handlers.{0}_handler'.format(self.kind)) as mock_handler:
                 handler.to_response()
                 mock_handler.assert_called_with('approve', self.reg, self.reg.registered_from)
 
@@ -102,7 +100,7 @@ class SanctionTokenHandlerBase(OsfTestCase):
             return
         approval_token = self.sanction.approval_state[self.user._id]['approval_token']
         handler = TokenHandler.from_string(approval_token)
-        self.Model.remove_one(self.sanction)
+        self.Model.delete(self.sanction)
         with mock_auth(self.user):
             try:
                 handler.to_response()

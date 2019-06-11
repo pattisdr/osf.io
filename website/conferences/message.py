@@ -5,6 +5,7 @@ import hmac
 import hashlib
 import logging
 
+from django.apps import apps
 from nameparser import HumanName
 from werkzeug.utils import cached_property
 
@@ -21,13 +22,13 @@ DKIM_PASS_VALUES = ['Pass']
 SPF_PASS_VALUES = ['Pass', 'Neutral']
 
 ANGLE_BRACKETS_REGEX = re.compile(r'<(.*?)>')
-BASE_REGEX = r'''
+BASE_REGEX = r"""
         (?P<test>test-|stage-)?
         (?P<meeting>\w*?)
         -
         (?P<category>{allowed_types})
         @osf\.io
-    '''
+    """
 
 class ConferenceMessage(object):
 
@@ -164,19 +165,19 @@ class ConferenceMessage(object):
             count = int(count)
         except (TypeError, ValueError):
             count = 0
-        return filter(
+        return list(filter(
             lambda value: value is not None,
-            map(
+            list(map(
                 lambda idx: self.request.files.get('attachment-{0}'.format(idx + 1)),
-                range(count),
-            ),
-        )
+                list(range(count)),
+            )),
+        ))
 
     @property
     def allowed_types(self):
-        from .model import Conference
+        Conference = apps.get_model('osf.Conference')
         allowed_types = []
-        for conf in Conference.find():
-            allowed_types.extend([conf.field_names['submission1'], conf.field_names['submission2']])
+        for field_names in Conference.objects.values_list('field_names', flat=True):
+            allowed_types.extend([field_names['submission1'], field_names['submission2']])
         regex_types_allowed = '|'.join(set(allowed_types))
         return regex_types_allowed

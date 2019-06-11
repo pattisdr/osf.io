@@ -1,7 +1,6 @@
 <%inherit file="project/project_base.mako"/>
 <%def name="title()">${node['title']} Contributors</%def>
 
-<%include file="project/modal_generate_private_link.mako"/>
 <%include file="project/modal_add_contributor.mako"/>
 <%include file="project/modal_remove_contributor.mako"/>
 
@@ -139,6 +138,23 @@
         ${buttonGroup()}
     </div>
 
+    % if 'admin' in user['permissions'] and access_requests and node['access_requests_enabled']:
+    <div id="manageAccessRequests">
+        <h3> Requests for Access</h3>
+        <p class="m-b-xs">The following users have requested access to this project.</p>
+        <table  id="manageAccessRequestsTable"
+        class="table responsive-table responsive-table-xxs"
+        data-bind="template: {
+            name: 'accessRequestsTable',
+            afterRender: afterRender,
+            options: {
+                containment: '#manageAccessRequests'
+            }
+            }">
+        </table>
+    </div>
+    % endif
+
     % if 'admin' in user['permissions']:
         <h3 class="m-t-xl">View-only Links
             <a href="#addPrivateLink" data-toggle="modal" class="btn btn-success btn-sm m-l-md">
@@ -146,85 +162,12 @@
             </a>
         </h3>
         <p>Create a link to share this project so those who have the link can view&mdash;but not edit&mdash;the project.</p>
-        <div class="scripted" id="linkScope">
-            <table id="privateLinkTable" class="table responsive-table responsive-table-xs"
-                    data-bind="visible: visible">
-                <thead>
-                    <tr>
-                        <th class="responsive-table-hide">Link Name</th>
-                        <th class="shared-comp">Shared Components</th>
-                        <th>Created Date</th>
-                        <th>Created By</th>
-                        <th class="min-width">Anonymous</th>
-                        <th class="min-width"></th>
-                    </tr>
-                </thead>
-                <tbody data-bind="template: {
-                            name: 'linkTbl',
-                            foreach: privateLinks,
-                            afterRender: afterRenderLink
-                        }">
-                </tbody>
-            </table>
-        </div>
+        <%include file="project/private_links.mako"/>
     % endif
 </div>
 
 <link rel="stylesheet" href="/static/css/pages/contributor-page.css">
-
-<script id="linkTbl" type="text/html">
-    <tr>
-        <td data-bind="attr: {class: expanded() ? 'expanded' : null,
-                                role: $root.collapsed() ? 'button' : null},
-                       click: $root.collapsed() ? toggleExpand : null">
-            <span class="link-name m-b-xs" data-bind="text: name"></span>
-            <span data-bind="attr: {class: expanded() ? 'fa toggle-icon fa-angle-up' : 'fa toggle-icon fa-angle-down'}"></span>
-            <div>
-                <div class="btn-group">
-                    <button title="Copy to clipboard" class="btn btn-default btn-sm m-r-xs copy-button"
-                            data-bind="attr: {'data-clipboard-text': linkUrl}" >
-                        <i class="fa fa-copy"></i>
-                    </button>
-                    <input class="link-url" type="text" data-bind="value: linkUrl, attr:{readonly: readonly}, click: toggle, clickBubble: false"  />
-                </div>
-            </div>
-        </td>
-        <td>
-            <div class="header" data-bind="visible: $root.collapsed() && expanded()"></div>
-            <div class="td-content" data-bind="visible: !$root.collapsed() || expanded()">
-                <ul class="private-link-list narrow-list" data-bind="foreach: nodesList">
-                    <li data-bind="style:{marginLeft: $data.scale}">
-                        <span data-bind="getIcon: $data.category"></span>
-                        <a data-bind="text:$data.title, attr: {href: $data.url}"></a>
-                    </li>
-                </ul>
-            </div>
-        </td>
-        <td>
-            <div class="header" data-bind="visible: $root.collapsed() && expanded()"></div>
-            <div class="td-content" data-bind="visible: !$root.collapsed() || expanded()">
-                <span class="link-create-date" data-bind="text: dateCreated.local, tooltip: {title: dateCreated.utc}"></span>
-            </div>
-        </td>
-        <td>
-            <div class="header" data-bind="visible: $root.collapsed() && expanded()"></div>
-            <div class="td-content" data-bind="visible: !$root.collapsed() || expanded()">
-                <a data-bind="text: creator.fullname, attr: {href: creator.url}" class="overflow-block"></a>
-            </div>
-        </td>
-        <td>
-            <div class="header" data-bind="visible: $root.collapsed() && expanded()"></div>
-            <div class="td-content" data-bind="visible: !$root.collapsed() || expanded()">
-                <span data-bind="html: anonymousDisplay"></span>
-            </div>
-        </td>
-        <td>
-            <div class="td-content" data-bind="visible: expanded() || !$root.collapsed()">
-                <button data-bind="click:  $root.removeLink" type="button" class="btn btn-danger to-top-element">Remove</button>
-            </div>
-        </td>
-    </tr>
-</script>
+<link rel="stylesheet" href="/static/css/responsive-tables.css">
 
 <script id="contribTable" type="text/html">
     <thead>
@@ -274,6 +217,41 @@
     <!-- /ko -->
 </script>
 
+<script id="accessRequestsTable" type="text/html">
+    <thead>
+        <tr>
+            <th class="responsive-table-hide">Name</th>
+            <th></th>
+            <th class="access-permissions">
+                Permissions
+                <i class="fa fa-question-circle permission-info"
+                    data-toggle="popover"
+                    data-title="Permission Information"
+                    data-container="body"
+                    data-placement="right"
+                    data-html="true"
+                ></i>
+            </th>
+            <th class="biblio-contrib">
+                Bibliographic Contributor
+                <i class="fa fa-question-circle visibility-info"
+                    data-toggle="popover"
+                    data-title="Bibliographic Contributor Information"
+                    data-container="body"
+                    data-placement="right"
+                    data-html="true"
+                ></i>
+            </th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody data-bind="template: {
+        name: 'accessRequestRow',
+        foreach: $root.accessRequests,
+        as: 'accessRequest',
+    }">
+</script>
+
 <script id="contribRow" type="text/html">
     <tr data-bind="visible: !contributor.filtered(), click: unremove, css: {'contributor-delete-staged': $parent.deleteStaged}, attr: {class: $parent}">
         <td data-bind="attr: {class: contributor.expanded() ? 'expanded' : null,
@@ -281,10 +259,10 @@
                        click: $root.collapsed() ? toggleExpand : null">
             <!-- ko if: ($parent === 'contrib' && $root.isSortable()) -->
                 <span class="fa fa-bars sortable-bars"></span>
-                <img class="m-l-xs" data-bind="attr: {src: contributor.gravatar_url}" />
+                <img class="m-l-xs" data-bind="attr: {src: contributor.profile_image_url}" />
             <!-- /ko -->
             <!-- ko ifnot: ($parent === 'contrib' && $root.isSortable()) -->
-                <img data-bind="attr: {src: contributor.gravatar_url}" />
+                <img data-bind="attr: {src: contributor.profile_image_url}" />
             <!-- /ko -->
             <span data-bind="attr: {class: contributor.expanded() ? 'fa toggle-icon fa-angle-up' : 'fa toggle-icon fa-angle-down'}"></span>
             <div class="card-header">
@@ -333,17 +311,74 @@
             <div class="td-content" data-bind="visible: !$root.collapsed() || contributor.expanded()">
                 <input
                     type="checkbox" class="biblio visible-filter"
-                    data-bind="checked: visible, enable: $data.canEdit() && !contributor.isAdmin && !deleteStaged()"
+                    data-bind="checked: visible, enable: $data.canEdit() && !contributor.isParentAdmin && !deleteStaged()"
                 />
             </div>
         </td>
-        <td>
+        <td data-bind="css: {'add-remove': !$root.collapsed()}">
             <div class="td-content" data-bind="visible: !$root.collapsed() || contributor.expanded()">
                 <!-- ko if: (contributor.canEdit() || canRemove) -->
-                        <button href="#removeContributor" class="btn btn-danger btn-sm m-l-md"
-                           data-bind="click: remove"
-                           data-toggle="modal">Remove</button>
+                        <span href="#removeContributor"
+                           data-bind="click: remove, class: {}, visible: !$root.collapsed()"
+                           data-toggle="modal"><i class="fa fa-times fa-2x remove-or-reject"></i></span>
+                        <button href="#removeContributor" class="btn btn-default btn-sm m-l-md"
+                           data-bind="click: remove, visible: $root.collapsed()"
+                           data-toggle="modal"><i class="fa fa-times"></i> Remove</button>
                 <!-- /ko -->
+                <!-- ko if: (canAddAdminContrib) -->
+                        <button class="btn btn-success btn-sm m-l-md"
+                           data-bind="click: addParentAdmin"
+                        ><i class="fa fa-plus"></i> Add</button>
+                <!-- /ko -->
+            </div>
+        </td>
+    </tr>
+</script>
+
+<script id="accessRequestRow" type="text/html">
+    <tr>
+        <td data-bind="attr: {class: accessRequest.expanded() ? 'expanded' : null,
+                       role: $root.collapsed() ? 'button' : null},
+                       click: $root.collapsed() ? toggleExpand : null">
+            <span class="fa fa-fw">&nbsp;</span>
+            <img data-bind="attr: {src: accessRequest.user.profile_image_url}" />
+            <span data-bind="attr: {class: accessRequest.expanded() ? 'fa toggle-icon fa-angle-up' : 'fa toggle-icon fa-angle-down'}"></span>
+            <div class="card-header">
+                <a data-bind="text: accessRequest.user.shortname, attr:{href: profileUrl}"></a>
+                <span data-bind="text: accessRequest.permissionText()"></span>
+            </div>
+        </td>
+        <td class="table-only">
+            <a data-bind="text: accessRequest.user.shortname, attr:{href: accessRequest.profileUrl}"></a>
+        </td>
+        <td class="permissions">
+            <div class="header" data-bind="visible: accessRequest.expanded() && $root.collapsed()"></div>
+                <div class="td-content" data-bind="visible: !$root.collapsed() ||  accessRequest.expanded()">
+                <select class="form-control input-sm" data-bind="
+                    options: $parents[0].permissionList,
+                    value: permission,
+                    optionsText: optionsText.bind(permission)"
+                >
+                </select>
+                <span data-bind="text: permissionText()"></span>
+            </div>
+        </td>
+        <td>
+            <div class="header" data-bind="visible: accessRequest.expanded()  && $root.collapsed()"></div>
+            <div class="td-content" data-bind="visible: !$root.collapsed() || accessRequest.expanded()">
+                <input
+                    type="checkbox" class="biblio"
+                    data-bind="checked: visible"
+                />
+            </div>
+        </td>
+        <td data-bind="css: {'add-remove': !$root.collapsed()}">
+            <div class="td-content" data-bind="visible: !$root.collapsed() || accessRequest.expanded()">
+                <button class="btn btn-success btn-sm m-l-md request-accept-button"
+                       data-bind="click: function() {respondToAccessRequest('accept')}"
+                ><i class="fa fa-plus"></i> Add</button>
+                <span data-bind="click: function() {respondToAccessRequest('reject')}, visible: !$root.collapsed()"><i class="fa fa-times fa-2x remove-or-reject"></i></span>
+                <button class="btn btn-default btn-sm m-l-md" data-bind="click: function() {respondToAccessRequest('reject')}, visible: $root.collapsed()"><i class="fa fa-times"></i> Remove</button>
             </div>
         </td>
     </tr>
@@ -366,10 +401,18 @@
 
     <script type="text/javascript">
       window.contextVars = window.contextVars || {};
-      window.contextVars.user = ${ user | sjson, n };
+      window.contextVars.currentUser = window.contextVars.currentUser || {};
+      window.contextVars.currentUser.permissions = ${ user['permissions'] | sjson, n } ;
       window.contextVars.isRegistration = ${ node['is_registration'] | sjson, n };
       window.contextVars.contributors = ${ contributors | sjson, n };
+      window.contextVars.accessRequests = ${ access_requests | sjson, n };
       window.contextVars.adminContributors = ${ adminContributors | sjson, n };
+      window.contextVars.analyticsMeta = $.extend(true, {}, window.contextVars.analyticsMeta, {
+          pageMeta: {
+              title: 'Contributors',
+              public: false,
+          },
+      });
     </script>
 
     <script src=${"/static/public/js/sharing-page.js" | webpack_asset}></script>

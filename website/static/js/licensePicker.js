@@ -19,7 +19,7 @@ var LICENSE_PROPERTIES = {
     'copyrightHolders': 'Copyright Holders'
 };
 
-var template = require('raw!templates/license-picker.html');
+var template = require('raw-loader!templates/license-picker.html');
 
 /**
  * @class LicensePicker: Knockout.js view model for project license selection
@@ -59,7 +59,7 @@ var LicensePicker = oop.extend(ChangeMessageMixin, {
 
         self.savedLicense = ko.observable(license);
         self.savedLicenseName = ko.pureComputed(function() {
-            return self.savedLicense().name;
+            return self.savedLicense().name === 'No license' ? 'Add a license' : self.savedLicense().name;
         });
         self.savedLicenseId = ko.computed(function() {
             return self.savedLicense().id;
@@ -162,7 +162,7 @@ var LicensePicker = oop.extend(ChangeMessageMixin, {
         });
 
         self.hideLicensePicker = ko.computed(function() {
-            return !user.isAdmin && self.selectedLicenseId() === DEFAULT_LICENSE.id;
+            return !user.isAdmin && self.savedLicenseId() === DEFAULT_LICENSE.id;
         });
     },
     togglePreview: function(labelClicked) {

@@ -1,23 +1,14 @@
 # -*- coding: utf-8 -*-
 
-import collections
-import re
-import urllib
 import logging
+import re
 import urlparse
-from contextlib import contextmanager
 
-import furl
-
+from django.utils.http import urlencode
 from flask import request, url_for
 
 from website import settings as website_settings
 from api.base import settings as api_settings
-from modularodm import Q
-from modularodm.exceptions import NoResultsFound
-
-# Keep me: Makes rubeus importable from website.util
-from . import rubeus  # noqa
 
 logger = logging.getLogger(__name__)
 
@@ -35,27 +26,6 @@ waterbutler_action_map = {
     'create_folder': 'file',
 }
 
-
-# Function courtesy of @brianjgeiger and @abought, moved from API utils
-def rapply(data, func, *args, **kwargs):
-    """Recursively apply a function to all values in an iterable
-    :param dict | list | basestring data: iterable to apply func to
-    :param function func:
-    """
-    if isinstance(data, collections.Mapping):
-        return {
-            key: rapply(value, func, *args, **kwargs)
-            for key, value in data.iteritems()
-        }
-    elif isinstance(data, collections.Iterable) and not isinstance(data, basestring):
-        desired_type = type(data)
-        return desired_type(
-            rapply(item, func, *args, **kwargs) for item in data
-        )
-    else:
-        return func(data, *args, **kwargs)
-
-
 def conjunct(words, conj='and'):
     words = list(words)
     num_words = len(words)
@@ -68,7 +38,6 @@ def conjunct(words, conj='and'):
     elif num_words > 2:
         return ', '.join(words[:-1]) + ', {0} {1}'.format(conj, words[-1])
 
-
 def _get_guid_url_for(url):
     """URL Post-processor transforms specific `/project/<pid>` or `/project/<pid>/node/<nid>`
     urls into guid urls. Ex: `<nid>/wiki/home`.
@@ -78,8 +47,8 @@ def _get_guid_url_for(url):
     guid_url = guid_url_profile_pattern.sub('', guid_url, count=1)
     return guid_url
 
-
-def api_url_for(view_name, _absolute=False, _xml=False, *args, **kwargs):
+# Move to api utils?
+def api_url_for(view_name, _absolute=False, _xml=False, _internal=False, *args, **kwargs):
     """Reverse URL lookup for API routes (that use the JSONRenderer or XMLRenderer).
     Takes the same arguments as Flask's url_for, with the addition of
     `_absolute`, which will make an absolute URL with the correct HTTP scheme
@@ -92,10 +61,11 @@ def api_url_for(view_name, _absolute=False, _xml=False, *args, **kwargs):
     if _absolute:
         # We do NOT use the url_for's _external kwarg because app.config['SERVER_NAME'] alters
         # behavior in an unknown way (currently breaks tests). /sloria /jspies
-        return urlparse.urljoin(website_settings.DOMAIN, url)
+        domain = website_settings.INTERNAL_DOMAIN if _internal else website_settings.DOMAIN
+        return urlparse.urljoin(domain, url)
     return url
 
-
+# Move somewhere
 def api_v2_url(path_str,
                params=None,
                base_route=website_settings.API_DOMAIN,
@@ -112,16 +82,15 @@ def api_v2_url(path_str,
     """
     params = params or {}  # Optional params dict for special-character param names, eg filter[fullname]
 
-    base_url = furl.furl(base_route + base_prefix)
+    x = urlparse.urljoin(base_route, urlparse.urljoin(base_prefix, path_str.lstrip('/')))
 
-    base_url.path.add([x for x in path_str.split('/') if x] + [''])
+    if params or kwargs:
+        x = '{}?{}'.format(x, urlencode(dict(params, **kwargs)))
 
-    base_url.args.update(params)
-    base_url.args.update(kwargs)
-    return str(base_url)
+    return x
 
-
-def web_url_for(view_name, _absolute=False, _guid=False, *args, **kwargs):
+# Move to api utils?
+def web_url_for(view_name, _absolute=False, _internal=False, _guid=False, *args, **kwargs):
     """Reverse URL lookup for web routes (those that use the OsfWebRenderer).
     Takes the same arguments as Flask's url_for, with the addition of
     `_absolute`, which will make an absolute URL with the correct HTTP scheme
@@ -134,7 +103,8 @@ def web_url_for(view_name, _absolute=False, _guid=False, *args, **kwargs):
     if _absolute:
         # We do NOT use the url_for's _external kwarg because app.config['SERVER_NAME'] alters
         # behavior in an unknown way (currently breaks tests). /sloria /jspies
-        return urlparse.urljoin(website_settings.DOMAIN, url)
+        domain = website_settings.INTERNAL_DOMAIN if _internal else website_settings.DOMAIN
+        return urlparse.urljoin(domain, url)
     return url
 
 
@@ -142,70 +112,3 @@ def is_json_request():
     """Return True if the current request is a JSON/AJAX request."""
     content_type = request.content_type
     return content_type and ('application/json' in content_type)
-
-
-def waterbutler_url_for(route, provider, path, node, user=None, **kwargs):
-    """DEPRECATED Use waterbutler_api_url_for
-    Reverse URL lookup for WaterButler routes
-    :param str route: The action to preform, upload, download, delete...
-    :param str provider: The name of the requested provider
-    :param str path: The path of the requested file or folder
-    :param Node node: The node being accessed
-    :param User user: The user whos cookie will be used or None
-    :param dict kwargs: Addition query parameters to be appended
-    """
-    url = furl.furl(website_settings.WATERBUTLER_URL)
-    url.path.segments.append(waterbutler_action_map[route])
-
-    url.args.update({
-        'path': path,
-        'nid': node._id,
-        'provider': provider,
-    })
-
-    if user:
-        url.args['cookie'] = user.get_or_create_cookie()
-    elif website_settings.COOKIE_NAME in request.cookies:
-        url.args['cookie'] = request.cookies[website_settings.COOKIE_NAME]
-
-    view_only = False
-    if 'view_only' in kwargs:
-        view_only = kwargs.get('view_only')
-    else:
-        view_only = request.args.get('view_only')
-
-    url.args['view_only'] = view_only
-
-    url.args.update(kwargs)
-    return url.url
-
-
-def waterbutler_api_url_for(node_id, provider, path='/', **kwargs):
-    assert path.startswith('/'), 'Path must always start with /'
-    url = furl.furl(website_settings.WATERBUTLER_URL)
-    segments = ['v1', 'resources', node_id, 'providers', provider] + path.split('/')[1:]
-    url.path.segments.extend([urllib.quote(x.encode('utf-8')) for x in segments])
-    url.args.update(kwargs)
-    return url.url
-
-
-@contextmanager
-def disconnected_from(signal, listener):
-    """Temporarily disconnect a Blinker signal."""
-    signal.disconnect(listener)
-    yield
-    signal.connect(listener)
-
-
-def check_private_key_for_anonymized_link(private_key):
-    from website.project.model import PrivateLink
-
-    is_anonymous = False
-    if private_key is not None:
-        try:
-            link = PrivateLink.find_one(Q('key', 'eq', private_key))
-        except NoResultsFound:
-            link = None
-        if link is not None:
-            is_anonymous = link.anonymous
-    return is_anonymous
