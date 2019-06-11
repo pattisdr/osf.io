@@ -162,7 +162,7 @@ class TestDraftRegistrationViews(RegistrationsTestBase):
         self.draft.deleted = timezone.now()
         self.draft.save()
         self.draft.reload()
-
+        # add more tests
         url = self.draft_api_url('get_draft_registration')
         res = self.app.get(url, auth=self.user.auth, expect_errors=True)
         assert_equal(res.status_code, http.GONE)
