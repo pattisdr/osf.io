@@ -11,18 +11,18 @@ from osf.exceptions import ValidationValueError, ValidationError
 from website.project.metadata.utils import create_jsonschema_from_metaschema
 
 FORMBLOCK_TYPES = [
+    ('page-heading', 'page-heading'),
+    ('section-heading', 'section-heading'),
+    ('subsection-heading', 'subsection-heading'),
+    ('input-label', 'input-label'),
     ('short-text-input', 'short-text-input'),
     ('long-text-input', 'long-text-input'),
-    ('singleselect', 'singleselect'),
-    ('multiselect', 'multiselect'),
-    ('osf-author-import', 'osf-author-import'),
-    ('osf-upload', 'osf-upload'),
-    ('h1', 'h1'),
-    ('h2', 'h2'),
-    ('h3', 'h3'),
+    ('file-input', 'file-input'),
+    ('contributors-input', 'contributors-input'),
+    ('single-select-input', 'single-select-input'),
+    ('multi-select-input', 'multi-select-input'),
     ('select-input-option', 'select-input-option'),
     ('select-input-other', 'select-input-other'),
-    ('input-label', 'input-label'),
 ]
 
 
@@ -153,7 +153,6 @@ class RegistrationFormBlock(ObjectIDMixin, BaseModel):
 
     schema = models.ForeignKey('RegistrationSchema', related_name='form_blocks', on_delete=models.CASCADE)
     help_text = models.TextField()
-    block_id = models.CharField(max_length=255, db_index=True)
     question_id = models.CharField(max_length=255, db_index=True, null=True)
     block_type = models.CharField(max_length=31, db_index=True, choices=FORMBLOCK_TYPES)
     block_text = models.TextField()

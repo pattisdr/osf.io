@@ -5,28 +5,19 @@ from __future__ import unicode_literals
 from django.db import migrations
 
 FORMAT_TYPE_TO_TYPE_MAP = {
-    ('multiselect', 'choose'): 'multiselect',
-    (None, 'multiselect'): 'multiselect',
-    (None, 'choose'): 'singleselect',
-    ('osf-upload-open', 'osf-upload'): 'osf-upload',
-    ('osf-upload-toggle', 'osf-upload'): 'osf-upload',
-    ('singleselect', 'choose'): 'singleselect',
-    ('text', 'string'): 'string',
-    ('textarea', 'osf-author-import'): 'osf-author-import',
-    ('textarea', 'string'): 'string',
-    ('textarea-lg', None): 'string',
-    ('textarea-lg', 'string'): 'string',
-    ('textarea-xl', 'string'): 'string',
+    ('multiselect', 'choose'): 'multi-select-input',
+    (None, 'multiselect'): 'multi-select-input',
+    (None, 'choose'): 'single-select-input',
+    ('osf-upload-open', 'osf-upload'): 'file-input',
+    ('osf-upload-toggle', 'osf-upload'): 'file-input',
+    ('singleselect', 'choose'): 'single-select-input',
+    ('text', 'string'): 'short-text-input',
+    ('textarea', 'osf-author-import'): 'contributors-input',
+    ('textarea', 'string'): 'long-text-input',
+    ('textarea-lg', None): 'long-text-input',
+    ('textarea-lg', 'string'): 'long-text-input',
+    ('textarea-xl', 'string'): 'long-text-input',
 }
-
-FORMAT_TO_SIZE_MAP = {
-    'text': 'sm',
-    'textarea': 'md',
-    'textarea-lg': 'lg',
-    'textarea-xl': 'xl',
-}
-
-DEFAULT_SIZE = 'md'
 
 def remove_version_1_schemas(state, schema):
     RegistrationSchema = state.get_model('osf', 'registrationschema')
@@ -62,6 +53,7 @@ def update_schemaless_registrations(state, schema):
 
 def update_schema_configs(state, schema):
     RegistrationSchema = state.get_model('osf', 'registrationschema')
+    # TODO, factor in AsPredictedSchema, version 3
     for rs in RegistrationSchema.objects.filter(schema_version=2):
         rs.config = rs.schema.get('config', {})
         # assert not rs.config.get('tooltip', False)
@@ -72,157 +64,6 @@ def update_schema_configs(state, schema):
 def unset_schema_configs(state, schema):
     RegistrationSchema = state.get_model('osf', 'registrationschema')
     RegistrationSchema.objects.update(config=dict())
-
-def _build_block(state, obj, **blargs):
-    RegistrationFormBlock = state.get_model('osf', 'registrationformblock')
-    EXPECTED_BLARGS = set([
-        'page',
-        'section',
-        'schema_id',
-        'block_id',
-        'block_text',
-        'block_type',
-        '_order',
-    ])
-    assert EXPECTED_BLARGS.issubset(set(blargs.keys()))
-    blargs['help_text'] = obj.get('help', '')
-    blargs['choices'] = obj.get('options', [])
-    blargs['required'] = False if blargs['block_type'] == 'header' else obj.get('required', True)
-    blargs['size'] = FORMAT_TO_SIZE_MAP.get(obj.get('format', None), DEFAULT_SIZE)
-    return RegistrationFormBlock(**blargs)
-
-def _generate_ridie_formblocks(state, question, page, _order, schema_id):
-    """ Builds formblocks from question information. RIDIE schemas are flat, with the
-        exception of file-upload questions, which appear to be nested based on "type",
-        but actually should not be.
-
-    :param StateApps state: Current Django model state
-    :param dict question: Question to build from
-    :param dict page: Page for context
-    :param int _order: Order for the next form block
-    :ret tuple(list, int): Returns a tuple of (<List of built blocks>, <_order for next block>)
-    """
-    blocks = []
-    blargs = {
-        'page': page['title'],
-        'section': question['title'],
-        'schema_id': schema_id,
-        'block_id': question['qid'],
-        'block_text': question['description'],
-        'block_type': 'osf-upload' if question['type'] == 'object' else FORMAT_TYPE_TO_TYPE_MAP[(question['format'], question['type'])],
-        '_order': _order,
-    }
-    block = _build_block(state, question, **blargs)
-    blocks.append(block)
-    _order += 1
-    return blocks, _order
-
-def _generate_formblocks(state, question, page, _order, schema_id):
-    """ Builds formblocks from question information.
-
-    :param StateApps state: Current Django model state
-    :param dict question: Question to build from
-    :param dict page: Page for context
-    :param int _order: Order for the next form block
-    :ret tuple(list, int): Returns a tuple of (<List of built blocks>, <_order for next block>)
-    """
-    blocks = []
-    _type = question['type']
-    qid = question['qid']
-    blargs = {
-        'page': page['title'],
-        'section': question['title'],
-        'schema_id': schema_id,
-        '_order': _order,
-    }
-
-    if _type == 'object':
-        if question.get('description', False):
-            # Question header create
-            blargs.update({
-                'block_id': qid,
-                'block_type': 'header',
-                'block_text': question['description'],
-            })
-            block = _build_block(state, question, **blargs)
-            blocks.append(block)
-            blargs['_order'] = _order = _order + 1
-        for obj in question['properties']:
-            _qid = obj['id']
-            if obj['type'] == 'object':
-                if obj.get('description', False):
-                    # Question sub-header create
-                    blargs.update({
-                        'block_id': '.'.join([qid, _qid]),
-                        'block_type': 'header',
-                        'block_text': obj['description'],
-                    })
-                    block = _build_block(state, obj, **blargs)
-                    blocks.append(block)
-                    blargs['_order'] = _order = _order + 1
-                for _obj in obj['properties']:
-                    # sub-sub block create
-                    __qid = _obj['id']
-                    blargs.update({
-                        'block_id': '.'.join([qid, _qid, __qid]),
-                        'block_type': FORMAT_TYPE_TO_TYPE_MAP[(_obj['format'], _obj.get('type', None))],
-                        'block_text': _obj['description'],
-                    })
-                    block = _build_block(state, _obj, **blargs)
-                    blocks.append(block)
-                    blargs['_order'] = _order = _order + 1
-            else:
-                # sub block create
-                blargs.update({
-                    'block_id': '.'.join([qid, _qid]),
-                    'block_type': FORMAT_TYPE_TO_TYPE_MAP[(obj['format'], obj.get('type', None))],
-                    'block_text': obj.get('description', None) or obj.get('title', None) or '',
-                })
-                block = _build_block(state, obj, **blargs)
-                blocks.append(block)
-                blargs['_order'] = _order = _order + 1
-    else:
-        # block create
-        blargs.update({
-            'block_id': qid,
-            'block_type': FORMAT_TYPE_TO_TYPE_MAP[(question.get('format', None), question.get('type', None))],
-            'block_text': question['title'],
-        })
-        block = _build_block(state, question, **blargs)
-        blocks.append(block)
-        blargs['_order'] = _order = _order + 1
-    return blocks, _order
-
-
-def map_schema_to_formblocks(state, schema):
-    RegistrationSchema = state.get_model('osf', 'registrationschema')
-    RegistrationFormBlock = state.get_model('osf', 'registrationformblock')
-    blocks_to_create = []
-    for rs in RegistrationSchema.objects.filter(schema_version=2):
-        _order = 1
-        for page in rs.schema['pages']:
-            if page.get('description', False):
-                block = RegistrationFormBlock(
-                    page=page['title'],
-                    block_id=page['id'],
-                    section=None,
-                    block_type='header',
-                    block_text=page['description'],
-                    required=False,
-                    schema_id=rs.id,
-                    _order=_order,
-                )
-                blocks_to_create.append(block)
-                _order += 1
-            for question in page['questions']:
-                if 'RIDIE' in rs.name:
-                    blocks, _order = _generate_ridie_formblocks(state, question, page, _order, rs.id)
-                else:
-                    blocks, _order = _generate_formblocks(state, question, page, _order, rs.id)
-                for block in blocks:
-                    blocks_to_create.append(block)
-
-    RegistrationFormBlock.objects.bulk_create(blocks_to_create)
 
 def unmap_formblocks(state, schema):
     RegistrationFormBlock = state.get_model('osf', 'registrationformblock')
@@ -244,46 +85,77 @@ def create_block(state, schema_id, block_type, block_text='', required=False, he
         question_id=question_id,
     )
 
-# WIP exploring making schemas more flat -
-def map_osf_standard_pre_data_collection_registration(state, schema):
-    RegistrationSchema = state.get_model('osf', 'registrationschema')
-    schema = RegistrationSchema.objects.get(name='OSF-Standard Pre-Data Collection Registration', schema_version=2)
+# Split question multiple choice options into blocks
+def split_options_into_blocks(state, rs, question):
+    for option in question.get('options', []):
+        answer_text = option if isinstance(option, basestring) else option.get('text')
+        help_text = '' if isinstance(option, basestring) else option.get('tooltip', '')
 
-    for page in schema.schema['pages']:
-        create_block(
-            state,
-            schema.id,
-            'h1',
-            block_text=page['title'],
-        )
-        for question in page['questions']:
+        if answer_text.lower() == 'other':
             create_block(
                 state,
-                schema.id,
-                'input-label',
-                block_text=question['title']
+                rs.id,
+                'select-input-other',
+                block_text=answer_text,
+                help_text=help_text
             )
-            if question['format'] == 'singleselect':
+        else:
+            create_block(
+                state,
+                rs.id,
+                'select-input-option',
+                block_text=answer_text,
+                help_text=help_text
+            )
+
+def get_question_id(question):
+    return question.get('qid', '') or question.get('id', '')
+
+def format_question(state, rs, question):
+    # If there are subquestions, recurse and format subquestions
+    if question.get('properties'):
+        for property in question.get('properties'):
+            format_question(state, rs, property)
+    else:
+        # Map the original schema section format to the new block_type, and create a schema block
+        block_type = FORMAT_TYPE_TO_TYPE_MAP[(question.get('format'), question.get('type'))]
+        create_block(
+            state,
+            rs.id,
+            block_type,
+            required=question.get('required', False),
+            question_id=get_question_id(question)
+        )
+
+        # If there are multiple choice answers, create blocks for these as well.
+        split_options_into_blocks(state, rs, question)
+
+
+def map_schema_to_formblocksv2(state, schema):
+    RegistrationSchema = state.get_model('osf', 'registrationschema')
+    # Returns the latest version of all visible schemas (?) inactive are still included.
+    # How to handle EGAP schema?
+    schemas = RegistrationSchema.objects.filter(visible=True).order_by('name', '-schema_version').distinct('name')
+    for rs in schemas:
+        for page in rs.schema['pages']:
+            # Create page block
+            create_block(
+                state,
+                rs.id,
+                'page-heading',
+                block_text=page.get('title', ''),
+                help_text=page.get('description', '')
+            )
+            for question in page['questions']:
+                # Create question header
                 create_block(
                     state,
-                    schema.id,
-                    'singleselect',
-                    required=True,
-                    question_id=question['qid']
+                    rs.id,
+                    'input-label',
+                    block_text=question.get('title', ''),
+                    help_text=question.get('description', ''),
                 )
-                for option in question['options']:
-                    create_block(
-                        state,
-                        schema.id,
-                        'select-input-option',
-                        block_text=option
-                    )
-            elif question['format'] == 'textarea':
-                create_block(
-                    state,
-                    schema.id,
-                    'long-text-input',
-                )
+                format_question(state, rs, question)
 
 
 class Migration(migrations.Migration):
@@ -296,6 +168,5 @@ class Migration(migrations.Migration):
         migrations.RunPython(remove_version_1_schemas, noop),
         migrations.RunPython(update_schemaless_registrations, noop),
         migrations.RunPython(update_schema_configs, unset_schema_configs),
-        # migrations.RunPython(map_schema_to_formblocks, unmap_formblocks),
-        migrations.RunPython(map_osf_standard_pre_data_collection_registration, unmap_formblocks)
+        migrations.RunPython(map_schema_to_formblocksv2, unmap_formblocks)
     ]
