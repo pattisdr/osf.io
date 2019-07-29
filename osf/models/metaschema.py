@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 from django.db import models
-from django.contrib.postgres.fields import ArrayField
 import jsonschema
 
 from website.util import api_v2_url
@@ -12,19 +11,18 @@ from osf.exceptions import ValidationValueError, ValidationError
 from website.project.metadata.utils import create_jsonschema_from_metaschema
 
 FORMBLOCK_TYPES = [
-    ('string', 'string'),
+    ('short-text-input', 'short-text-input'),
+    ('long-text-input', 'long-text-input'),
     ('singleselect', 'singleselect'),
     ('multiselect', 'multiselect'),
     ('osf-author-import', 'osf-author-import'),
     ('osf-upload', 'osf-upload'),
-    ('header', 'header'),
-]
-
-FORMBLOCK_SIZES = [
-    ('sm', 'sm'),
-    ('md', 'md'),
-    ('lg', 'lg'),
-    ('xl', 'xl'),
+    ('h1', 'h1'),
+    ('h2', 'h2'),
+    ('h3', 'h3'),
+    ('select-input-option', 'select-input-option'),
+    ('select-input-other', 'select-input-other'),
+    ('input-label', 'input-label'),
 ]
 
 
@@ -150,18 +148,15 @@ class RegistrationSchema(AbstractSchema):
 
 class RegistrationFormBlock(ObjectIDMixin, BaseModel):
     class Meta:
-        unique_together = ('schema', 'block_id')
+        # unique_together = ('schema', 'block_id')
         order_with_respect_to = 'schema'
 
     schema = models.ForeignKey('RegistrationSchema', related_name='form_blocks', on_delete=models.CASCADE)
-    page = models.CharField(max_length=255)
-    section = models.CharField(max_length=255, null=True)
     help_text = models.TextField()
     block_id = models.CharField(max_length=255, db_index=True)
+    question_id = models.CharField(max_length=255, db_index=True, null=True)
     block_type = models.CharField(max_length=31, db_index=True, choices=FORMBLOCK_TYPES)
     block_text = models.TextField()
-    size = models.CharField(max_length=2, null=True, choices=FORMBLOCK_SIZES)
-    choices = ArrayField(models.TextField(), default=list)  # Longest on prod: >511 chars
     required = models.BooleanField(default=True)
 
     @property

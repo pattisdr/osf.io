@@ -33,17 +33,11 @@ class RegistrationSchemaFormBlockSerializer(JSONAPISerializer):
 
     id = IDField(source='_id', read_only=True)
     type = TypeField()
-    page = ser.CharField(max_length=255, read_only=True)
-    section = ser.CharField(max_length=255, read_only=True)
     help_text = ser.CharField(read_only=True, allow_blank=True)
-    block_id = ser.CharField(max_length=255)
+    question_id = ser.CharField(max_length=255)
     block_type = ser.CharField(read_only=True)
     block_text = ser.CharField(allow_blank=True)
-    size = ser.CharField(read_only=True, allow_blank=True)
-    choices = ser.ListField(
-        child=ser.CharField(read_only=True, allow_blank=True),
-        default=list(),
-    )
+
     required = ser.BooleanField(default=True, read_only=True)
     index = ser.IntegerField(required=False, read_only=True, source='_order')
 

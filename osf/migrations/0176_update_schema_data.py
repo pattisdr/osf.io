@@ -64,7 +64,7 @@ def update_schema_configs(state, schema):
     RegistrationSchema = state.get_model('osf', 'registrationschema')
     for rs in RegistrationSchema.objects.filter(schema_version=2):
         rs.config = rs.schema.get('config', {})
-        assert not rs.config.get('tooltip', False)
+        # assert not rs.config.get('tooltip', False)
         if rs.schema.get('description', False):
             rs.config['tooltip'] = rs.schema['description']
         rs.save()
@@ -231,15 +231,71 @@ def unmap_formblocks(state, schema):
 def noop(*args, **kwargs):
     pass
 
+def create_block(state, schema_id, block_type, block_text='', required=False, help_text='',
+        question_id=''):
+    RegistrationFormBlock = state.get_model('osf', 'registrationformblock')
+
+    return RegistrationFormBlock.objects.create(
+        schema_id=schema_id,
+        block_type=block_type,
+        required=required,
+        block_text=block_text,
+        help_text=help_text,
+        question_id=question_id,
+    )
+
+# WIP exploring making schemas more flat -
+def map_osf_standard_pre_data_collection_registration(state, schema):
+    RegistrationSchema = state.get_model('osf', 'registrationschema')
+    schema = RegistrationSchema.objects.get(name='OSF-Standard Pre-Data Collection Registration', schema_version=2)
+
+    for page in schema.schema['pages']:
+        create_block(
+            state,
+            schema.id,
+            'h1',
+            block_text=page['title'],
+        )
+        for question in page['questions']:
+            create_block(
+                state,
+                schema.id,
+                'input-label',
+                block_text=question['title']
+            )
+            if question['format'] == 'singleselect':
+                create_block(
+                    state,
+                    schema.id,
+                    'singleselect',
+                    required=True,
+                    question_id=question['qid']
+                )
+                for option in question['options']:
+                    create_block(
+                        state,
+                        schema.id,
+                        'select-input-option',
+                        block_text=option
+                    )
+            elif question['format'] == 'textarea':
+                create_block(
+                    state,
+                    schema.id,
+                    'long-text-input',
+                )
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('osf', '0174_add_formblock_models'),
+        ('osf', '0175_alter_form_blocks_v2'),
     ]
 
     operations = [
         migrations.RunPython(remove_version_1_schemas, noop),
         migrations.RunPython(update_schemaless_registrations, noop),
         migrations.RunPython(update_schema_configs, unset_schema_configs),
-        migrations.RunPython(map_schema_to_formblocks, unmap_formblocks),
+        # migrations.RunPython(map_schema_to_formblocks, unmap_formblocks),
+        migrations.RunPython(map_osf_standard_pre_data_collection_registration, unmap_formblocks)
     ]
