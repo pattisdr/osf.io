@@ -14,6 +14,7 @@ class SchemaSerializer(JSONAPISerializer):
     type = TypeField()
 
     name = ser.CharField(read_only=True)
+    description = ser.CharField(read_only=True)
     schema_version = ser.IntegerField(read_only=True)
     schema = ser.DictField(read_only=True)
     active = ser.BooleanField(read_only=True)
@@ -36,9 +37,9 @@ class RegistrationSchemaFormBlockSerializer(JSONAPISerializer):
     help_text = ser.CharField(read_only=True, allow_blank=True)
     question_id = ser.CharField(max_length=255)
     block_type = ser.CharField(read_only=True)
-    block_text = ser.CharField(allow_blank=True)
+    display_text = ser.CharField(allow_blank=True)
 
-    required = ser.BooleanField(default=True, read_only=True)
+    required = ser.BooleanField(read_only=True)
     index = ser.IntegerField(required=False, read_only=True, source='_order')
 
     links = LinksField({

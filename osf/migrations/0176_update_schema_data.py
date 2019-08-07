@@ -55,10 +55,8 @@ def update_schema_configs(state, schema):
     RegistrationSchema = state.get_model('osf', 'registrationschema')
     # TODO, factor in AsPredictedSchema, version 3
     for rs in RegistrationSchema.objects.filter(schema_version=2):
-        rs.config = rs.schema.get('config', {})
-        # assert not rs.config.get('tooltip', False)
         if rs.schema.get('description', False):
-            rs.config['tooltip'] = rs.schema['description']
+            rs.description = rs.schema['description']
         rs.save()
 
 def unset_schema_configs(state, schema):
@@ -72,7 +70,7 @@ def unmap_formblocks(state, schema):
 def noop(*args, **kwargs):
     pass
 
-def create_block(state, schema_id, block_type, block_text='', required=False, help_text='',
+def create_block(state, schema_id, block_type, display_text='', required=False, help_text='',
         question_id=''):
     RegistrationFormBlock = state.get_model('osf', 'registrationformblock')
 
@@ -80,7 +78,7 @@ def create_block(state, schema_id, block_type, block_text='', required=False, he
         schema_id=schema_id,
         block_type=block_type,
         required=required,
-        block_text=block_text,
+        display_text=display_text,
         help_text=help_text,
         question_id=question_id,
     )
@@ -95,17 +93,19 @@ def split_options_into_blocks(state, rs, question):
             create_block(
                 state,
                 rs.id,
-                'select-input-other',
-                block_text=answer_text,
-                help_text=help_text
+                'select-other-option',
+                display_text=answer_text,
+                help_text=help_text,
+                question_id=get_question_id(question)
             )
         else:
             create_block(
                 state,
                 rs.id,
                 'select-input-option',
-                block_text=answer_text,
-                help_text=help_text
+                display_text=answer_text,
+                help_text=help_text,
+                question_id=get_question_id(question)
             )
 
 def get_question_id(question):
@@ -114,7 +114,11 @@ def get_question_id(question):
 def format_question(state, rs, question):
     # If there are subquestions, recurse and format subquestions
     if question.get('properties'):
-        for property in question.get('properties'):
+        for index, property in enumerate(question.get('properties')):
+            if not index:
+                property['title'] = question.get('title', '')
+                property['description'] = question.get('description', '')
+            property['qid'] = '{}.{}'.format(get_question_id(question), property.get('id', ''))
             format_question(state, rs, property)
     else:
         # Map the original schema section format to the new block_type, and create a schema block
@@ -123,7 +127,9 @@ def format_question(state, rs, question):
             state,
             rs.id,
             block_type,
+            display_text=question.get('title', ''),
             required=question.get('required', False),
+            help_text=question.get('description', ''),
             question_id=get_question_id(question)
         )
 
@@ -143,18 +149,10 @@ def map_schema_to_formblocksv2(state, schema):
                 state,
                 rs.id,
                 'page-heading',
-                block_text=page.get('title', ''),
+                display_text=page.get('title', ''),
                 help_text=page.get('description', '')
             )
             for question in page['questions']:
-                # Create question header
-                create_block(
-                    state,
-                    rs.id,
-                    'input-label',
-                    block_text=question.get('title', ''),
-                    help_text=question.get('description', ''),
-                )
                 format_question(state, rs, question)
 
 

@@ -14,7 +14,7 @@ FORMBLOCK_TYPES = [
     ('page-heading', 'page-heading'),
     ('section-heading', 'section-heading'),
     ('subsection-heading', 'subsection-heading'),
-    ('input-label', 'input-label'),
+    ('paragraph', 'paragraph'),
     ('short-text-input', 'short-text-input'),
     ('long-text-input', 'long-text-input'),
     ('file-input', 'file-input'),
@@ -22,7 +22,7 @@ FORMBLOCK_TYPES = [
     ('single-select-input', 'single-select-input'),
     ('multi-select-input', 'multi-select-input'),
     ('select-input-option', 'select-input-option'),
-    ('select-input-other', 'select-input-other'),
+    ('select-other-option', 'select-other-option'),
 ]
 
 
@@ -73,6 +73,7 @@ class AbstractSchema(ObjectIDMixin, BaseModel):
 
 class RegistrationSchema(AbstractSchema):
     config = DateTimeAwareJSONField(blank=True, default=dict)
+    description = models.TextField(blank=True, default='')
 
     @property
     def _config(self):
@@ -148,15 +149,14 @@ class RegistrationSchema(AbstractSchema):
 
 class RegistrationFormBlock(ObjectIDMixin, BaseModel):
     class Meta:
-        # unique_together = ('schema', 'block_id')
         order_with_respect_to = 'schema'
 
     schema = models.ForeignKey('RegistrationSchema', related_name='form_blocks', on_delete=models.CASCADE)
     help_text = models.TextField()
     question_id = models.CharField(max_length=255, db_index=True, null=True)
     block_type = models.CharField(max_length=31, db_index=True, choices=FORMBLOCK_TYPES)
-    block_text = models.TextField()
-    required = models.BooleanField(default=True)
+    display_text = models.TextField()
+    required = models.BooleanField(default=False)
 
     @property
     def absolute_api_v2_url(self):
