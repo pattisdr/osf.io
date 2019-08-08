@@ -15,6 +15,7 @@ FORMBLOCK_TYPES = [
     ('section-heading', 'section-heading'),
     ('subsection-heading', 'subsection-heading'),
     ('paragraph', 'paragraph'),
+    ('question-title', 'question-title'),
     ('short-text-input', 'short-text-input'),
     ('long-text-input', 'long-text-input'),
     ('file-input', 'file-input'),
@@ -153,7 +154,8 @@ class RegistrationFormBlock(ObjectIDMixin, BaseModel):
 
     schema = models.ForeignKey('RegistrationSchema', related_name='form_blocks', on_delete=models.CASCADE)
     help_text = models.TextField()
-    question_id = models.CharField(max_length=255, db_index=True, null=True)
+    answer_id = models.CharField(max_length=255, db_index=True, null=True)
+    chunk_id = models.CharField(max_length=24, db_index=True, null=True)
     block_type = models.CharField(max_length=31, db_index=True, choices=FORMBLOCK_TYPES)
     display_text = models.TextField()
     required = models.BooleanField(default=False)

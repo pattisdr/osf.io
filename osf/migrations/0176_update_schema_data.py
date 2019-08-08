@@ -3,6 +3,7 @@
 from __future__ import unicode_literals
 
 from django.db import migrations
+from osf.models.base import generate_object_id
 
 FORMAT_TYPE_TO_TYPE_MAP = {
     ('multiselect', 'choose'): 'multi-select-input',
@@ -71,7 +72,7 @@ def noop(*args, **kwargs):
     pass
 
 def create_block(state, schema_id, block_type, display_text='', required=False, help_text='',
-        question_id=''):
+        answer_id='', chunk_id=''):
     RegistrationFormBlock = state.get_model('osf', 'registrationformblock')
 
     return RegistrationFormBlock.objects.create(
@@ -80,23 +81,24 @@ def create_block(state, schema_id, block_type, display_text='', required=False, 
         required=required,
         display_text=display_text,
         help_text=help_text,
-        question_id=question_id,
+        answer_id=answer_id,
+        chunk_id=chunk_id,
     )
 
 # Split question multiple choice options into blocks
-def split_options_into_blocks(state, rs, question):
+def split_options_into_blocks(state, rs, question, chunk_id):
     for option in question.get('options', []):
         answer_text = option if isinstance(option, basestring) else option.get('text')
         help_text = '' if isinstance(option, basestring) else option.get('tooltip', '')
 
-        if answer_text.lower() == 'other':
+        if 'other' in answer_text.lower():
             create_block(
                 state,
                 rs.id,
                 'select-other-option',
                 display_text=answer_text,
                 help_text=help_text,
-                question_id=get_question_id(question)
+                chunk_id=chunk_id
             )
         else:
             create_block(
@@ -105,36 +107,82 @@ def split_options_into_blocks(state, rs, question):
                 'select-input-option',
                 display_text=answer_text,
                 help_text=help_text,
-                question_id=get_question_id(question)
+                chunk_id=chunk_id,
             )
 
-def get_question_id(question):
+def get_answer_id(question):
     return question.get('qid', '') or question.get('id', '')
 
-def format_question(state, rs, question):
+def find_title_description_help(question):
+    title = question.get('title', '')
+    description = question.get('description', '')
+    help = question.get('help', '')
+    help_text_keywords = ['please', 'choose', 'provide']
+
+    if title:
+        for keyword in help_text_keywords:
+            if keyword in description.lower():
+                help = description
+                description = ''
+    else:
+        title = description
+        description = ''
+
+    return title, description, help
+
+
+def format_question(state, rs, question, sub=False):
     # If there are subquestions, recurse and format subquestions
     if question.get('properties'):
-        for index, property in enumerate(question.get('properties')):
-            if not index:
-                property['title'] = question.get('title', '')
-                property['description'] = question.get('description', '')
-            property['qid'] = '{}.{}'.format(get_question_id(question), property.get('id', ''))
-            format_question(state, rs, property)
+        # Creates section or subsection
+        create_block(
+            state,
+            rs.id,
+            block_type='subsection-heading' if sub else 'section-heading',
+            display_text=question.get('title', '') or question.get('description', ''),
+        )
+        for property in question.get('properties'):
+            property['qid'] = '{}.{}'.format(get_answer_id(question), property.get('id', ''))
+            format_question(state, rs, property, sub=True)
     else:
+        chunk_id = generate_object_id()
+        title, description, help = find_title_description_help(question)
+
+        # Creates question title block
+        create_block(
+            state,
+            rs.id,
+            block_type='question-title',
+            display_text=title,
+            help_text='' if description else help,
+            chunk_id=chunk_id
+        )
+
+        # Creates paragraph block (question description)
+        if description:
+            create_block(
+                state,
+                rs.id,
+                block_type='paragraph',
+                display_text=description,
+                help_text=help,
+                chunk_id=chunk_id,
+            )
+
+        # Creates question input block - this block will correspond to an answer
         # Map the original schema section format to the new block_type, and create a schema block
         block_type = FORMAT_TYPE_TO_TYPE_MAP[(question.get('format'), question.get('type'))]
         create_block(
             state,
             rs.id,
             block_type,
-            display_text=question.get('title', ''),
             required=question.get('required', False),
-            help_text=question.get('description', ''),
-            question_id=get_question_id(question)
+            chunk_id=chunk_id,
+            answer_id=get_answer_id(question)
         )
 
         # If there are multiple choice answers, create blocks for these as well.
-        split_options_into_blocks(state, rs, question)
+        split_options_into_blocks(state, rs, question, chunk_id)
 
 
 def map_schema_to_formblocksv2(state, schema):

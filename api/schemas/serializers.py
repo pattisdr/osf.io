@@ -35,7 +35,8 @@ class RegistrationSchemaFormBlockSerializer(JSONAPISerializer):
     id = IDField(source='_id', read_only=True)
     type = TypeField()
     help_text = ser.CharField(read_only=True, allow_blank=True)
-    question_id = ser.CharField(max_length=255)
+    answer_id = ser.CharField(max_length=255)
+    chunk_id = ser.CharField(max_length=255)
     block_type = ser.CharField(read_only=True)
     display_text = ser.CharField(allow_blank=True)
 
