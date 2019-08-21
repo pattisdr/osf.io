@@ -1,6 +1,7 @@
 import pytz
 import markupsafe
 import logging
+import jsonschema
 
 from django.apps import apps
 from django.contrib.auth.models import Group
@@ -1722,3 +1723,120 @@ class SpamOverrideMixin(SpamMixin):
             )
             log.should_hide = True
             log.save()
+
+
+class RegistrationSchemaValidation(models.Model):
+    """
+    RegistrationSchema mixin for validation answers on DraftRegistration and Registration model.
+    Expects answers to be in flattened format, with question key top-level.
+    """
+
+    class Meta:
+        abstract = True
+
+    # For schema blocks validation, expected format for files
+    FILE_UPLOAD_SCHEMA = {
+        'type': 'object',
+        'additionalProperties': False,
+        'properties': {
+            'name': {'type': 'string'},
+            'id': {'type': 'string'}
+        },
+        'dependencies': {
+            'name': ['id'],
+            'id': ['name']
+        }
+    }
+
+    # For schema blocks validation
+    def get_multiple_choice_options(self, question):
+        """
+        Returns a dictionary with an 'enum' key, and a value as
+        an array with the possible multiple choice answers for a given question.
+
+        Schema blocks are linked by chunk_ids, so fetches multiple choice options
+        with the same chunk_id as the given question
+
+        :question SchemaBlock with an answer_id
+        """
+        options = self.schema_blocks.filter(
+            chunk_id=question.chunk_id,
+            block_type='select-input-option'
+        ).values_list('display_text', flat=True)
+
+        return {
+            'enum': list(options)
+        }
+
+    def get_jsonschema_type(self, block_type):
+        """
+        For a given schema block type, returns the corresponding
+        jsonschema type
+
+        :params block_type: string, SchemaBlock block_type
+        :return string
+        """
+        if block_type == 'file-input':
+            return 'array'
+        elif block_type == 'multi-select-input':
+            return 'array'
+        else:
+            return 'string'
+
+    # For schema blocks validation
+    def format_question_validation(self, question):
+        """
+        Returns json for validating an individual question
+
+        :params question SchemaBlock
+        """
+        if question.block_type == 'single-select-input':
+            property = self.get_multiple_choice_options(question)
+        elif question.block_type == 'multi-select-input':
+            property = {
+                'items': self.get_multiple_choice_options(question)
+            }
+        elif question.block_type == 'file-input':
+            property = {
+                'items': self.FILE_UPLOAD_SCHEMA
+            }
+        else:
+            property = {}
+
+        property['type'] = self.get_jsonschema_type(question.block_type)
+        return property
+
+    # For schema blocks validation
+    def build_flattened_jsonschema(self):
+        """
+        Builds jsonschema for validating flattened responses (answers field, in new workflow)
+        :params schema RegistrationSchema
+        :returns dictionary, jsonschema, for validation
+        """
+        properties = {}
+        # schema blocks corresponding to answers
+        questions = self.schema_blocks.filter(answer_id__isnull=False)
+        for question in questions:
+            properties[question.answer_id] = self.format_question_validation(question)
+
+        json_schema = {
+            'type': 'object',
+            'additionalProperties': False,
+            'properties': properties
+        }
+
+        required = questions.filter(required=True).values_list('answer_id', flat=True)
+        if required:
+            json_schema['required'] = list(required)
+
+        return json_schema
+
+    def validate_answers(self, answers):
+        json_schema = self.build_flattened_jsonschema()
+        try:
+            jsonschema.validate(answers, json_schema)
+        except jsonschema.ValidationError as e:
+            raise ValidationValueError(e.message)
+        except jsonschema.SchemaError as e:
+            raise ValidationValueError(e.message)
+        return True

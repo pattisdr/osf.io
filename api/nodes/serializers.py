@@ -1433,6 +1433,7 @@ class DraftRegistrationSerializer(JSONAPISerializer):
     registration_metadata = ser.DictField(required=False)
     datetime_initiated = VersionedDateTimeField(read_only=True)
     datetime_updated = VersionedDateTimeField(read_only=True)
+    answers = ser.DictField(required=False)
 
     branched_from = RelationshipField(
         related_view='nodes:node-detail',

@@ -5,6 +5,7 @@ import jsonschema
 from website.util import api_v2_url
 
 from osf.models.base import BaseModel, ObjectIDMixin
+from osf.models.mixins import RegistrationSchemaValidation
 from osf.utils.datetime_aware_jsonfield import DateTimeAwareJSONField
 from osf.exceptions import ValidationValueError, ValidationError
 
@@ -73,7 +74,7 @@ class AbstractSchema(ObjectIDMixin, BaseModel):
         return '(name={}, schema_version={}, id={})'.format(self.name, self.schema_version, self.id)
 
 
-class RegistrationSchema(AbstractSchema):
+class RegistrationSchema(AbstractSchema, RegistrationSchemaValidation):
     config = DateTimeAwareJSONField(blank=True, default=dict)
     description = models.TextField(null=True, blank=True)
 

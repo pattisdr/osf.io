@@ -80,6 +80,7 @@ def create_jsonschema_from_metaschema(metaschema, required_fields=False, is_revi
 
     return json_schema
 
+
 def get_object_jsonschema(question, required_fields, is_reviewer, is_required):
     """
     Returns jsonschema for nested objects within schema
