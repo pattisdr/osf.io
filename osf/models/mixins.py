@@ -1,4 +1,5 @@
 import pytz
+import copy
 import markupsafe
 import logging
 
@@ -1791,7 +1792,7 @@ class RegistrationResponseMixin(models.Model):
         :returns registration_metadata
         """
         schema = self.get_registration_schema
-        registration_responses = self.registration_responses
+        registration_responses = copy.deepcopy(self.registration_responses)
         # Pull out all registration_response_keys and their block types
         registration_response_keys = schema.schema_blocks.filter(
             registration_response_key__isnull=False
@@ -1803,7 +1804,7 @@ class RegistrationResponseMixin(models.Model):
         metadata = {}
 
         for registration_response_key_dict in registration_response_keys:
-            response_key = registration_response_key_dict['registration_response_key']
+            response_key = str(registration_response_key_dict['registration_response_key'])
             # Turns "confirmatory-analyses-further.further.question2c" into
             # ['confirmatory-analyses-further', 'value', 'further', 'value', 'question2c']
             nested_keys = response_key.replace('.', '.value.').split('.')
@@ -1818,7 +1819,6 @@ class RegistrationResponseMixin(models.Model):
                     registration_responses.get(response_key, '')
                 )
             )
-
         return metadata
 
     class Meta:
