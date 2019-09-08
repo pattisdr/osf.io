@@ -37,6 +37,20 @@ FORMAT_TYPE_TO_TYPE_MAP = {
     ('textarea-xl', 'string'): 'long-text-input',
 }
 
+# For registration_responses validation, expected format for files
+FILE_UPLOAD_SCHEMA = {
+    'type': 'object',
+    'additionalProperties': False,
+    'properties': {
+        'name': {'type': 'string'},
+        'id': {'type': 'string'}
+    },
+    'dependencies': {
+        'name': ['id'],
+        'id': ['name']
+    }
+}
+
 def get_osf_models():
     """
     Helper function to retrieve all osf related models.
@@ -411,6 +425,92 @@ def unmap_schemablocks(*args):
     state = args[0]
     RegistrationSchemaBlock = state.get_model('osf', 'registrationschemablock')
     RegistrationSchemaBlock.objects.all().delete()
+
+
+# For registration_responses validation
+def get_multiple_choice_options(registration_schema, question):
+    """
+    Returns a dictionary with an 'enum' key, and a value as
+    an array with the possible multiple choice answers for a given question.
+    Schema blocks are linked by chunk_ids, so fetches multiple choice options
+    with the same chunk_id as the given question
+    :question SchemaBlock with an registration_response_key
+    """
+    options = registration_schema.schema_blocks.filter(
+        schema_block_group_key=question.schema_block_group_key,
+        block_type='select-input-option'
+    ).values_list('display_text', flat=True)
+
+    return {
+        'enum': list(options)
+    }
+
+# For registration_responses validation
+def get_jsonschema_type(block_type):
+    """
+    For a given schema block type, returns the corresponding
+    jsonschema type
+    :params block_type: string, SchemaBlock block_type
+    :return string
+    """
+    if block_type == 'file-input':
+        return 'array'
+    elif block_type == 'multi-select-input':
+        return 'array'
+    else:
+        return 'string'
+
+# For registration_responses validation
+def format_question_validation(registration_schema, question):
+    """
+    Returns json for validating an individual question
+    :params question SchemaBlock
+    """
+    if question.block_type == 'single-select-input':
+        property = get_multiple_choice_options(registration_schema, question)
+    elif question.block_type == 'multi-select-input':
+        property = {
+            'items': get_multiple_choice_options(registration_schema, question)
+        }
+    elif question.block_type == 'file-input':
+        property = {
+            'items': FILE_UPLOAD_SCHEMA
+        }
+    else:
+        property = {}
+
+    property['type'] = get_jsonschema_type(question.block_type)
+    # Stashing the question title on the jsonschema's description field
+    property['description'] = registration_schema.schema_blocks.get(
+        schema_block_group_key=question.schema_block_group_key,
+        block_type='question-title'
+    ).display_text
+    return property
+
+# For registration_responses validation
+def build_flattened_jsonschema(registration_schema):
+    """
+    Builds jsonschema for validating flattened registration_responses field
+    :params schema RegistrationSchema
+    :returns dictionary, jsonschema, for validation
+    """
+    properties = {}
+    # schema blocks corresponding to registration_responses
+    questions = registration_schema.schema_blocks.filter(registration_response_key__isnull=False)
+    for question in questions:
+        properties[question.registration_response_key] = format_question_validation(registration_schema, question)
+
+    json_schema = {
+        'type': 'object',
+        'additionalProperties': False,
+        'properties': properties
+    }
+
+    required = questions.filter(required=True).values_list('registration_response_key', flat=True)
+    if required:
+        json_schema['required'] = list(required)
+
+    return json_schema
 
 
 class UpdateRegistrationSchemas(Operation):

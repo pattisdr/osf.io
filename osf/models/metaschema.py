@@ -76,6 +76,7 @@ class AbstractSchema(ObjectIDMixin, BaseModel):
 class RegistrationSchema(AbstractSchema):
     config = DateTimeAwareJSONField(blank=True, default=dict)
     description = models.TextField(null=True, blank=True)
+    registration_responses_jsonschema = DateTimeAwareJSONField(default=dict, blank=True)
 
     @property
     def _config(self):
@@ -147,6 +148,39 @@ class RegistrationSchema(AbstractSchema):
         except jsonschema.SchemaError as e:
             raise ValidationValueError(e.message)
         return
+
+    def validate_registration_responses(self, registration_responses):
+        """
+        Validates registration_responses against the cached jsonschema on the RegistrationSchema.
+        The `title` of the question is stashed under the description for the particular question property
+        for forumulating a more clear error response.
+        """
+        try:
+            jsonschema.validate(registration_responses, self.registration_responses_jsonschema)
+        except jsonschema.ValidationError as e:
+            properties = self.registration_responses_jsonschema.get('properties', {})
+            relative_path = getattr(e, 'relative_path', None)
+            question_id = relative_path[0] if relative_path else ''
+            if properties.get(question_id, None):
+                question_title = properties.get(question_id).get('description') or question_id
+                if e.relative_schema_path[0] == 'required':
+                    raise ValidationError(
+                        'For your registration the \'{}\' field is required'.format(question_title)
+                    )
+                elif 'enum' in properties.get(question_id):
+                    raise ValidationError(
+                        'For your registration, your response to the \'{}\' field is invalid, your response must be one of the provided options.'.format(
+                            question_title,
+                        ),
+                    )
+                else:
+                    raise ValidationError(
+                        'For your registration, your response to the \'{}\' field is invalid. {}'.format(question_title, e.message),
+                    )
+            raise ValidationError(e.message)
+        except jsonschema.SchemaError as e:
+            raise ValidationValueError(e.message)
+        return True
 
 
 class FileMetadataSchema(AbstractSchema):
