@@ -43,4 +43,9 @@ class Migration(migrations.Migration):
             name='registration_responses_migrated',
             field=models.NullBooleanField(default=True),
         ),
+        migrations.AddField(
+            model_name='registrationschema',
+            name='registration_responses_jsonschema',
+            field=osf.utils.datetime_aware_jsonfield.DateTimeAwareJSONField(blank=True, default=dict, encoder=osf.utils.datetime_aware_jsonfield.DateTimeAwareJSONEncoder),
+        )
     ]

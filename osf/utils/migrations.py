@@ -191,8 +191,10 @@ def ensure_schemas(*args):
         if created:
             logger.info('Added schema {} to the database'.format(schema['name']))
 
-        schema_obj.registration_responses_jsonschema = build_flattened_jsonschema(schema_obj)
-        schema_obj.save()
+        if hasattr(schema_obj, 'registration_responses_jsonschema'):
+            # `registration_responses_jsonschema` field won't exist for historical migrations
+            schema_obj.registration_responses_jsonschema = build_flattened_jsonschema(schema_obj)
+            schema_obj.save()
 
     logger.info('Ensured {} schemas are in the database'.format(schema_count))
 

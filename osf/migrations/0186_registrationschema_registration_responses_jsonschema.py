@@ -3,7 +3,6 @@
 from __future__ import unicode_literals
 
 from django.db import migrations
-import osf.utils.datetime_aware_jsonfield
 from osf.utils.migrations import build_flattened_jsonschema
 
 
@@ -26,10 +25,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AddField(
-            model_name='registrationschema',
-            name='registration_responses_jsonschema',
-            field=osf.utils.datetime_aware_jsonfield.DateTimeAwareJSONField(blank=True, default=dict, encoder=osf.utils.datetime_aware_jsonfield.DateTimeAwareJSONEncoder),
-        ),
         migrations.RunPython(migrate_registration_responses_jsonschema, clear_registration_responses_jsonschema),
     ]
