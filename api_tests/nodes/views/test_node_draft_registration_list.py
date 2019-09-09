@@ -510,6 +510,58 @@ class TestDraftRegistrationCreate(DraftRegistrationTestCase):
         assert data['embeds']['branched_from']['data']['id'] == project_public._id
         assert data['embeds']['initiator']['data']['id'] == user._id
 
+    def test_required_registration_responses_questions_not_required_on_post(
+            self, app, user, provider, project_public, prereg_metadata):
+        prereg_schema = RegistrationSchema.objects.get(
+            name='Prereg Challenge',
+            schema_version=SCHEMA_VERSION)
+
+        prereg_draft_registration = DraftRegistrationFactory(
+            initiator=user,
+            registration_schema=prereg_schema,
+            branched_from=project_public
+        )
+
+        url = '/{}nodes/{}/draft_registrations/?embed=initiator&embed=branched_from'.format(
+            API_BASE, project_public._id)
+
+        registration_responses = {'q1': 'answer to the question'}
+        prereg_draft_registration.registration_metadata = {}
+        prereg_draft_registration.save()
+
+        payload = {
+            'data': {
+                'type': 'draft_registrations',
+                'attributes': {
+                    'registration_responses': registration_responses
+                },
+                'relationships': {
+                    'registration_schema': {
+                        'data': {
+                            'type': 'registration_schema',
+                            'id': prereg_schema._id
+                        }
+                    },
+                    'provider': {
+                        'data': {
+                            'type': 'registration-providers',
+                            'id': provider._id,
+                        }
+                    }
+                }
+            }
+        }
+        res = app.post_json_api(
+            url, payload, auth=user.auth,
+            expect_errors=True)
+        assert res.status_code == 201
+        data = res.json['data']
+        assert res.json['data']['attributes']['registration_metadata']['q1']['value'] == registration_responses['q1']
+        assert res.json['data']['attributes']['registration_responses']['q1'] == registration_responses['q1']
+        assert prereg_schema._id in data['relationships']['registration_schema']['links']['related']['href']
+        assert data['embeds']['branched_from']['data']['id'] == project_public._id
+        assert data['embeds']['initiator']['data']['id'] == user._id
+
     def test_registration_supplement_must_be_supplied(
             self, app, user, url_draft_registrations):
         draft_data = {

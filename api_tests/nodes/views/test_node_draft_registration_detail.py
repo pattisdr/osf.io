@@ -300,19 +300,6 @@ class TestDraftRegistrationUpdate(DraftRegistrationTestCase):
         )
         assert res.status_code == 403
 
-    def test_registration_metadata_must_be_supplied(
-            self, app, user, payload, url_draft_registrations):
-        payload['data']['attributes'] = {}
-
-        res = app.put_json_api(
-            url_draft_registrations,
-            payload, auth=user.auth,
-            expect_errors=True)
-        errors = res.json['errors'][0]
-        assert res.status_code == 400
-        assert errors['source']['pointer'] == '/data/attributes/registration_metadata'
-        assert errors['detail'] == 'This field is required.'
-
     def test_registration_metadata_must_be_a_dictionary(
             self, app, user, payload, url_draft_registrations):
         payload['data']['attributes']['registration_metadata'] = 'Registration data'
@@ -432,6 +419,37 @@ class TestDraftRegistrationUpdate(DraftRegistrationTestCase):
         assert res.status_code == 200
         assert res.json['data']['attributes']['registration_metadata']['q2']['value'] == 'New response'
         assert 'q1' not in res.json['data']['attributes']['registration_metadata']
+
+    def test_required_registration_responses_questions_not_required_on_update(
+            self, app, user, project_public, draft_registration_prereg):
+
+        url = '/{}nodes/{}/draft_registrations/{}/'.format(
+            API_BASE, project_public._id, draft_registration_prereg._id)
+
+        registration_responses = {
+            'q1': 'First question answered'
+        }
+
+        draft_registration_prereg.registration_responses = {}
+        draft_registration_prereg.registration_metadata = {}
+        draft_registration_prereg.save()
+
+        payload = {
+            'data': {
+                'id': draft_registration_prereg._id,
+                'type': 'draft_registrations',
+                'attributes': {
+                    'registration_responses': registration_responses
+                }
+            }
+        }
+
+        res = app.put_json_api(
+            url, payload, auth=user.auth,
+            expect_errors=True)
+        assert res.status_code == 200
+        assert res.json['data']['attributes']['registration_metadata']['q1']['value'] == registration_responses['q1']
+        assert res.json['data']['attributes']['registration_responses']['q1'] == registration_responses['q1']
 
     def test_reviewer_can_update_draft_registration(
             self, app, project_public,

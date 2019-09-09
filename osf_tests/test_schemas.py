@@ -34,13 +34,18 @@ class TestRegistrationSchemaValidation:
 
     @pytest.fixture()
     def prereg_schema(self):
-        reg = RegistrationSchema.objects.get(name='Prereg Challenge', schema_version=2)
-        return reg
+        schema = RegistrationSchema.objects.get(name='Prereg Challenge', schema_version=2)
+        return schema
 
     @pytest.fixture()
     def osf_standard_schema(self):
-        reg = RegistrationSchema.objects.get(name='OSF-Standard Pre-Data Collection Registration', schema_version=2)
-        return reg
+        schema = RegistrationSchema.objects.get(name='OSF-Standard Pre-Data Collection Registration', schema_version=2)
+        return schema
+
+    @pytest.fixture()
+    def registered_report_schema(self):
+        schema = RegistrationSchema.objects.get(name='Registered Report Protocol Preregistration', schema_version=2)
+        return schema
 
     @pytest.fixture()
     def prereg_test_data(self):
@@ -133,3 +138,12 @@ class TestRegistrationSchemaValidation:
         with pytest.raises(ValidationValueError) as excinfo:
             prereg_schema.validate_registration_responses(prereg_test_data)
         assert excinfo.value.message == "For your registration, your response to the 'q13.uploader' field is invalid. u'id' is a dependency of u'name'"
+
+    def test_validate_required_fields(self, registered_report_schema):
+        # Passing in required_fields is True enforces that required fields are present
+        with pytest.raises(ValidationValueError) as excinfo:
+            registered_report_schema.validate_registration_responses({}, required_fields=True)
+        assert excinfo.value.message == "u'q1' is a required property"
+
+        validated = registered_report_schema.validate_registration_responses({})
+        assert validated is True

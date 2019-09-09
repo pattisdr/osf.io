@@ -1497,6 +1497,32 @@ class DraftRegistrationSerializer(JSONAPISerializer):
     def get_absolute_url(self, obj):
         return obj.absolute_url
 
+    def update_metadata(self, draft, metadata, reviewer, required_fields=False):
+        try:
+            # Required fields are only required when creating the actual registration, not updating the draft.
+            draft.validate_metadata(metadata=metadata, reviewer=reviewer, required_fields=required_fields)
+        except ValidationError as e:
+            raise exceptions.ValidationError(e.message)
+        draft.update_metadata(metadata)
+        draft.save()
+
+    def update_registration_responses(self, draft, registration_responses, required_fields=False):
+        # New workflow - at some point `registration_metadata` will be deprecated, but for now,
+        # we support data coming in on either field, registration_metadata (expanded) or registration_responses (flat)
+        try:
+            draft.validate_registration_responses(registration_responses=registration_responses, required_fields=required_fields)
+        except ValidationError as e:
+            raise exceptions.ValidationError(e.message)
+        draft.update_registration_responses(registration_responses)
+        draft.save()
+
+    def enforce_metadata_or_registration_responses(self, metadata=None, registration_responses=None):
+        if metadata and registration_responses:
+            raise exceptions.ValidationError(
+                'You cannot include both `registration_metadata` and `registration_responses` in your request. Please use' +
+                ' `registration_responses` as `registration_metadata` will be deprecated in the future.',
+            )
+
     def create(self, validated_data):
         initiator = get_user_auth(self.context['request']).user
         node = self.context['view'].get_node()
@@ -1510,28 +1536,17 @@ class DraftRegistrationSerializer(JSONAPISerializer):
         # TODO: this
         # if not provider.schemas_acceptable.filter(id=schema.id).exists():
         #     raise exceptions.ValidationError('Invalid schema for provider.')
-        if metadata and registration_responses:
-            raise exceptions.ValidationError(
-                'You cannot include both `registration_metadata` and `registration_responses` in your request. Please use' +
-                ' `registration_responses` as `registration_metadata` will be deprecated in the future.',
-            )
+        self.enforce_metadata_or_registration_responses(metadata, registration_responses)
 
         draft = DraftRegistration.create_from_node(node=node, user=initiator, schema=schema, provider=provider)
         reviewer = is_prereg_admin_not_project_admin(self.context['request'], draft)
 
         if metadata:
-            try:
-                # Required fields are only required when creating the actual registration, not updating the draft.
-                draft.validate_metadata(metadata=metadata, reviewer=reviewer, required_fields=False)
-            except ValidationError as e:
-                raise exceptions.ValidationError(e.message)
-            draft.update_metadata(metadata)
-            draft.save()
+            self.update_metadata(draft, metadata, reviewer)
 
         if registration_responses:
-            # TODO validate registration_responses
-            draft.update_registration_responses(registration_responses)
-            draft.save()
+            self.update_registration_responses(draft, registration_responses)
+
         return draft
 
     class Meta:
@@ -1540,13 +1555,15 @@ class DraftRegistrationSerializer(JSONAPISerializer):
 
 class DraftRegistrationDetailSerializer(DraftRegistrationSerializer):
     """
-    Overrides DraftRegistrationSerializer to make id and registration_metadata required.
+    Overrides DraftRegistrationSerializer to make id required.
     registration_supplement cannot be changed after draft has been created.
 
     Also makes registration_supplement read-only.
+
+    Either pass in registration_metadata (old workflow) or registration_responses
+    (new workflow), not both.  registration_metadata will eventually be deprecated.
     """
     id = IDField(source='_id', required=True)
-    registration_metadata = ser.DictField(required=True)
 
     registration_schema = RelationshipField(
         related_view='schemas:registration-schema-detail',
@@ -1564,15 +1581,15 @@ class DraftRegistrationDetailSerializer(DraftRegistrationSerializer):
         Update draft instance with the validated metadata.
         """
         metadata = validated_data.pop('registration_metadata', None)
+        registration_responses = validated_data.pop('registration_responses', None)
         reviewer = is_prereg_admin_not_project_admin(self.context['request'], draft)
+
+        self.enforce_metadata_or_registration_responses(metadata, registration_responses)
+
         if metadata:
-            try:
-                # Required fields are only required when creating the actual registration, not updating the draft.
-                draft.validate_metadata(metadata=metadata, reviewer=reviewer, required_fields=False)
-            except ValidationError as e:
-                raise exceptions.ValidationError(e.message)
-            draft.update_metadata(metadata)
-            draft.save()
+            self.update_metadata(draft, metadata, reviewer)
+        if registration_responses:
+            self.update_registration_responses(draft, registration_responses)
         return draft
 
 

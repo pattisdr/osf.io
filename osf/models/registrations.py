@@ -697,3 +697,9 @@ class DraftRegistration(ObjectIDMixin, RegistrationResponseMixin, BaseModel):
         Validates draft's metadata
         """
         return self.registration_schema.validate_metadata(*args, **kwargs)
+
+    def validate_registration_responses(self, *args, **kwargs):
+        """
+        Validates draft's registration_responses
+        """
+        return self.registration_schema.validate_registration_responses(*args, **kwargs)

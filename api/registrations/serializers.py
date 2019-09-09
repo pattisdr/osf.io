@@ -543,6 +543,8 @@ class RegistrationCreateSerializer(RegistrationSerializer):
                                              ' registered: {}'.format(', '.join(orphan_files_names)))
 
         try:
+            # Validating registration_responses - whether `registration_responses` or `registration_metadata` were
+            # populated on the draft, the other field was built and persisted to the draft as well.
             draft.validate_metadata(metadata=draft.registration_metadata, reviewer=reviewer, required_fields=True)
         except ValidationValueError:
             log_exception()  # Probably indicates a bug on our end, so log to sentry

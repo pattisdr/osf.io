@@ -149,16 +149,20 @@ class RegistrationSchema(AbstractSchema):
             raise ValidationValueError(e.message)
         return
 
-    def validate_registration_responses(self, registration_responses):
+    def validate_registration_responses(self, registration_responses, required_fields=False):
         """
         Validates registration_responses against the cached jsonschema on the RegistrationSchema.
         The `title` of the question is stashed under the description for the particular question property
         for forumulating a more clear error response.
         """
+        validation_schema = self.registration_responses_jsonschema
+        if not required_fields and validation_schema.get('required', None):
+            del validation_schema['required']
+
         try:
-            jsonschema.validate(registration_responses, self.registration_responses_jsonschema)
+            jsonschema.validate(registration_responses, validation_schema)
         except jsonschema.ValidationError as e:
-            properties = self.registration_responses_jsonschema.get('properties', {})
+            properties = validation_schema.get('properties', {})
             relative_path = getattr(e, 'relative_path', None)
             question_id = relative_path[0] if relative_path else ''
             if properties.get(question_id, None):
