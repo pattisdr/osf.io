@@ -436,8 +436,8 @@ def get_multiple_choice_options(registration_schema, question):
     """
     Returns a dictionary with an 'enum' key, and a value as
     an array with the possible multiple choice answers for a given question.
-    Schema blocks are linked by chunk_ids, so fetches multiple choice options
-    with the same chunk_id as the given question
+    Schema blocks are linked by schema_block_group_keys, so fetches multiple choice options
+    with the same schema_block_group_key as the given question
     :question SchemaBlock with an registration_response_key
     """
     options = registration_schema.schema_blocks.filter(
