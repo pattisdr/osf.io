@@ -43,12 +43,12 @@ FILE_UPLOAD_SCHEMA = {
     'type': 'object',
     'additionalProperties': False,
     'properties': {
-        'name': {'type': 'string'},
-        'id': {'type': 'string'}
+        'file_name': {'type': 'string'},
+        'file_id': {'type': 'string'}
     },
     'dependencies': {
-        'name': ['id'],
-        'id': ['name']
+        'file_name': ['file_id'],
+        'file_id': ['file_name']
     }
 }
 
