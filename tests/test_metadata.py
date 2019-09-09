@@ -34,6 +34,11 @@ class TestMetaData(OsfTestCase):
             len(OSF_META_SCHEMAS)
         )
 
+        assert_equal(
+            RegistrationSchema.objects.exclude(registration_responses_jsonschema={}).count(),
+            len(OSF_META_SCHEMAS)
+        )
+
     def test_reigstrationschema_uniqueness_is_enforced_in_the_database(self):
         RegistrationSchema(name='foo', schema={'foo': 42}, schema_version=1).save()
         assert_raises(ValidationError, RegistrationSchema(name='foo', schema={'bar': 24}, schema_version=1).save)

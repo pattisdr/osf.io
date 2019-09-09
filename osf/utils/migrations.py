@@ -16,6 +16,7 @@ from osf.models import NodeLicense, RegistrationSchema
 from osf.models.base import generate_object_id
 from website.project.metadata.schemas import OSF_META_SCHEMAS
 
+
 logger = logging.getLogger(__file__)
 
 
@@ -189,6 +190,9 @@ def ensure_schemas(*args):
 
         if created:
             logger.info('Added schema {} to the database'.format(schema['name']))
+
+        schema_obj.registration_responses_jsonschema = build_flattened_jsonschema(schema_obj)
+        schema_obj.save()
 
     logger.info('Ensured {} schemas are in the database'.format(schema_count))
 
