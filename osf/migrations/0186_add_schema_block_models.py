@@ -12,7 +12,7 @@ import osf.utils.datetime_aware_jsonfield
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('osf', '0181_osfuser_contacted_deactivation'),
+        ('osf', '0185_basefilenode_versions'),
     ]
 
     operations = [
@@ -27,7 +27,7 @@ class Migration(migrations.Migration):
                 ('example_text', models.TextField(null=True)),
                 ('registration_response_key', models.CharField(blank=True, db_index=True, max_length=255, null=True)),
                 ('schema_block_group_key', models.CharField(db_index=True, max_length=24, null=True)),
-                ('block_type', models.CharField(choices=[(b'page-heading', b'page-heading'), (b'section-heading', b'section-heading'), (b'subsection-heading', b'subsection-heading'), (b'paragraph', b'paragraph'), (b'question-title', b'question-title'), (b'short-text-input', b'short-text-input'), (b'long-text-input', b'long-text-input'), (b'file-input', b'file-input'), (b'contributors-input', b'contributors-input'), (b'single-select-input', b'single-select-input'), (b'multi-select-input', b'multi-select-input'), (b'select-input-option', b'select-input-option'), (b'select-other-option', b'select-other-option')], db_index=True, max_length=31)),
+                ('block_type', models.CharField(choices=[(b'page-heading', b'page-heading'), (b'section-heading', b'section-heading'), (b'subsection-heading', b'subsection-heading'), (b'paragraph', b'paragraph'), (b'question-label', b'question-label'), (b'short-text-input', b'short-text-input'), (b'long-text-input', b'long-text-input'), (b'file-input', b'file-input'), (b'contributors-input', b'contributors-input'), (b'single-select-input', b'single-select-input'), (b'multi-select-input', b'multi-select-input'), (b'select-input-option', b'select-input-option'), (b'select-other-option', b'select-other-option')], db_index=True, max_length=31)),
                 ('display_text', models.TextField()),
                 ('required', models.BooleanField(default=False)),
             ],
