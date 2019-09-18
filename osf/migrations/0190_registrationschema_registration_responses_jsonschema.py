@@ -21,7 +21,7 @@ def migrate_registration_responses_jsonschema(state, schema):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('osf', '0185_migrate_registered_meta'),
+        ('osf', '0189_migrate_registered_meta'),
     ]
 
     operations = [

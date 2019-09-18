@@ -489,7 +489,7 @@ def format_question_validation(registration_schema, question):
     # Stashing the question title on the jsonschema's description field
     property['description'] = registration_schema.schema_blocks.get(
         schema_block_group_key=question.schema_block_group_key,
-        block_type='question-title'
+        block_type='question-label'
     ).display_text
     return property
 
