@@ -44,11 +44,13 @@ FILE_UPLOAD_SCHEMA = {
     'additionalProperties': False,
     'properties': {
         'file_name': {'type': 'string'},
-        'file_id': {'type': 'string'}
+        'file_id': {'type': 'string'},
+        'sha256': {'type': 'string'}
     },
     'dependencies': {
-        'file_name': ['file_id'],
-        'file_id': ['file_name']
+        'file_name': ['file_id', 'sha256'],
+        'file_id': ['file_name', 'sha256'],
+        'sha256': ['file_name', 'file_id']
     }
 }
 
@@ -447,8 +449,12 @@ def get_multiple_choice_options(registration_schema, question):
         block_type='select-input-option'
     ).values_list('display_text', flat=True)
 
+    options = list(options)
+    if '' not in options:
+        options.append('')
+
     return {
-        'enum': list(options)
+        'enum': options
     }
 
 # For registration_responses validation

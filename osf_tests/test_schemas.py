@@ -65,7 +65,8 @@ class TestRegistrationSchemaValidation:
             'q13.question': 'This is a test',
             'q13.uploader': [{
                 'file_name': 'Alphabet.txt',
-                'file_id': '5d5d61704a445a02048ad476'
+                'file_id': '5d5d61704a445a02048ad476',
+                'sha256': 'asdfgj'
             }],
             'q14': 'Meta-Analysis - A systematic review of published studies.',
             'q15': ['No blinding is involved in this study.', 'For studies that involve human subjects, they will not know the treatment group to which they have been assigned.'],
@@ -138,6 +139,11 @@ class TestRegistrationSchemaValidation:
         with pytest.raises(ValidationValueError) as excinfo:
             prereg_schema.validate_registration_responses(prereg_test_data)
         assert excinfo.value.message == "For your registration, your response to the 'q13.uploader' field is invalid. u'file_id' is a dependency of u'file_name'"
+
+        prereg_test_data['q13.uploader'] = [{'file_name': '12345', 'file_id': 'abcde'}]
+        with pytest.raises(ValidationValueError) as excinfo:
+            prereg_schema.validate_registration_responses(prereg_test_data)
+        assert excinfo.value.message == "For your registration, your response to the 'q13.uploader' field is invalid. u'sha256' is a dependency of u'file_name'"
 
     def test_validate_required_fields(self, registered_report_schema):
         # Passing in required_fields is True enforces that required fields are present
