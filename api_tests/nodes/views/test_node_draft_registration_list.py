@@ -727,6 +727,74 @@ class TestDraftRegistrationCreate(DraftRegistrationTestCase):
         assert errors['detail'] == 'For your registration your response to the \'Has data collection begun for this project?\'' \
                                    ' field is invalid, your response must be one of the provided options.'
 
+    def test_registration_responses_must_be_a_dictionary(
+            self, app, user, payload, url_draft_registrations):
+        payload['data']['attributes']['registration_responses'] = 'Registration data'
+
+        res = app.post_json_api(
+            url_draft_registrations,
+            payload, auth=user.auth,
+            expect_errors=True)
+        errors = res.json['errors'][0]
+        assert res.status_code == 400
+        assert errors['source']['pointer'] == '/data/attributes/registration_responses'
+        assert errors['detail'] == 'Expected a dictionary of items but got type "unicode".'
+
+    def test_registration_responses_question_values_must_not_be_dictionaries(
+            self, app, user, payload, url_draft_registrations):
+        schema = RegistrationSchema.objects.get(
+            name='OSF-Standard Pre-Data Collection Registration',
+            schema_version=SCHEMA_VERSION)
+        payload['data']['relationships']['registration_schema']['data']['id'] = schema._id
+        payload['data']['attributes']['registration_responses'] = {}
+        payload['data']['attributes']['registration_responses']['datacompletion'] = {'value': 'No, data collection has not begun'}
+
+        res = app.post_json_api(
+            url_draft_registrations,
+            payload, auth=user.auth,
+            expect_errors=True)
+        errors = res.json['errors'][0]
+        assert res.status_code == 400
+        assert errors['detail'] == 'For your registration, your response to the \'Has data collection begun for this project?\' field' \
+                                   ' is invalid, your response must be one of the provided options.'
+
+    def test_question_in_registration_responses_must_be_in_schema(
+            self, app, user, payload, url_draft_registrations):
+        schema = RegistrationSchema.objects.get(
+            name='OSF-Standard Pre-Data Collection Registration',
+            schema_version=SCHEMA_VERSION)
+
+        payload['data']['relationships']['registration_schema']['data']['id'] = schema._id
+        payload['data']['attributes']['registration_responses'] = {}
+        payload['data']['attributes']['registration_responses']['q11'] = 'No, data collection has not begun'
+
+        res = app.post_json_api(
+            url_draft_registrations,
+            payload, auth=user.auth,
+            expect_errors=True)
+        errors = res.json['errors'][0]
+        assert res.status_code == 400
+        assert errors['detail'] == 'Additional properties are not allowed (u\'q11\' was unexpected)'
+
+    def test_registration_responses_multiple_choice_question_value_must_match_value_in_schema(
+            self, app, user, payload, url_draft_registrations):
+        schema = RegistrationSchema.objects.get(
+            name='OSF-Standard Pre-Data Collection Registration',
+            schema_version=SCHEMA_VERSION)
+
+        payload['data']['relationships']['registration_schema']['data']['id'] = schema._id
+        payload['data']['attributes']['registration_responses'] = {}
+        payload['data']['attributes']['registration_responses']['datacompletion'] = 'Nope, data collection has not begun'
+
+        res = app.post_json_api(
+            url_draft_registrations,
+            payload, auth=user.auth,
+            expect_errors=True)
+        errors = res.json['errors'][0]
+        assert res.status_code == 400
+        assert errors['detail'] == 'For your registration, your response to the \'Has data collection begun for this project?\'' \
+                                   ' field is invalid, your response must be one of the provided options.'
+
     def test_reviewer_cannot_create_draft_registration(
             self, app, user_read_contrib, project_public,
             payload, url_draft_registrations):

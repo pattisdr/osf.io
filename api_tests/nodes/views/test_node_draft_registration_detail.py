@@ -199,6 +199,22 @@ class TestDraftRegistrationUpdate(DraftRegistrationTestCase):
         }
 
     @pytest.fixture()
+    def payload_with_registration_responses(self, draft_registration):
+        return {
+            'data': {
+                'id': draft_registration._id,
+                'type': 'draft_registrations',
+                'attributes': {
+                    'registration_responses': {
+                        'datacompletion': 'No, data collection has not begun',
+                        'looked': 'No',
+                        'comments': 'This is my first registration.'
+                    }
+                }
+            }
+        }
+
+    @pytest.fixture()
     def administer_permission(self):
         return Permission.objects.get(codename='administer_prereg')
 
@@ -450,6 +466,59 @@ class TestDraftRegistrationUpdate(DraftRegistrationTestCase):
         assert res.status_code == 200
         assert res.json['data']['attributes']['registration_metadata']['q1']['value'] == registration_responses['q1']
         assert res.json['data']['attributes']['registration_responses']['q1'] == registration_responses['q1']
+
+    def test_registration_responses_must_be_a_dictionary(
+            self, app, user, payload_with_registration_responses, url_draft_registrations):
+        payload_with_registration_responses['data']['attributes']['registration_responses'] = 'Registration data'
+
+        res = app.put_json_api(
+            url_draft_registrations,
+            payload_with_registration_responses, auth=user.auth,
+            expect_errors=True)
+        errors = res.json['errors'][0]
+        assert res.status_code == 400
+        assert errors['source']['pointer'] == '/data/attributes/registration_responses'
+        assert errors['detail'] == 'Expected a dictionary of items but got type "unicode".'
+
+    def test_registration_responses_question_values_should_not_be_dicts(
+            self, app, user, payload_with_registration_responses, url_draft_registrations):
+        payload_with_registration_responses['data']['attributes']['registration_responses']['datacompletion'] = {'value': 'No, data collection has not begun'}
+
+        res = app.put_json_api(
+            url_draft_registrations,
+            payload_with_registration_responses, auth=user.auth,
+            expect_errors=True)
+        errors = res.json['errors'][0]
+        assert res.status_code == 400
+        assert errors['detail'] == 'For your registration, your response to the \'Has data collection begun for this project?\'' \
+                                   ' field is invalid, your response must be one of the provided options.'
+
+    def test_question_in_registration_responses_must_be_in_schema(
+            self, app, user, payload_with_registration_responses, url_draft_registrations):
+        payload_with_registration_responses['data']['attributes']['registration_responses']['q11'] = {
+            'value': 'No, data collection has not begun'
+        }
+
+        res = app.put_json_api(
+            url_draft_registrations,
+            payload_with_registration_responses, auth=user.auth,
+            expect_errors=True)
+        errors = res.json['errors'][0]
+        assert res.status_code == 400
+        assert errors['detail'] == 'Additional properties are not allowed (u\'q11\' was unexpected)'
+
+    def test_multiple_choice_question_value_in_registration_responses_must_match_value_in_schema(
+            self, app, user, payload_with_registration_responses, url_draft_registrations):
+        payload_with_registration_responses['data']['attributes']['registration_responses']['datacompletion'] = 'Nope, data collection has not begun'
+
+        res = app.put_json_api(
+            url_draft_registrations,
+            payload_with_registration_responses, auth=user.auth,
+            expect_errors=True)
+        errors = res.json['errors'][0]
+        assert res.status_code == 400
+        assert errors['detail'] == 'For your registration, your response to the \'Has data collection begun for this project?\' field' \
+                                   ' is invalid, your response must be one of the provided options.'
 
     def test_reviewer_can_update_draft_registration(
             self, app, project_public,
