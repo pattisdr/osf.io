@@ -475,6 +475,7 @@ prereg_registration_metadata_built = {
                 'value': '',
                 'extra': [
                     {
+                        'selectedFileName': 'Alphabet.txt',
                         'file_name': 'Alphabet.txt',
                         'file_id': '5d6d22274d476c088fb8e021',
                         'data': {
@@ -545,6 +546,7 @@ prereg_registration_metadata_built = {
                 'value': '',
                 'extra': [
                     {
+                        'selectedFileName': 'Screen Shot 2019-08-30 at 9.04.01 AM.png',
                         'file_name': 'Screen Shot 2019-08-30 at 9.04.01 AM.png',
                         'file_id': '5d6d22264d476c088fb8e01f',
                         'data': {
@@ -552,6 +554,7 @@ prereg_registration_metadata_built = {
                         }
                     },
                     {
+                        'selectedFileName': 'Alphabet.txt',
                         'file_name': 'Alphabet.txt',
                         'file_id': '5d6d22274d476c088fb8e021',
                         'data': {
@@ -1401,6 +1404,7 @@ veer_condensed = {
                 'value': '',
                 'extra': [
                     {
+                        'selectedFileName': 'Alphabet.txt',
                         'file_name': 'Alphabet.txt',
                         'file_id': '5d6d25024d476c088fb8e03b',
                         'data': {
@@ -1408,6 +1412,7 @@ veer_condensed = {
                         },
                     },
                     {
+                        'selectedFileName': 'Screen Shot 2019-08-30 at 9.04.01 AM.png',
                         'file_id': '5d6d25014d476c088fb8e038',
                         'file_name': 'Screen Shot 2019-08-30 at 9.04.01 AM.png',
                         'data': {
@@ -1574,7 +1579,7 @@ class TestMigrateDraftRegistrationRegistrationResponses:
 
     @pytest.fixture()
     def draft_osf_standard(self, osf_standard_schema):
-        return DraftRegistrationFactory(
+        draft = DraftRegistrationFactory(
             registration_schema=osf_standard_schema,
             registration_metadata={
                 'looked': {
@@ -1594,6 +1599,9 @@ class TestMigrateDraftRegistrationRegistrationResponses:
                 }
             }
         )
+        draft.registration_responses = {}
+        draft.save()
+        return draft
 
     @pytest.fixture()
     def empty_draft_osf_standard(self, osf_standard_schema):
@@ -1601,23 +1609,32 @@ class TestMigrateDraftRegistrationRegistrationResponses:
             registration_schema=osf_standard_schema,
             registration_metadata={}
         )
+        draft.registration_responses = {}
         draft.registration_responses_migrated = False
         draft.save()
         return draft
 
     @pytest.fixture()
     def draft_prereg(self, prereg_schema):
-        return DraftRegistrationFactory(
+        draft = DraftRegistrationFactory(
             registration_schema=prereg_schema,
             registration_metadata=prereg_registration_metadata
         )
+        draft.registration_responses = {}
+        draft.registration_responses_migrated = False
+        draft.save()
+        return draft
 
     @pytest.fixture()
     def draft_veer(self, veer_schema):
-        return DraftRegistrationFactory(
+        draft = DraftRegistrationFactory(
             registration_schema=veer_schema,
             registration_metadata=veer_registration_metadata
         )
+        draft.registration_responses = {}
+        draft.registration_responses_migrated = False
+        draft.save()
+        return draft
 
     def test_migrate_empty_draft(self, app, empty_draft_osf_standard):
         assert empty_draft_osf_standard.registration_responses == {}
@@ -1680,10 +1697,12 @@ class TestMigrateDraftRegistrationRegistrationResponses:
         assert responses['q19.uploader'] == []
         assert responses['q11.uploader'] == [
             {
+                'sha256': 'sdf',
                 'file_name': 'Screen Shot 2019-08-30 at 9.04.01 AM.png',
                 'file_id': '5d6d22264d476c088fb8e01f'
             },
             {
+                'sha256': 'asdf',
                 'file_name': 'Alphabet.txt',
                 'file_id': '5d6d22274d476c088fb8e021'
             }
@@ -1704,7 +1723,8 @@ class TestMigrateDraftRegistrationRegistrationResponses:
         assert responses['q7.uploader'] == [
             {
                 'file_name': 'Alphabet.txt',
-                'file_id': '5d6d22274d476c088fb8e021'
+                'file_id': '5d6d22274d476c088fb8e021',
+                'sha256': 'dsdfds'
             }
         ]
 
@@ -1739,10 +1759,12 @@ class TestMigrateDraftRegistrationRegistrationResponses:
         assert responses['confirmatory-analyses-second.second.question4c'] == 'here is the rationale'
         assert responses['recommended-hypothesis.question4a'] == [
             {
+                'sha256': 'asdf',
                 'file_name': 'Alphabet.txt',
                 'file_id': '5d6d25024d476c088fb8e03b'
             },
             {
+                'sha256': 'asdf',
                 'file_name': 'Screen Shot 2019-08-30 at 9.04.01 AM.png',
                 'file_id': '5d6d25014d476c088fb8e038'
             }
@@ -1781,9 +1803,9 @@ class TestMigrateRegistrationRegistrationResponses:
 
     @pytest.fixture()
     def reg_osf_standard(self, osf_standard_schema):
-        return RegistrationFactory(
-            schema=osf_standard_schema,
-            data={
+        draft = DraftRegistrationFactory(
+            registration_schema=osf_standard_schema,
+            registration_metadata={
                 'looked': {
                     'comments': [],
                     'value': 'Yes',
@@ -1801,32 +1823,47 @@ class TestMigrateRegistrationRegistrationResponses:
                 }
             }
         )
+        return RegistrationFactory(
+            schema=osf_standard_schema,
+            draft_registration=draft,
+            project=draft.branched_from
+        )
 
     @pytest.fixture()
     def reg_prereg(self, prereg_schema):
+        draft = DraftRegistrationFactory(
+            registration_schema=prereg_schema,
+            registration_metadata=prereg_registration_metadata
+        )
         return RegistrationFactory(
             schema=prereg_schema,
-            data=prereg_registration_metadata
+            draft_registration=draft,
+            project=draft.branched_from
         )
 
     @pytest.fixture()
     def reg_veer(self, veer_schema):
+        draft = DraftRegistrationFactory(
+            registration_metadata=veer_registration_metadata,
+            registration_schema=veer_schema,
+        )
         return RegistrationFactory(
             schema=veer_schema,
-            data=veer_registration_metadata
+            draft_registration=draft,
+            project=draft.branched_from
         )
 
     def test_migrate_registrations(self, app, reg_osf_standard, reg_prereg, reg_veer):
-        drafts = [
+        regs = [
             reg_osf_standard,
             reg_prereg,
             reg_veer
         ]
 
-        for draft in drafts:
-            draft.registration_responses = {}
-            draft.registration_responses_migrated = False
-            draft.save()
+        for reg in regs:
+            reg.registration_responses = {}
+            reg.registration_responses_migrated = False
+            reg.save()
 
         migrate_registrations(dry_run=False)
 
@@ -1854,7 +1891,7 @@ class TestMigrateRegistrationRegistrationResponses:
         assert responses['q12.question'] == 'these are my measured variables'
         assert responses['q1'] == 'This is my title'
         assert responses['q3'] == 'research questions'
-        assert responses['q2'] == 'Dawn Pattison, James Brown, Carrie Skinner'
+        assert responses['q2'] == reg_prereg.registered_from.visible_contributors.first().fullname
         assert responses['q5'] == 'Registration prior to creation of data'
         assert responses['q4'] == 'this is my hypothesis'
         assert responses['q6'] == 'Explanation of existing data'
@@ -1864,10 +1901,12 @@ class TestMigrateRegistrationRegistrationResponses:
         assert responses['q19.uploader'] == []
         assert responses['q11.uploader'] == [
             {
+                'sha256': 'sdf',
                 'file_name': 'Screen Shot 2019-08-30 at 9.04.01 AM.png',
                 'file_id': '5d6d22264d476c088fb8e01f'
             },
             {
+                'sha256': 'asdf',
                 'file_name': 'Alphabet.txt',
                 'file_id': '5d6d22274d476c088fb8e021'
             }
@@ -1887,6 +1926,7 @@ class TestMigrateRegistrationRegistrationResponses:
         assert responses['q13.uploader'] == []
         assert responses['q7.uploader'] == [
             {
+                'sha256': 'dsdfds',
                 'file_name': 'Alphabet.txt',
                 'file_id': '5d6d22274d476c088fb8e021'
             }
@@ -1923,10 +1963,12 @@ class TestMigrateRegistrationRegistrationResponses:
         assert responses['confirmatory-analyses-second.second.question4c'] == 'here is the rationale'
         assert responses['recommended-hypothesis.question4a'] == [
             {
+                'sha256': 'asdf',
                 'file_name': 'Alphabet.txt',
                 'file_id': '5d6d25024d476c088fb8e03b'
             },
             {
+                'sha256': 'asdf',
                 'file_name': 'Screen Shot 2019-08-30 at 9.04.01 AM.png',
                 'file_id': '5d6d25014d476c088fb8e038'
             }
