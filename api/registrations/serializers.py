@@ -22,7 +22,7 @@ from api.base.serializers import (
 )
 from framework.auth.core import Auth
 from osf.exceptions import ValidationValueError, NodeStateError
-from osf.models import Node
+from osf.models import Node, AbstractNode, BaseFileNode
 from framework.sentry import log_exception
 
 class RegistrationSerializer(NodeSerializer):
@@ -572,9 +572,44 @@ class RegistrationCreateSerializer(RegistrationSerializer):
         for _, value in files.items():
             if 'extra' in value:
                 for file_metadata in value['extra']:
+                    self.check_file_validity(file_metadata)
                     if file_metadata['nodeId'] not in registering:
                         orphan_files.append(file_metadata)
+
         return orphan_files
+
+    def check_file_validity(self, file_metadata):
+        """
+        Validation of file information on registration_metadata.  Theoretically, the passed
+        in file_id, file_name, and sha256 strings on registration_responses or get_registration_metadata
+        do not have to be valid, so we enforce their accuracy here, to ensure file links load properly.
+
+        Verify that the specified file is present on the specified node, and that the
+        specified sha256 is indeed a version of the file.  Verify that the file name
+        attached to that version is the specified file name.
+        """
+        node = AbstractNode.load(file_metadata.get('nodeId'))
+        file = BaseFileNode.objects.filter(_id=file_metadata.get('file_id', '')).first()
+        if not node:
+            raise exceptions.ValidationError('Specified file node in registration metadata cannot be found.')
+
+        if not file or file.target != node:
+            raise exceptions.ValidationError('Specified file in registration metadata is not on the registering project.')
+
+        specified_sha = file_metadata.get('sha256', '')
+
+        match = False
+        file_name = ''
+        for version in file.versions.all():
+            if specified_sha == version.metadata.get('sha256'):
+                match = True
+                file_name = version.get_basefilenode_version(file).version_name
+
+        if not match:
+            raise exceptions.ValidationError('Specified sha256 in registration metadata does not match a version on the attached file.')
+
+        if not file_metadata.get('file_name', '') == file_name:
+            raise exceptions.ValidationError('Specified file name in registration metadata is invalid.')
 
 
 class RegistrationDetailSerializer(RegistrationSerializer):
