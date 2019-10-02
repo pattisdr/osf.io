@@ -22,7 +22,7 @@ from api.base.serializers import (
 )
 from framework.auth.core import Auth
 from osf.exceptions import ValidationValueError, NodeStateError
-from osf.models import Node, AbstractNode, BaseFileNode
+from osf.models import Node, AbstractNode
 from framework.sentry import log_exception
 
 class RegistrationSerializer(NodeSerializer):
@@ -569,48 +569,55 @@ class RegistrationCreateSerializer(RegistrationSerializer):
         from website.archiver.utils import find_selected_files
         files = find_selected_files(draft.registration_schema, draft.registration_metadata)
         orphan_files = []
-        for _, value in files.items():
+        for key, value in files.items():
             if 'extra' in value:
                 for file_metadata in value['extra']:
-                    self.check_file_validity(file_metadata)
-                    if file_metadata['nodeId'] not in registering:
+                    if not self._is_attached_file_valid(file_metadata, registering):
                         orphan_files.append(file_metadata)
 
         return orphan_files
 
-    def check_file_validity(self, file_metadata):
+    def _is_attached_file_valid(self, file_metadata, registering):
         """
-        Validation of file information on registration_metadata.  Theoretically, the passed
-        in file_id, file_name, and sha256 strings on registration_responses or get_registration_metadata
-        do not have to be valid, so we enforce their accuracy here, to ensure file links load properly.
+        Validation of file information on registration_metadata.  Theoretically, the file information
+        on registration_responses does not have to be valid, so we enforce their accuracy here,
+        to ensure file links load properly.
 
-        Verify that the specified file is present on the specified node, and that the
-        specified sha256 is indeed a version of the file.  Verify that the file name
-        attached to that version is the specified file name.
+        Verifying that nodeId in the file_metadata is one of the files we're registering. Verify
+        that selectedFileName is the name of a file on the node.  Verify that the sha256 matches
+        a version on that file.
+
+        :param file_metadata - under "registration_metadata"
+        :param registering - node ids you are registering
+        :return boolean
         """
-        node = AbstractNode.load(file_metadata.get('nodeId'))
-        file = BaseFileNode.objects.filter(_id=file_metadata.get('file_id', '')).first()
+
+        node_id = file_metadata.get('nodeId')
+        if node_id not in registering:
+            return False
+
+        node = AbstractNode.load(node_id)
         if not node:
-            raise exceptions.ValidationError('Specified file node in registration metadata cannot be found.')
-
-        if not file or file.target != node:
-            raise exceptions.ValidationError('Specified file in registration metadata is not on the registering project.')
+            # node in registration_metadata doesn't exist
+            return False
 
         specified_sha = file_metadata.get('sha256', '')
 
+        file = node.files.filter(name=file_metadata.get('selectedFileName')).first()
+        if not file:
+            # file with this name does not exist on the node
+            return False
+
         match = False
-        file_name = ''
         for version in file.versions.all():
             if specified_sha == version.metadata.get('sha256'):
                 match = True
-                file_name = version.get_basefilenode_version(file).version_name
 
         if not match:
-            raise exceptions.ValidationError('Specified sha256 in registration metadata does not match a version on the attached file.')
+            # Specified sha256 does not match a version on the specified file
+            return False
 
-        if not file_metadata.get('file_name', '') == file_name:
-            raise exceptions.ValidationError('Specified file name in registration metadata is invalid.')
-
+        return True
 
 class RegistrationDetailSerializer(RegistrationSerializer):
     """

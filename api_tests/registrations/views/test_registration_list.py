@@ -10,6 +10,7 @@ from api.base.settings.defaults import API_BASE
 from api_tests.nodes.views.test_node_draft_registration_list import DraftRegistrationTestCase
 from api_tests.subjects.mixins import SubjectsFilterMixin
 from api_tests.registrations.filters.test_filters import RegistrationListFilteringMixin
+from api_tests.utils import create_test_file
 from framework.auth.core import Auth
 from osf.models import RegistrationSchema, DraftRegistration
 from osf_tests.factories import (
@@ -21,6 +22,7 @@ from osf_tests.factories import (
     DraftRegistrationFactory,
     OSFGroupFactory,
 )
+from osf_tests.management_commands.test_migration_registration_responses import prereg_registration_responses
 from rest_framework import exceptions
 from tests.base import ApiTestCase
 from website.views import find_bookmark_collection
@@ -1122,6 +1124,84 @@ class TestRegistrationCreate(DraftRegistrationTestCase):
         assert res.json['errors'][0]['detail'] == 'All files attached to this form must be registered to complete the' \
                                                   ' process. The following file(s) are attached, but are not part of' \
                                                   ' a component being registered: file 1'
+
+    def test_assert_file_validity_on_registration_metadata(
+        self, app, user, payload, url_registrations, project_public
+    ):
+        file_name = 'registration_file.pdf'
+        sha256 = 'asdfjkl'
+        file = create_test_file(project_public, user, file_name)
+        version = file.versions.first()
+        # mock sha256
+        version.metadata['sha256'] = sha256
+        version.save()
+
+        prereg_schema = RegistrationSchema.objects.get(
+            name='Prereg Challenge',
+            schema_version=SCHEMA_VERSION)
+
+        prereg_draft_registration = DraftRegistrationFactory(
+            initiator=user,
+            registration_schema=prereg_schema,
+            branched_from=project_public
+        )
+
+        prereg_registration_responses['q11.uploader'] = []
+
+        # q7 has file information
+        prereg_draft_registration.update_registration_responses(prereg_registration_responses)
+        prereg_draft_registration.save()
+
+        prereg_draft_registration.save()
+
+        payload = {
+            'data': {
+                'type': 'registrations',
+                'attributes': {
+                    'draft_registration': prereg_draft_registration._id,
+                    'registration_choice': 'immediate',
+                }
+            }
+        }
+
+        res = app.post_json_api(
+            url_registrations,
+            payload,
+            auth=user.auth,
+            expect_errors=True)
+        # File with the given name in the payload doesn't exist on the node
+        assert res.status_code == 400
+
+        prereg_registration_responses['q7.uploader'] = [{
+            'file_name': file_name,
+            'file_id': file._id,
+            'sha256': 'incorrect_sha'
+        }]
+
+        prereg_draft_registration.update_registration_responses(prereg_registration_responses)
+        prereg_draft_registration.save()
+        res = app.post_json_api(
+            url_registrations,
+            payload,
+            auth=user.auth,
+            expect_errors=True)
+        # sha256 is inaccurate
+        assert res.status_code == 400
+
+        prereg_registration_responses['q7.uploader'] = [{
+            'file_name': file_name,
+            'file_id': file._id,
+            'sha256': sha256
+        }]
+
+        prereg_draft_registration.update_registration_responses(prereg_registration_responses)
+        prereg_draft_registration.save()
+        res = app.post_json_api(
+            url_registrations,
+            payload,
+            auth=user.auth,
+            expect_errors=True)
+        assert res.status_code == 201
 
 
 @pytest.mark.django_db
