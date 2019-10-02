@@ -6,6 +6,7 @@ from website.util import api_v2_url
 
 from osf.models.base import BaseModel, ObjectIDMixin
 from osf.utils.datetime_aware_jsonfield import DateTimeAwareJSONField
+from osf.utils.migrations import build_flattened_jsonschema
 from osf.exceptions import ValidationValueError, ValidationError
 
 from website.project.metadata.utils import create_jsonschema_from_metaschema
@@ -76,7 +77,6 @@ class AbstractSchema(ObjectIDMixin, BaseModel):
 class RegistrationSchema(AbstractSchema):
     config = DateTimeAwareJSONField(blank=True, default=dict)
     description = models.TextField(null=True, blank=True)
-    registration_responses_jsonschema = DateTimeAwareJSONField(default=dict, blank=True)
 
     @property
     def _config(self):
@@ -155,9 +155,7 @@ class RegistrationSchema(AbstractSchema):
         The `title` of the question is stashed under the description for the particular question property
         for forumulating a more clear error response.
         """
-        validation_schema = self.registration_responses_jsonschema
-        if not required_fields and validation_schema.get('required', None):
-            del validation_schema['required']
+        validation_schema = build_flattened_jsonschema(self, required_fields=required_fields)
 
         try:
             jsonschema.validate(registration_responses, validation_schema)

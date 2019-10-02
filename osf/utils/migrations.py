@@ -12,7 +12,6 @@ from django.db import connection
 from django.db.migrations.operations.base import Operation
 
 from website import settings
-from osf.models import NodeLicense, RegistrationSchema
 from osf.models.base import generate_object_id
 from website.project.metadata.schemas import OSF_META_SCHEMAS
 
@@ -162,6 +161,8 @@ def ensure_licenses(*args, **kwargs):
 
 
 def remove_licenses(*args):
+    from osf.models import NodeLicense
+
     pre_count = NodeLicense.objects.all().count()
     NodeLicense.objects.all().delete()
 
@@ -193,15 +194,11 @@ def ensure_schemas(*args):
         if created:
             logger.info('Added schema {} to the database'.format(schema['name']))
 
-        if hasattr(schema_obj, 'registration_responses_jsonschema'):
-            # `registration_responses_jsonschema` field won't exist for historical migrations
-            schema_obj.registration_responses_jsonschema = build_flattened_jsonschema(schema_obj)
-            schema_obj.save()
-
     logger.info('Ensured {} schemas are in the database'.format(schema_count))
 
 
 def remove_schemas(*args):
+    from osf.models import RegistrationSchema
     pre_count = RegistrationSchema.objects.all().count()
     RegistrationSchema.objects.all().delete()
 
@@ -436,13 +433,14 @@ def unmap_schemablocks(*args):
 
 
 # For registration_responses validation
-def get_multiple_choice_options(registration_schema, question):
+def get_multiple_choice_options(registration_schema, question, required_fields):
     """
     Returns a dictionary with an 'enum' key, and a value as
     an array with the possible multiple choice answers for a given question.
     Schema blocks are linked by schema_block_group_keys, so fetches multiple choice options
     with the same schema_block_group_key as the given question
     :question SchemaBlock with an registration_response_key
+    :required_fields boolean - do we want to enforce that required fields are present
     """
     options = registration_schema.schema_blocks.filter(
         schema_block_group_key=question.schema_block_group_key,
@@ -450,7 +448,10 @@ def get_multiple_choice_options(registration_schema, question):
     ).values_list('display_text', flat=True)
 
     options = list(options)
-    if '' not in options:
+    # required is True if we want to both enforce required_fields
+    # and the question in particular is required.
+    required = required_fields and question.required
+    if not required and '' not in options:
         options.append('')
 
     return {
@@ -473,16 +474,16 @@ def get_jsonschema_type(block_type):
         return 'string'
 
 # For registration_responses validation
-def format_question_validation(registration_schema, question):
+def format_question_validation(registration_schema, question, required_fields):
     """
     Returns json for validating an individual question
     :params question SchemaBlock
     """
     if question.block_type == 'single-select-input':
-        property = get_multiple_choice_options(registration_schema, question)
+        property = get_multiple_choice_options(registration_schema, question, required_fields)
     elif question.block_type == 'multi-select-input':
         property = {
-            'items': get_multiple_choice_options(registration_schema, question)
+            'items': get_multiple_choice_options(registration_schema, question, required_fields)
         }
     elif question.block_type == 'file-input':
         property = {
@@ -500,7 +501,7 @@ def format_question_validation(registration_schema, question):
     return property
 
 # For registration_responses validation
-def build_flattened_jsonschema(registration_schema):
+def build_flattened_jsonschema(registration_schema, required_fields):
     """
     Builds jsonschema for validating flattened registration_responses field
     :params schema RegistrationSchema
@@ -510,7 +511,7 @@ def build_flattened_jsonschema(registration_schema):
     # schema blocks corresponding to registration_responses
     questions = registration_schema.schema_blocks.filter(registration_response_key__isnull=False)
     for question in questions:
-        properties[question.registration_response_key] = format_question_validation(registration_schema, question)
+        properties[question.registration_response_key] = format_question_validation(registration_schema, question, required_fields)
 
     json_schema = {
         'type': 'object',
@@ -519,7 +520,7 @@ def build_flattened_jsonschema(registration_schema):
     }
 
     required = questions.filter(required=True).values_list('registration_response_key', flat=True)
-    if required:
+    if required and required_fields:
         json_schema['required'] = list(required)
 
     return json_schema

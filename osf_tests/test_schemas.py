@@ -123,12 +123,12 @@ class TestRegistrationSchemaValidation:
         prereg_test_data['q13.uploader'] = {}
         with pytest.raises(ValidationValueError) as excinfo:
             prereg_schema.validate_registration_responses(prereg_test_data)
-        assert excinfo.value.message == "For your registration, your response to the 'q13.uploader' field is invalid. {} is not of type u'array'"
+        assert excinfo.value.message == "For your registration, your response to the 'q13.uploader' field is invalid. {} is not of type 'array'"
 
         prereg_test_data['q13.uploader'] = ['hello']
         with pytest.raises(ValidationValueError) as excinfo:
             prereg_schema.validate_registration_responses(prereg_test_data)
-        assert excinfo.value.message == "For your registration, your response to the 'q13.uploader' field is invalid. 'hello' is not of type u'object'"
+        assert excinfo.value.message == "For your registration, your response to the 'q13.uploader' field is invalid. 'hello' is not of type 'object'"
 
         prereg_test_data['q13.uploader'] = [{'bad_key': '12345'}]
         with pytest.raises(ValidationValueError) as excinfo:
@@ -138,14 +138,14 @@ class TestRegistrationSchemaValidation:
         prereg_test_data['q13.uploader'] = [{'file_name': '12345'}]
         with pytest.raises(ValidationValueError) as excinfo:
             prereg_schema.validate_registration_responses(prereg_test_data)
-        assert excinfo.value.message == "For your registration, your response to the 'q13.uploader' field is invalid. u'file_id' is a dependency of u'file_name'"
+        assert excinfo.value.message == "For your registration, your response to the 'q13.uploader' field is invalid. 'file_id' is a dependency of 'file_name'"
 
         prereg_test_data['q13.uploader'] = [{'file_name': '12345', 'file_id': 'abcde'}]
         with pytest.raises(ValidationValueError) as excinfo:
             prereg_schema.validate_registration_responses(prereg_test_data)
-        assert excinfo.value.message == "For your registration, your response to the 'q13.uploader' field is invalid. u'sha256' is a dependency of u'file_name'"
+        assert excinfo.value.message == "For your registration, your response to the 'q13.uploader' field is invalid. 'sha256' is a dependency of 'file_name'"
 
-    def test_validate_required_fields(self, registered_report_schema):
+    def test_validate_required_fields(self, registered_report_schema, prereg_schema, prereg_test_data):
         # Passing in required_fields is True enforces that required fields are present
         with pytest.raises(ValidationValueError) as excinfo:
             registered_report_schema.validate_registration_responses({}, required_fields=True)
@@ -153,3 +153,12 @@ class TestRegistrationSchemaValidation:
 
         validated = registered_report_schema.validate_registration_responses({})
         assert validated is True
+
+        # Assert multiple choice questions accept empty strings if required_fields is False
+        prereg_test_data['q5'] = ''
+        validated = prereg_schema.validate_registration_responses(prereg_test_data)
+        assert validated is True
+
+        with pytest.raises(ValidationValueError) as excinfo:
+            prereg_schema.validate_registration_responses(prereg_test_data, required_fields=True)
+        assert excinfo.value.message == "For your registration, your response to the 'Existing Data' field is invalid, your response must be one of the provided options."
